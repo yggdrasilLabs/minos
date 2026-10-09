@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 01
-current_phase_name: Workspace and Gates
+current_phase_name: workspace-and-gates
 status: verifying
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-10-09T21:39:28.007Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-10-09T22:31:52.287Z"
 last_activity: 2026-10-09
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Completed 01-04 gap closure plan
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 4
+  completed_plans: 4
   percent: 13
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 01 — Workspace and Gates
+**Current focus:** Phase 01 — workspace-and-gates
 
 ## Current Position
 
-Phase: 01 (Workspace and Gates) — EXECUTING
-Plan: 3 of 3
+Phase: 01 (workspace-and-gates) — EXECUTING
+Plan: 4 of 4
 Status: Phase complete — ready for verification
-Last activity: 2026-10-09 — Phase 01 execution started
+Last activity: 2026-10-09 — Completed 01-04 gap closure plan (UAT tests 1 to 3)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P01 | 3min | 3 tasks | 28 files |
 | Phase 01 P02 | 1min | 2 tasks | 1 files |
 | Phase 01 P03 | 4min | 3 tasks | 3 files |
+| Phase 01 P04 | 5min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,9 @@ Recent decisions affecting current work:
 - [Phase 01]: cargo-deny multiple-versions stays warn; 7 duplicates from msb_krun, proptest, getrandom
 - [Phase 01]: 01-03: all 23 gate violations rejected with verbatim evidence in 01-GATE-EVIDENCE.md; V-23 zstd-sys ban fired as expected
 - [Phase 01]: 01-03: three gate gaps (inner allow with reason, missing [lints], rustdoc only under cargo doc) left open for the user, not resolved
+- [Phase 01]: 01-04: unwrap_used, expect_used, indexing_slicing raised to forbid (UAT test 1); #[expect] can no longer silence them
+- [Phase 01]: 01-04: .cargo/config.toml [build] rustflags forbid backstop plus D-15 per-manifest lints check (UAT test 2)
+- [Phase 01]: 01-04: cargo doc --workspace --no-deps is the fifth gate command (UAT test 3)
 
 ### Pending Todos
 
@@ -89,6 +93,7 @@ None yet.
 - [Phase 2/6] `claude -p` behavior under subscription login is unverified (tools off with `--json-schema`, `--max-turns 1`, usage field names)
 - [Phase 5] The container engine for `env build` on macOS depends on the SPIKE-06 answer
 - [Phase 8] The default baseline repeat count for the noise floor should come from measured variance across VM boots, not a guess
+- [Phase 8] F-01: #[derive(clap::Parser)] fails clippy under forbid (clap_derive emits allow(clippy::restriction)); the user decides between the clap builder API and revisiting forbid before any clap derive
 
 ## Deferred Items
 
@@ -100,6 +105,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-09T21:39:28.001Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-10-09T22:31:41.792Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
