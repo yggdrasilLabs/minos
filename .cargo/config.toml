@@ -4,5 +4,7 @@
 # A RUSTFLAGS environment variable silently replaces this list, and so do CARGO_ENCODED_RUSTFLAGS and any
 # target.<triple> or target.<cfg> rustflags key. With any of them set, the backstop is gone.
 # Registry and git dependencies are unaffected: Cargo builds them with --cap-lints allow.
+# `cargo install` from inside this directory also gets these flags (config discovery is cwd-based, and cap-lints
+# does not apply to the installed package itself); run tool installs from elsewhere.
 [build]
 rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]
