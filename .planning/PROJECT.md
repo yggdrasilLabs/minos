@@ -12,7 +12,7 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Repo-wide gates: `cargo fmt --all --check`, clippy with `-D warnings` and the workspace lints (`unsafe_code`, `unwrap_used`, `expect_used`, `indexing_slicing`, all `forbid`), `cargo test`, `cargo deny check`, `cargo doc --no-deps`, committed `Cargo.lock` — Validated in Phase 1: Workspace and Gates (2026-10-09; see 01-GATE-EVIDENCE.md and 01-VERIFICATION.md)
 
 ### Active
 
@@ -29,7 +29,7 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 - [ ] `minos report` is a pure function of ledger and blobs, hashed, and `minos adopt` refuses without the acknowledged hash and only writes a patch file
 - [ ] Cost is recorded as usage, never dollars, and displayed as one `approx. cost` figure from a user-editable price table
 - [ ] A sample `optimize` project ships in the repo and the full loop runs on it end to end: `minos check`, `minos run --generations N`, `minos report`, `minos adopt`
-- [ ] Repo-wide gates: `cargo fmt --all --check`, clippy with `-D warnings` and the workspace lints (`unsafe_code`, `unwrap_used`, `expect_used`, `indexing_slicing`, all `forbid`), `cargo test`, `cargo deny check`, `cargo doc --no-deps`, committed `Cargo.lock`
+
 - [ ] The rules in `rules/` are followed in all code
 
 ### Out of Scope
@@ -92,4 +92,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-09 after initialization*
+*Last updated: 2026-10-09 after Phase 1 (Workspace and Gates) completion*
