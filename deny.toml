@@ -35,6 +35,21 @@ deny = [
   { crate = "zstd-sys", reason = "C; backhand uses gzip only" },
   { crate = "liblzma-sys", reason = "C; backhand uses gzip only" },
   { crate = "cc", reason = "no C compiled in our tree" },
+  # Who may link what
+  { crate = "anyhow", wrappers = ["minos-cli"], reason = "anyhow only at the CLI main (rules/err-anyhow-app.md)" },
+  { crate = "msb_krun", wrappers = ["minos-vmm"], reason = "only minos-vmm links the VMM (KRUN-01)" },
+  # Crate layering (GATE-04, D-03). `wrappers` lists the crates allowed to depend on the banned crate DIRECTLY.
+  # It does not follow transitive paths (verified in research: with only minos-sandbox banned,
+  # minos-loop -> minos-runner -> minos-sandbox passed), so every internal library crate needs its own entry.
+  # The binaries (minos-vmm, minos-guest, minos-cli) need none: nothing depends on them.
+  # Dev-dependency edges are in the checked graph too.
+  { crate = "minos-core", wrappers = ["minos-store", "minos-sandbox", "minos-backend-krun", "minos-guest", "minos-propose", "minos-runner", "minos-loop", "minos-cli"], reason = "core depends on no internal crate" },
+  { crate = "minos-store", wrappers = ["minos-runner", "minos-loop", "minos-cli"], reason = "layering" },
+  { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
+  { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
+  { crate = "minos-propose", wrappers = ["minos-loop", "minos-cli"], reason = "layering" },
+  { crate = "minos-runner", wrappers = ["minos-cli"], reason = "loop reaches the runner only through its JobRunner trait" },
+  { crate = "minos-loop", wrappers = ["minos-cli"], reason = "layering" },
 ]
 
 [bans.workspace-dependencies]
