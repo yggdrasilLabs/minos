@@ -6936,3 +6936,182 @@ Exit code: 0
 ```text
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
 ```
+
+### G-02-CLOSED: crate without inherited lints under the rustflags backstop
+
+Requirement: GATE-01, UAT test 2
+
+Edit (applies to both runs): crates/minos-loop/Cargo.toml: deleted the two lines `[lints]` and `workspace = true`; crates/minos-loop/src/lib.rs: appended `pub fn gate_probe(s: &str) -> u8 { s.parse::<u8>().unwrap() }`, `pub fn gate_probe_expect(s: &str) -> u8 { s.parse::<u8>().expect("n") }`, `pub fn gate_probe_index(x: &[u8]) -> u8 { x[0] }`, and `pub fn gate_probe_unsafe(x: &[u8]) -> u8 { unsafe { *x.get_unchecked(0) } }` (no doc, no attribute)
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 101
+
+```text
+error: usage of an `unsafe` block
+ --> crates/minos-loop/src/lib.rs:5:44
+  |
+5 | pub fn gate_probe_unsafe(x: &[u8]) -> u8 { unsafe { *x.get_unchecked(0) } }
+  |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: requested on the command line with `-F unsafe-code`
+
+error: used `unwrap()` on a `Result` value
+ --> crates/minos-loop/src/lib.rs:2:36
+  |
+2 | pub fn gate_probe(s: &str) -> u8 { s.parse::<u8>().unwrap() }
+  |                                    ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: if this value is an `Err`, it will panic
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unwrap_used
+  = note: requested on the command line with `-F clippy::unwrap-used`
+
+error: used `expect()` on a `Result` value
+ --> crates/minos-loop/src/lib.rs:3:43
+  |
+3 | pub fn gate_probe_expect(s: &str) -> u8 { s.parse::<u8>().expect("n") }
+  |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: if this value is an `Err`, it will panic
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#expect_used
+  = note: requested on the command line with `-F clippy::expect-used`
+
+error: indexing may panic
+ --> crates/minos-loop/src/lib.rs:4:43
+  |
+4 | pub fn gate_probe_index(x: &[u8]) -> u8 { x[0] }
+  |                                           ^^^^
+  |
+  = help: consider using `.get(n)` or `.get_mut(n)` instead
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#indexing_slicing
+  = note: requested on the command line with `-F clippy::indexing-slicing`
+
+error: could not compile `minos-loop` (lib) due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `minos-loop` (lib test) due to 4 previous errors
+```
+
+Command: `RUSTFLAGS= cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+```
+
+### C-03-RERUN: no unknown lint name with the backstop
+
+Requirement: RESEARCH.md Pitfall 3
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings 2>&1 | grep -ci 'unknown lint'`
+
+```text
+0
+```
+
+### B-01: untouched tree under the rustflags backstop
+
+Requirement: GATE-01, GATE-02
+
+Edit: none (untouched tree)
+
+For `cargo build` every line except cargo progress lines is shown. For `cargo test` and `cargo deny check` only the closing summary lines are shown, verbatim.
+
+Command: `cargo build --workspace`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.29s
+```
+
+Command: `cargo test --workspace`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.02s
+     Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-52d5905ac48406d1)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos-318232a1b6d97755)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_core-c619c5be5a10c8c9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_guest-3a96ca21e5db09e7)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_loop-994e138925915d56)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_propose-1a9a8fd769d6a47b)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_runner-89243ff6043495d6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_sandbox-dcc21162d5b68e3e)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_store-4edbb133c2d25261)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_vmm-0703513a634d49f4)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_backend_krun
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_loop
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_propose
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_runner
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_sandbox
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_store
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+### G-03-CLOSED: broken intra-doc link under cargo doc
+
+Requirement: GATE-01, D-12, UAT test 3
+
+Edit (applies to run 2 only; run 1 is on the untouched tree): crates/minos-store/src/lib.rs: appended `pub const GATE_PROBE: u8 = 0;` with the doc line ``/// Gate probe that links to [`DoesNotExist`].``
+
+Command: `cargo doc --workspace --no-deps`
+
+Exit code: 0
+
+```text
+ Documenting minos-loop v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-loop)
+ Documenting minos-cli v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+   Generated /Users/seanmcauliffe/Repos/minos/target/doc/minos_backend_krun/index.html and 9 other files
+```
+
+Command: `cargo doc --workspace --no-deps`
+
+Exit code: 101
+
+```text
+ Documenting minos-store v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-store)
+ Documenting minos-loop v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-loop)
+ Documenting minos-runner v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-runner)
+ Documenting minos-cli v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-cli)
+error: unresolved link to `DoesNotExist`
+ --> crates/minos-store/src/lib.rs:3:32
+  |
+3 | /// Gate probe that links to [`DoesNotExist`].
+  |                                ^^^^^^^^^^^^ no item named `DoesNotExist` in scope
+  |
+  = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+  = note: requested on the command line with `-D rustdoc::broken-intra-doc-links`
+
+error: could not document `minos-store`
+warning: build failed, waiting for other jobs to finish...
+```
+
+RUSTDOCFLAGS check: `printenv RUSTDOCFLAGS` printed nothing, and `grep -c rustdocflags .cargo/config.toml` printed `0`.

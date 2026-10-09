@@ -1,0 +1,8 @@
+# Backstop for a workspace member whose Cargo.toml omits `[lints] workspace = true` (01-CONTEXT.md D-01, D-15).
+# The [workspace.lints] table in Cargo.toml stays the primary policy. These four flags repeat four of its
+# lints at the same level, so change both files together.
+# A RUSTFLAGS environment variable silently replaces this list, and so do CARGO_ENCODED_RUSTFLAGS and any
+# target.<triple> or target.<cfg> rustflags key. With any of them set, the backstop is gone.
+# Registry and git dependencies are unaffected: Cargo builds them with --cap-lints allow.
+[build]
+rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]

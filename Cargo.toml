@@ -42,7 +42,7 @@ struct_excessive_bools = "allow"
 multiple_crate_versions = "allow"
 
 [workspace.lints.rustdoc]
-broken_intra_doc_links = "deny"   # enforced only by `cargo doc`, not by clippy or test (open decision 3 in 01-01-PLAN.md)
+broken_intra_doc_links = "deny"   # enforced by `cargo doc --workspace --no-deps`, the fifth gate command; clippy and test ignore this table
 
 [workspace.dependencies]
 minos-core         = { path = "crates/minos-core", version = "=0.1.0" }

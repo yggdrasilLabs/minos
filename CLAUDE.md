@@ -411,6 +411,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check
+cargo doc --workspace --no-deps          # the only command that enforces [workspace.lints.rustdoc]
 cargo lambda build --release --arm64     # Lambda functions; plain cargo build links the wrong glibc
 ```
 
