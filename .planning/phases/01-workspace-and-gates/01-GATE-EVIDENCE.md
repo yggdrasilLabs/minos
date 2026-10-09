@@ -7296,3 +7296,15 @@ Exit code: 101
 1 error: use of a disallowed method `std::env::var`
 2 error: use of a disallowed type `std::fs::File`
 ```
+
+## Review fix (01-REVIEW.md WR-04): C-linking helpers banned
+
+`deny.toml` `[bans] deny` gains `pkg-config`, `vcpkg`, `cmake`, `bindgen`, `bzip2-sys`, `libz-sys`, `aws-lc-sys`, and `ring`. `cargo tree -i <crate>` for both checked targets found none of them in the aarch64-apple-darwin or aarch64-unknown-linux-musl graph (`pkg-config` and `bzip2-sys` exist in the lock only for x86_64 arms of `msb_krun_vmm`).
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```

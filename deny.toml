@@ -43,6 +43,16 @@ deny = [
   { crate = "zstd-sys", reason = "C; backhand uses gzip only" },
   { crate = "liblzma-sys", reason = "C; backhand uses gzip only" },
   { crate = "cc", reason = "no C compiled in our tree" },
+  # `cc` catches crates that compile C. These catch crates that link or bind an installed C library
+  # without compiling it, which `cc` never sees. None is in either aarch64 graph today.
+  { crate = "pkg-config", reason = "links system C libraries without compiling; no C in our tree" },
+  { crate = "vcpkg",      reason = "links system C libraries without compiling; no C in our tree" },
+  { crate = "cmake",      reason = "builds C/C++ in our tree" },
+  { crate = "bindgen",    reason = "generates FFI to C in our tree" },
+  { crate = "bzip2-sys",  reason = "C; only reachable on x86_64 via msb_krun_vmm" },
+  { crate = "libz-sys",   reason = "C; flate2 must stay on miniz_oxide or zlib-rs" },
+  { crate = "aws-lc-sys", reason = "C; the rustls provider is a reviewed exception, not a default" },
+  { crate = "ring",       reason = "C and asm; the rustls provider is a reviewed exception, not a default" },
   # Who may link what
   { crate = "anyhow", wrappers = ["minos-cli"], reason = "anyhow only at the CLI main (rules/err-anyhow-app.md)" },
   { crate = "msb_krun", wrappers = ["minos-vmm"], reason = "only minos-vmm links the VMM (KRUN-01)" },
