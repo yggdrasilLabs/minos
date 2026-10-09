@@ -7272,3 +7272,27 @@ advisories ok, bans ok, licenses ok, sources ok
 ```
 
 No `target/` directory was created (`cargo deny` only resolves the graph).
+
+## Review fix (01-REVIEW.md WR-03): minos-core purity bans extended
+
+`crates/minos-core/clippy.toml` now bans `std::thread::sleep`, `std::env::{var, var_os, args}`, `std::fs::{read, read_to_string, write}`, and `std::io::stdin` (methods); `std::fs::File`, `std::process::Command`, and `std::net::{TcpStream, TcpListener, UdpSocket}` (types); and `std::println`, `std::eprintln`, and `std::dbg` (macros), alongside the clock and hash-collection entries proven in V-09 and V-10.
+
+### C-03b: no invalid disallowed path with the extended tables
+
+Command: `cargo clippy -p minos-core --all-targets -- -D warnings` on the untouched crate
+
+Exit code: 0. `grep -ciE "unknown path|invalid path|could not resolve|disallowed"` over the output: 0.
+
+### V-09b / V-10b: one probe per table fires
+
+A throwaway function appended to `crates/minos-core/src/lib.rs` (reverted with `git checkout --` afterward, not committed) used `std::env::var` (method), `std::fs::File` (type), and `println!` (macro).
+
+Command: `cargo clippy -p minos-core --all-targets -- -D warnings`
+
+Exit code: 101
+
+```text
+1 error: use of a disallowed macro `std::println`
+1 error: use of a disallowed method `std::env::var`
+2 error: use of a disallowed type `std::fs::File`
+```

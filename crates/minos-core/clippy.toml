@@ -1,10 +1,30 @@
 # Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
 # walking up from CARGO_MANIFEST_DIR.
+# Every path below is a real std path, proven to fire once (01-GATE-EVIDENCE.md V-09, V-10, V-09b, V-10b).
+# A mistyped path only warns, so re-prove any entry you change.
 disallowed-methods = [
   { path = "std::time::SystemTime::now", reason = "minos-core has no clock: time arrives as an argument" },
-  { path = "std::time::Instant::now", reason = "minos-core has no clock: time arrives as an argument" },
+  { path = "std::time::Instant::now",    reason = "minos-core has no clock: time arrives as an argument" },
+  { path = "std::thread::sleep",         reason = "minos-core has no clock" },
+  { path = "std::env::var",              reason = "minos-core reads no environment" },
+  { path = "std::env::var_os",           reason = "minos-core reads no environment" },
+  { path = "std::env::args",             reason = "minos-core reads no environment" },
+  { path = "std::fs::read",              reason = "minos-core has no filesystem" },
+  { path = "std::fs::read_to_string",    reason = "minos-core has no filesystem" },
+  { path = "std::fs::write",             reason = "minos-core has no filesystem" },
+  { path = "std::io::stdin",             reason = "minos-core has no I/O" },
 ]
 disallowed-types = [
-  { path = "std::collections::HashMap", reason = "order must be stable: use BTreeMap" },
-  { path = "std::collections::HashSet", reason = "order must be stable: use BTreeSet" },
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeSet" },
+  { path = "std::fs::File",              reason = "minos-core has no filesystem" },
+  { path = "std::process::Command",      reason = "minos-core spawns nothing" },
+  { path = "std::net::TcpStream",        reason = "minos-core has no network" },
+  { path = "std::net::TcpListener",      reason = "minos-core has no network" },
+  { path = "std::net::UdpSocket",        reason = "minos-core has no network" },
+]
+disallowed-macros = [
+  { path = "std::println",  reason = "minos-core has no I/O; return values, do not print" },
+  { path = "std::eprintln", reason = "minos-core has no I/O; return values, do not print" },
+  { path = "std::dbg",      reason = "minos-core has no I/O" },
 ]
