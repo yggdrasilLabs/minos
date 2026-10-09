@@ -41,7 +41,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | 7. Supply chain | `cargo-deny` 0.20.2. Set `[sources] required-git-spec = "rev"`, `unknown-git = "deny"`, and a curated `[bans.build] allow-build-scripts` allowlist. | HIGH |
 | 8. Money | Hand-rolled integer fixed-point in core: rates in **pico-dollars** (`u128`), totals in micro-dollars. **CLAUDE.md's "nano-dollar precision" cannot represent published AWS rates** such as `$0.0000276944`/vCPU-s, which has 10 decimal places. | HIGH |
 | 9. `claude -p` | Use `std::process::Command` with `env_clear()` plus an **allowlist**, not `env_remove`. Pass the prompt on stdin, run in an empty private cwd, and parse the envelope leniently but `structured_output` strictly. | HIGH for flags and fields. Behavior of the flag combination is unverified. |
-| 10. tokio? | **No.** v1 is synchronous: `std::process`, `std::thread::scope`, `std::os::unix::net`, `std::fs::File::lock` (stable since 1.89). Nothing in v1 needs an async runtime. | HIGH |
+| 10. tokio? | **No Minos crate uses tokio.** v1 is synchronous: `std::process`, `std::thread::scope`, `std::os::unix::net`, `std::fs::File::lock` (stable since 1.89). Nothing in v1 needs an async runtime. The pinned VMM links tokio internally (`tokio 1.53.2 <- msb-imago <- msb_krun_devices <- msb_krun <- minos-vmm`); `deny.toml` bans `tokio` with `wrappers = ["msb-imago"]`, so that one edge is allowed and any `minos-*` crate that adds tokio is refused. | HIGH |
 | 11. Signing | Only `minos-vmm` needs `com.apple.security.hypervisor`. Ad-hoc sign it with `codesign --force -s - --entitlements minos-vmm.entitlements`. The `minos` CLI stays unsigned and has no entitlement. | MEDIUM-HIGH |
 
 ## Recommended Stack
@@ -255,7 +255,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | `rand::Rng::gen_range` and `rand` distributions in core | Not value-stable across versions, which breaks golden vectors and durable replay | `rand_chacha` stream + own mapping |
 | `backhand` default features | Pull in `liblzma-sys` and `zstd-sys` (C) | `default-features = false, features = ["gzip"]` |
 | `openssl`, `native-tls`, `git2`, `libgit2-sys`, `gix` | CLAUDE.md: no OpenSSL, no libgit2, no git in the trusted path | n/a in v1 (no network). rustls later. |
-| tokio in v1 | Adds a runtime and the async rule surface for zero benefit locally | std threads and processes |
+| tokio in any `minos-*` crate | Adds a runtime and the async rule surface for zero benefit locally; the pinned VMM links it internally and `deny.toml` fences that single edge | std threads and processes |
 | `fd-lock` / `fs2` | Superseded by `std::fs::File::lock` (1.89) | std |
 | `deny_unknown_fields` on the claude result envelope | Claude Code adds result fields frequently, so it would break on CLI upgrades | Lenient envelope, strict `structured_output` |
 | `claude --bare` with subscription auth | Bare mode never reads OAuth or Keychain | `--safe-mode` + empty cwd + `--strict-mcp-config` (subscription); `--bare` (API-key provider, later) |

@@ -7308,3 +7308,15 @@ Exit code: 0
 ```text
 advisories ok, bans ok, licenses ok, sources ok
 ```
+
+## Review fix (01-REVIEW.md WR-05): tokio fenced to the VMM edge
+
+`deny.toml` bans `tokio` with `wrappers = ["msb-imago"]`. `cargo tree -i tokio --depth 1` for both checked targets shows `msb-imago v0.1.7` as its only direct dependent, so the existing edge passes and any `minos-*` crate that adds `tokio` is refused.
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```

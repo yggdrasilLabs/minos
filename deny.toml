@@ -56,6 +56,7 @@ deny = [
   # Who may link what
   { crate = "anyhow", wrappers = ["minos-cli"], reason = "anyhow only at the CLI main (rules/err-anyhow-app.md)" },
   { crate = "msb_krun", wrappers = ["minos-vmm"], reason = "only minos-vmm links the VMM (KRUN-01)" },
+  { crate = "tokio", wrappers = ["msb-imago"], reason = "v1 is synchronous (STACK decision 10); tokio enters only through msb_krun's imago, never a minos-* crate" },
   # Crate layering (GATE-04, D-03). `wrappers` lists the crates allowed to depend on the banned crate DIRECTLY.
   # It does not follow transitive paths (verified in research: with only minos-sandbox banned,
   # minos-loop -> minos-runner -> minos-sandbox passed), so every internal library crate needs its own entry.
