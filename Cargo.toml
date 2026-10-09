@@ -1,6 +1,19 @@
 [workspace]
 resolver = "3"          # edition 2024 default; MSRV-aware: incompatible-rust-versions = "fallback"
-members = ["crates/*"]
+# Explicit, not a glob: adding a crate means editing the file that holds the lints. Every new member needs
+# `[lints] workspace = true`, a deny.toml layering entry, and (if core-like) its own clippy.toml.
+members = [
+  "crates/minos-core",
+  "crates/minos-store",
+  "crates/minos-sandbox",
+  "crates/minos-backend-krun",
+  "crates/minos-propose",
+  "crates/minos-runner",
+  "crates/minos-loop",
+  "crates/minos-vmm",
+  "crates/minos-guest",
+  "crates/minos-cli",
+]
 
 [workspace.package]
 version = "0.1.0"
