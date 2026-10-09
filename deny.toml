@@ -67,7 +67,7 @@ deny = [
   { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
   { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
   { crate = "minos-propose", wrappers = ["minos-loop", "minos-cli"], reason = "layering" },
-  { crate = "minos-runner", wrappers = ["minos-cli"], reason = "loop reaches the runner only through its JobRunner trait" },
+  { crate = "minos-runner", wrappers = ["minos-cli"], reason = "loop defines JobRunner; the CLI adapts minos-runner to it, so neither depends on the other" },
   { crate = "minos-loop", wrappers = ["minos-cli"], reason = "layering" },
 ]
 
