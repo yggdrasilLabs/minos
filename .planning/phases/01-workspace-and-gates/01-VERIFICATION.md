@@ -1,143 +1,135 @@
 ---
 phase: 01-workspace-and-gates
-verified: 2026-10-09T22:30:00Z
-status: human_needed
-score: 8/8 must-haves verified
+verified: 2026-10-09T23:30:00Z
+status: passed
+score: 12/12 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
+re_verification:
+  previous_status: human_needed
+  previous_score: 8/8
+  gaps_closed:
+    - "UAT test 1 / G-01: inner #![allow(clippy::unwrap_used, reason)] passed the clippy gate (now E0453 under forbid)"
+    - "UAT test 2 / G-02: a member without [lints] workspace = true escaped the workspace lints (now caught by the .cargo/config.toml rustflags backstop)"
+    - "UAT test 3 / G-03: [workspace.lints.rustdoc] was enforced by no gate command (now enforced by the fifth command, cargo doc --workspace --no-deps)"
+  gaps_remaining: []
+  regressions: []
 gaps: []
-human_verification:
-  - test: "Decide open decision 1: an inner #![allow(clippy::..., reason = \"...\")] passes the clippy gate"
-    expected: "User picks (A) accept and document the gap, or (B) raise unwrap_used, expect_used, indexing_slicing to forbid (edit to CLAUDE.md Code rules). ROADMAP SC2 and GATE-05 say 'no allow(clippy::...) appears anywhere'; the gate enforces that only for outer attributes and for reasonless inner ones."
-    why_human: "Changing a CLAUDE.md lint level is a design-of-record decision, not something a verifier or executor may do. Evidence G-01 (and my own reproduction) shows clippy exits 0."
-  - test: "Decide open decision 2: a crate that omits [lints] workspace = true escapes every workspace lint"
-    expected: "User picks (A) one-time check plus manifest review for every new crate, or (B) a .cargo/config.toml rustflags backstop. Today all 10 manifests carry the table (re-verified below)."
-    why_human: "The fix choice adds a policy file (.cargo/config.toml) that D-01 did not list, or relies on review. Evidence G-02 shows clippy exits 0 for such a crate."
-  - test: "Decide open decision 3: [workspace.lints.rustdoc] broken_intra_doc_links = deny is enforced only by cargo doc"
-    expected: "User picks (A) add `cargo doc --workspace --no-deps` as a fifth gate command (changes CLAUDE.md Commands and ROADMAP SC1), or (B) document that the rustdoc table only takes effect when docs are built."
-    why_human: "Adding a gate command changes the design of record. Evidence G-03: clippy and test exit 0, cargo doc exits 101."
+human_verification: []
 ---
 
 # Phase 1: Workspace and Gates Verification Report
 
-**Phase Goal:** Every line of code in the repo, from the first commit, is held to the workspace lints, the supply-chain policy, and the crate-layering rules by four plain cargo commands (`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`) on rustc 1.97.1 with edition 2024, with all policy in Cargo-native configuration files and no script.
-**Verified:** 2026-10-09
-**Status:** human_needed (all must-haves verified; three documented gate gaps need a user decision; none was resolved or hidden)
-**Re-verification:** No, initial verification
+**Phase Goal:** Every line of code in the repo, from the first commit, is held to the workspace lints, the supply-chain policy, and the crate-layering rules by five plain cargo commands (`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`, `cargo doc --workspace --no-deps`), with all policy in Cargo-native configuration files and no script.
+**Verified:** 2026-10-09, HEAD 8f035fa (working tree clean except `.planning/config.json`, which this phase did not touch)
+**Status:** passed
+**Re-verification:** Yes, after gap-closure plan 01-04 (the previous report was `human_needed` with three pending user decisions; all three were decided in 01-UAT.md and implemented)
 
 ## Goal Achievement
 
-### Observable Truths (ROADMAP Success Criteria first, then PLAN must-haves)
+### Observable Truths
+
+ROADMAP success criteria first, then the 01-04 must-haves that carry the UAT decisions. Plan 01-01 to 01-03 must-haves were re-checked as regressions (quick check) and are summarised at the end of the table.
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | SC1: On the ten-crate skeleton, the four commands pass on rustc 1.97.1 / edition 2024 with no script, and Cargo.lock is committed | VERIFIED | I ran them on HEAD fb098a5: `cargo --version` = 1.97.1, `cargo fmt --all --check` exit 0, `cargo clippy --workspace --all-targets -- -D warnings` exit 0, `cargo test --workspace` exit 0 (17 `test result: ok`, 0 tests), `cargo deny check` exit 0 with `advisories ok, bans ok, licenses ok, sources ok`. `git ls-files Cargo.lock` lists it (207 packages). `rust-toolchain.toml` pins 1.97.1; `edition = "2024"`, `resolver = "3"`. Tree outside `.planning` matches HEAD. |
-| 2 | SC2: Each code violation makes clippy fail: `unsafe`, `unwrap`, `expect`, slice index, `allow(clippy::...)` (only `#[expect]` passes), `SystemTime::now` and `HashMap` in minos-core | VERIFIED (with caveat, see truth 8 and Human Verification 1) | `01-GATE-EVIDENCE.md` V-01..V-10 have verbatim output and exit codes: V-01 exit 101 (`usage of an \`unsafe\` block`, `-F unsafe-code`; this is the backticked form the task notes expected); V-02/V-03 `unwrap_used`/`expect_used`; V-04 `indexing may panic`; V-05 outer allow without reason (two errors); V-06 outer allow with reason still fails (`#[allow] attribute found`); V-07 `#[expect(..., reason)]` exits 0 (positive control); V-08 unfulfilled expectation fails; V-09 `disallowed method std::time::SystemTime::now` with note `minos-core has no clock`; V-10 `disallowed type std::collections::HashMap`. Independent reproduction in a scratchpad copy (not the repo): V-09 reproduced (`use of a disallowed method`, exit 101). |
-| 3 | SC3: Each supply-chain or layering violation makes `cargo deny check` fail: git dep without rev, unknown registry/git source, unlisted build script, core/loop to sandbox or backend; normal core->sandbox fails earlier as a Cargo cycle | VERIFIED | Evidence V-11 (`git-source-underspecified`, exit 8), V-12 (`source-not-allowed` git, exit 8), V-13 (`source-not-allowed` registry, exit 8), V-14 (`build-script-not-allowed` httparse, exit 2), V-15/16/17 (loop to sandbox/backend/runner, `explicitly banned`, exit 2), V-18/19 (core dev-edge to sandbox/backend, banned, exit 2), V-20 (normal edge: `cyclic package dependency`, deny exit 1 and clippy exit 101), V-21 anyhow, V-22 msb_krun, V-23 (`cc`, `zstd-sys` explicitly banned via backhand zstd feature, exit 2; the expected result, not the UNEXPECTED path). Independent reproduction of V-15 in a scratchpad copy: `error[banned]: crate 'minos-sandbox = 0.1.0' is explicitly banned`, `bans FAILED`. |
-| 4 | SC4 / GATE-06: `cargo clean` has run after verification passes | VERIFIED | Plan 01-03 ran `cargo clean` (evidence: Removed 4871 files). A `target/` (981 MB) reappeared at 17:40 from a later cargo run, and my own gate re-runs also used it. I ran `cargo clean` as the last cargo action of this verification (Removed 3814 files, 1.1GiB); `test ! -d target` confirmed. No cargo command was run after it. |
-| 5 | Plan 01-01: ten crates exist with exactly the ARCHITECTURE.md dependency edges; every member has `[lints] workspace = true`; only minos-core has a clippy.toml | VERIFIED | `cargo metadata --no-deps` normal/dev edges match the plan's ten-line map exactly (re-run by me). All 10 manifests pass the `[lints]`/`workspace = true` check (re-run). `find` shows exactly one clippy.toml (`crates/minos-core/clippy.toml`, bans `SystemTime::now`, `Instant::now`, `HashMap`, `HashSet`); no root clippy.toml. |
-| 6 | Plan 01-01: lint baseline in `[workspace.lints]` matches CLAUDE.md and D-02/D-12; every `[workspace.dependencies]` entry is an exact `=` pin | VERIFIED | Cargo.toml: `unsafe_code = "forbid"`, `unwrap_used`/`expect_used`/`indexing_slicing = "deny"`, `allow_attributes` and `allow_attributes_without_reason = "deny"`, seven groups at priority -1, four carve-outs each with a comment reason. Workspace dependency block has 31 entries, 31 contain `"=` (exact pins, internal path deps included). No C/OpenSSL/libgit2 crate in either target graph (`cargo tree` grep count 0). LICENSE-APACHE sha256 matches the plan's `cfc7749b...`; LICENSE-MIT present. |
-| 7 | Plan 01-02: deny.toml encodes sources (rev required, `allow-git = []`, unknown registry/git denied), a 25-crate build-script allowlist plus `executables = "deny"`, 9 C bans, anyhow->minos-cli, msb_krun->minos-vmm, and seven per-crate layering `wrappers` entries | VERIFIED | Read deny.toml in full. Layering wrappers match the plan literally and match the real dependency edges (checked against the metadata output above): core listed for 8 dependents, loop only minos-cli, runner only minos-cli, etc. `[bans.workspace-dependencies]` has duplicates/unused deny and `include-path-dependencies = true`. `multiple-versions = "warn"` produces 7 duplicate warnings (bitflags, getrandom, miniz_oxide, nix, rand_chacha, rand_core, syn), visible but not failing, as designed. |
-| 8 | Plan 01-03: the three gaps the four commands cannot catch are recorded as open decisions, not resolved; CLAUDE.md and rules/ unchanged; REQUIREMENTS/ROADMAP reworded to match D-01 | VERIFIED (the gaps themselves are real, see Human Verification) | G-01 (inner allow with reason, exit 0), G-02 (crate without `[lints]`, exit 0), G-03 (rustdoc lint: clippy and test exit 0, `cargo doc` exit 101 `unresolved link`) are recorded verbatim, and the `## Open decisions for the user` section lists three numbered decisions. I reproduced G-01 independently in a scratchpad copy: clippy exits 0 with an inner `#![allow(clippy::unwrap_used, reason = "x")]` plus an `unwrap()`. `git diff --quiet HEAD -- CLAUDE.md rules` = 0 and `git log 7195911..HEAD -- CLAUDE.md rules` empty. REQUIREMENTS.md GATE-02/04/05 and ROADMAP Phase 1 text carry the new wording; zero `` `ci` `` or `A CI check` remain; the Phase 5 xtask wording (KRUN-08, ROADMAP line 153) was deliberately left alone per CONTEXT.md. |
+| 1 | SC1: on the ten-crate skeleton, all five commands pass on rustc 1.97.1 / edition 2024 with no script, and `Cargo.lock` is committed | VERIFIED | I ran all five on HEAD (`cargo 1.97.1`; no `RUSTFLAGS`/`RUSTDOCFLAGS`/`CARGO_ENCODED_RUSTFLAGS` set): `cargo fmt --all --check` exit 0, `cargo clippy --workspace --all-targets -- -D warnings` exit 0, `cargo test --workspace` exit 0 (all 0-test suites ok), `cargo deny check` exit 0 (`advisories ok, bans ok, licenses ok, sources ok`), `cargo doc --workspace --no-deps` exit 0 (`Generated .../minos_backend_krun/index.html and 9 other files`). `git ls-files` lists `Cargo.lock` and `.cargo/config.toml`. No `*.sh`, Makefile, justfile, xtask, or `.github` exists outside `target/`, `.git/`, `rules/`. |
+| 2 | SC2 / UAT 1: `unwrap_used`, `expect_used`, `indexing_slicing` are at `forbid` in `Cargo.toml` and in the CLAUDE.md Code rules; an inner `#![allow(clippy::unwrap_used, reason)]` plus `unwrap()` fails clippy | VERIFIED | `Cargo.toml` `[workspace.lints.clippy]` lines 107-109 equivalent: `unwrap_used = "forbid"`, `expect_used = "forbid"`, `indexing_slicing = "forbid"` (and `unsafe_code = "forbid"`). CLAUDE.md lines 106-112 show the same three at `forbid` plus the sentence that neither allow nor expect can silence them. `git diff c4b5bab HEAD -- CLAUDE.md` touches exactly two hunks (the three lint levels plus that one sentence, and the new `cargo doc` Commands line); `rules/` is unchanged. I reproduced the G-01 probe in a scratch copy of the tree (separate target dir, repo untouched): inner allow with reason plus `unwrap()` in `minos-store` gives `error[E0453]: allow(clippy::unwrap_used) incompatible with previous forbid`, exit 101. Evidence `G-01-CLOSED` records the same verbatim. |
+| 3 | SC2: `#[expect]` of a forbidden lint now fails; `#[expect]` of other lints still passes; the residual inner-allow gap on non-forbidden lints is stated, not hidden | VERIFIED | My scratch probe: `#[expect(clippy::indexing_slicing, reason)]` on indexing code gives E0453, exit 101 (matches evidence R-01). Evidence R-02 (`#[expect(clippy::get_first, reason)]` exit 0) and R-03 (inner `#![allow(clippy::get_first, reason)]` exit 0) are recorded verbatim. ROADMAP SC2 and REQUIREMENTS GATE-05 state the residual explicitly ("an inner `#![allow(..., reason = ...)]` is not caught" for other lints), so the wording is honest. No `allow(`/`expect(`/`unsafe`/`unwrap`/TODO/FIXME/TBD/XXX in any `crates/**/*.rs` (16 lines of stub code in total). |
+| 4 | UAT 2: `.cargo/config.toml` exists with the `[build] rustflags` forbid backstop, and a member that omits `[lints] workspace = true` still fails clippy | VERIFIED | `.cargo/config.toml` (tracked) contains `[build] rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]`, with comments naming the duplication, the `RUSTFLAGS` / `CARGO_ENCODED_RUSTFLAGS` / `target.*.rustflags` replacement caveat, and that dependencies are unaffected (`--cap-lints allow`). My scratch probe deleted `[lints]`/`workspace = true` from `minos-loop` and added `unwrap()` and `x[0]`: both fail with `requested on the command line with -F clippy::unwrap-used` / `-F clippy::indexing-slicing`, exit 101. The untouched tree passes all five commands, so no dependency fails under the flags (evidence B-01 also records `cargo build`, `test`, `deny` at exit 0). The `RUSTFLAGS=` weakness is demonstrated in evidence G-02-CLOSED (exit 0 with it set) and recorded as a caveat in D-01, not hidden. |
+| 5 | UAT 2 (option A): every crate manifest inherits the workspace lints, and a standing acceptance criterion exists for new crates | VERIFIED | The C-01 loop over `crates/*/Cargo.toml` prints `ok` for all ten crates (I re-ran it) and no `MISSING`. D-15 in 01-CONTEXT.md adds the acceptance criterion with the exact command. |
+| 6 | UAT 3: `cargo doc --workspace --no-deps` is the fifth gate command in CLAUDE.md Commands, ROADMAP Phase 1, REQUIREMENTS GATE-02, and 01-CONTEXT.md D-01, and it fails on a broken intra-doc link | VERIFIED | CLAUDE.md Commands line 414: `cargo doc --workspace --no-deps          # the only command that enforces [workspace.lints.rustdoc]`. ROADMAP Phase 1 goal and SC1 name all five commands; REQUIREMENTS GATE-02 lists all five; 01-CONTEXT.md D-01 lists five commands and five policy files and adds D-15. My scratch probe: appended `/// Link to [\`DoesNotExist\`].` gives `error: unresolved link to DoesNotExist ... -D rustdoc::broken-intra-doc-links`, exit 101, while `cargo clippy` on the same tree exits 0 (so the fifth command is genuinely needed). No `RUSTDOCFLAGS` is set and `.cargo/config.toml` has no `rustdocflags` key. `Cargo.toml` comment on the rustdoc table names the fifth command. |
+| 7 | UAT: the `## Gap closure (01-04)` section of `01-GATE-EVIDENCE.md` records `G-01-CLOSED`, `G-02-CLOSED`, `G-03-CLOSED` with verbatim output | VERIFIED | Section at line 6779; headings `G-01-CLOSED` (6790, exit 101, E0453 text), `G-02-CLOSED` (6940, exit 101 with four errors for unsafe/unwrap/expect/index, plus a second run with `RUSTFLAGS=` empty at exit 0), `G-03-CLOSED` (7078, exit 0 on the clean tree, exit 101 with the unresolved-link error). Also `R-01..R-03`, `F-01..F-03`, `C-03-RERUN`, `B-01`, `C-01-RERUN`, a five-command "Final gate", "Invariant check (01-04)", and "cargo clean (01-04)". Every error text I reproduced matches the recorded text. Files are genuinely probed-and-reverted: `git status` shows no source/policy change. |
+| 8 | SC3: each supply-chain or layering violation makes `cargo deny check` fail (regression check) | VERIFIED | `deny.toml` unchanged by 01-04: `required-git-spec = "rev"`, `allow-git = []`, `unknown-registry/unknown-git = "deny"`, `[bans.build] allow-build-scripts` list plus `executables = "deny"`, nine C/git crate bans, anyhow limited to `minos-cli`, `msb_krun` to `minos-vmm`, and seven per-crate layering `wrappers` entries (core, store, sandbox, backend-krun, propose, runner, loop). `cargo deny check` passes live. Evidence V-11..V-23 (verbatim failing outputs) are untouched. |
+| 9 | SC2: `SystemTime::now` and `HashMap` in `minos-core` are rejected (regression check) | VERIFIED | `crates/minos-core/clippy.toml` has `disallowed-methods` for `SystemTime::now` and `Instant::now` and `disallowed-types` for `HashMap` and `HashSet`; only minos-core has a clippy.toml. Evidence V-09 and V-10 untouched. |
+| 10 | Plan 01-01/01-02 structure: ten crates with the planned dependency edges, resolver 3, edition 2024, rust-version 1.97.1, exact `=` pins, toolchain pinned | VERIFIED | `crates/` has exactly the ten planned members and no xtask/AWS crate. `Cargo.toml` shows resolver 3, edition 2024, rust-version 1.97.1, every `[workspace.dependencies]` entry `=`-pinned (internal paths carry `version = "=0.1.0"`). `rust-toolchain.toml` pins 1.97.1 with rustfmt and clippy. `cargo deny` `[bans.workspace-dependencies]` (`duplicates`, `unused`) passes. |
+| 11 | CLAUDE.md and `rules/` are not weakened: only the user-decided edits were made | VERIFIED | The CLAUDE.md diff above is the whole change since the plan baseline c4b5bab, and both edits are the user's UAT decisions B (test 1) and A (test 3). `git diff --stat c4b5bab HEAD -- rules` is empty. No lint was lowered; three were raised. |
+| 12 | GATE-06: `cargo clean` ran last and no `target/` remains | VERIFIED | I ran `cargo clean` as the final cargo command of this verification ("Removed 4103 files, 1.1GiB total") and `ls target` reports no such directory. |
 
-**Score:** 8/8 truths verified (0 behavior-unverified, 0 overrides). Status is human_needed because the user has three pending decisions about gaps that weaken the literal wording of GATE-01/GATE-05, not because any must-have failed.
-
-### Decision D-01 (Cargo-native, no scripts)
-
-Confirmed. `find` (excluding target, .git, rules) finds no `*.sh`, Makefile, justfile, xtask, `.github`, `.cargo`, or `ci*`. `rules/` contains no `.sh` either. `.gitignore` is the single line `/target`. `crates/` has exactly the ten planned members and no xtask or AWS crate (D-07). All policy lives in `Cargo.toml`, `crates/minos-core/clippy.toml`, `deny.toml`, `rust-toolchain.toml`, `rustfmt.toml`.
+**Score:** 12/12 truths verified (0 behavior-unverified, 0 overrides). None of the truths is a runtime state-transition or cleanup invariant; they are all configuration-enforcement claims, and each was proven by a live failing-then-reverted probe, not by presence alone.
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `rust-toolchain.toml` | channel 1.97.1, rustfmt+clippy | VERIFIED | Content as planned, no targets (D-09) |
-| `Cargo.toml` | workspace, lint baseline, 31 exact pins | VERIFIED | See truth 6 |
-| `crates/minos-core/clippy.toml` | clock and hash-order bans | VERIFIED | Real std paths; proven live by V-09/V-10 |
-| `Cargo.lock` | committed | VERIFIED | Tracked, 207 packages |
-| `crates/minos-cli/Cargo.toml` | `minos` bin | VERIFIED | Binary set is `minos`, `minos-guest`, `minos-vmm` |
-| `LICENSE-APACHE` / `LICENSE-MIT` | D-08 | VERIFIED | Hash matches; MIT text present |
-| `deny.toml` | contains `required-git-spec = "rev"` | VERIFIED | Full policy, see truth 7 |
-| `01-GATE-EVIDENCE.md` | verbatim proofs, `## Open decisions for the user` | VERIFIED | 23 `### V-`, 3 `### G-`, 3 `### C-`; 11 `Exit code: 0`, 24 non-zero exit-code lines (includes the extra clippy run in V-20 and the Deny re-check/Final gate zeros) |
-| `.planning/REQUIREMENTS.md`, `ROADMAP.md` | D-01 wording | VERIFIED | Greps pass |
-
-Stub-level note: the crate sources are one-line doc stubs by design (Phase 1 is a skeleton phase). That is the specified deliverable, not a stub defect; no `TBD/FIXME/XXX/TODO` markers exist in `crates/`, `Cargo.toml`, or `deny.toml`.
+| -------- | -------- | ------ | ------- |
+| `Cargo.toml` | `unwrap_used`, `expect_used`, `indexing_slicing` at forbid; `unsafe_code` forbid; rustdoc table naming the fifth command | VERIFIED | Read in full. Carve-outs (`too_many_lines`, `similar_names`, `struct_excessive_bools`, `multiple_crate_versions`) each carry a rules/-cited reason comment. |
+| `.cargo/config.toml` | `[build] rustflags` forbid backstop with caveats | VERIFIED | Tracked in git, 8 lines, contains `-Fclippy::indexing_slicing`. |
+| `CLAUDE.md` | Code rules at forbid + one sentence; Commands with fifth command | VERIFIED | Exactly two diff hunks, see truth 2 and 6. |
+| `deny.toml` | Supply-chain and layering policy | VERIFIED | See truth 8. |
+| `crates/minos-core/clippy.toml` | Clock and hash-order bans | VERIFIED | See truth 9. |
+| `rust-toolchain.toml`, `rustfmt.toml`, `LICENSE-*`, `Cargo.lock` | Toolchain pin, fmt config, licenses, lockfile | VERIFIED | Present; `Cargo.lock` tracked. |
+| `01-GATE-EVIDENCE.md` (Gap closure 01-04) | Verbatim closing proofs | VERIFIED | See truth 7. |
+| `01-CONTEXT.md` D-01 (amended), D-15 (new) | Five files, five commands, caveats; new-crate criterion | VERIFIED | Lines 21 and 43. |
+| `REQUIREMENTS.md` GATE-01/02/05, `ROADMAP.md` Phase 1 | Five commands, forbid, backstop | VERIFIED | GATE-01 to GATE-05 are `[x]` and `Complete` in the traceability table; GATE-06 stays `[ ]`/Pending by design (cross-cutting). |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `crates/*/Cargo.toml` | `[workspace.lints]` | `[lints] workspace = true` | WIRED | 10 of 10 (C-01 plus my re-run) |
-| `crates/minos-core/clippy.toml` | `cargo clippy` | nearest clippy.toml | WIRED | V-09/V-10 fire; I reproduced V-09 |
-| member deps | `[workspace.dependencies]` | `.workspace = true` | WIRED | `[bans.workspace-dependencies]` duplicates/unused = deny and passes |
-| `deny.toml` wrappers | crate dependency edges | one deny entry per internal lib | WIRED | Matches metadata; V-15..V-19 fire |
-| `deny.toml [graph]` | Cargo.lock for both triples | `targets` | WIRED | deny passes on both; `cargo tree` clean for both |
+| ---- | -- | --- | ------ | ------- |
+| `Cargo.toml [workspace.lints.clippy]` | `cargo clippy ... -D warnings` | forbid turns allow/expect into E0453 | WIRED | Reproduced (P1, P4). |
+| `.cargo/config.toml [build] rustflags` | clippy on a manifest lacking `[lints]` | build.rustflags reach every workspace crate | WIRED | Reproduced (P2). |
+| `CLAUDE.md Commands` / `Cargo.toml [workspace.lints.rustdoc]` | `cargo doc --workspace --no-deps` | only rustdoc applies the rustdoc table | WIRED | Reproduced (P3, with clippy passing on the same tree). |
+| `crates/*/Cargo.toml [lints]` | `Cargo.toml [workspace.lints]` | `workspace = true` in all ten members | WIRED | C-01 loop, ten `ok`. |
+| `deny.toml` wrappers | crate dependency edges | per-crate `wrappers` lists | WIRED | `cargo deny check` passes; violations recorded V-15..V-20. |
+
+### Data-Flow Trace (Level 4)
+
+Not applicable: this phase produces configuration and ten stub crates that render no dynamic data.
 
 ### Behavioral Spot-Checks
 
-| Behavior | Command | Result | Status |
-|----------|---------|--------|--------|
-| Four gate commands pass on HEAD | fmt / clippy / test / deny | all exit 0 | PASS |
-| `SystemTime::now` in core rejected | probe appended in a scratchpad copy, clippy | `use of a disallowed method`, exit 101 | PASS |
-| loop -> sandbox edge rejected | edge added in a scratchpad copy, `cargo deny check bans` | `crate 'minos-sandbox = 0.1.0' is explicitly banned` | PASS |
-| Gap G-01 real | inner allow + unwrap in a scratchpad copy | clippy `Finished`, exit 0 | CONFIRMED GAP |
+Run in a scratch copy of the tree under `$scratchpad` with its own `CARGO_TARGET_DIR`; the repository was never edited. The scratch copy was deleted afterwards.
 
-All violation reproductions were made in a copy under the session scratchpad, not in the repository; the copy and its target dir were deleted. The repo tree is unchanged outside `.planning`.
+| Behavior | Command | Result | Status |
+| -------- | ------- | ------ | ------ |
+| Inner allow of a forbidden lint is rejected | `cargo clippy --workspace --all-targets -- -D warnings` with `#![allow(clippy::unwrap_used, reason)]` + `unwrap()` | E0453 "overruled by previous forbid", exit 101 | PASS |
+| `#[expect]` of a forbidden lint is rejected | same, `#[expect(clippy::indexing_slicing, reason)]` | E0453, exit 101 | PASS |
+| Crate without `[lints]` is still held | same, `minos-loop` manifest stripped, `unwrap()` and `x[0]` added | two clippy errors citing `-F`, exit 101 | PASS |
+| Broken doc link fails the fifth command only | `cargo doc --workspace --no-deps` / clippy | doc exit 101 "unresolved link"; clippy exit 0 | PASS |
+| Clean-tree gate | five commands on HEAD | all exit 0 | PASS |
 
 ### Probe Execution
 
-Step 7c: SKIPPED. The phase declares no `probe-*.sh` scripts (D-01 forbids scripts); the proof mechanism is the evidence file plus my reproductions above.
+SKIPPED: the phase declares no probe scripts, and no `scripts/*/tests/probe-*.sh` exists.
 
 ### Requirements Coverage
 
-| Requirement | Source Plan | Description | Status | Evidence |
-|-------------|-------------|-------------|--------|----------|
-| GATE-01 | 01-01, 01-03 | rustc 1.97.1 / edition 2024, `unsafe_code = forbid`, unwrap/expect/indexing denied | SATISFIED, with the G-02 and G-03 caveats | Cargo.toml, V-01..V-04, truths 1, 2, 6 |
-| GATE-02 | 01-02, 01-03 | Four plain cargo commands pass, Cargo.lock committed | SATISFIED | Truth 1 (run by me) |
-| GATE-03 | 01-02, 01-03 | deny.toml: rev required, unknown registry/git denied, build scripts allowlisted | SATISFIED | deny.toml, V-11..V-14 |
-| GATE-04 | 01-02, 01-03 | `cargo deny check` fails on core/loop -> sandbox or backend | SATISFIED | V-15..V-20 and reproduced V-15 |
-| GATE-05 | 01-01, 01-03 | core bans `SystemTime::now`/`HashMap`; no `allow(clippy::...)` anywhere | SATISFIED for outer attributes and reasonless inner ones; PARTIAL for inner `#![allow(..., reason)]` (G-01) | V-05..V-10, C-02, G-01 |
-| GATE-06 | cross-cutting | `cargo clean` after verification | SATISFIED | Ran `cargo clean` last; `target/` absent |
+Requirement IDs declared in PLAN frontmatter: 01-01 `[GATE-01, GATE-05]`, 01-02 `[GATE-02, GATE-03, GATE-04]`, 01-03 `[GATE-01..GATE-05]`, 01-04 `[GATE-01, GATE-02, GATE-05]`. REQUIREMENTS.md maps GATE-01..GATE-05 to Phase 1 and GATE-06 to all phases. Every ID is accounted for; no orphans.
 
-All five phase IDs (GATE-01..05) appear in at least one PLAN `requirements:` field (01-01: 01,05; 01-02: 02,03,04; 01-03: all five) and all five are mapped to Phase 1 in REQUIREMENTS.md. No orphaned requirements. REQUIREMENTS.md still shows GATE-06 unticked, which is correct until the orchestrator marks the phase complete.
+| Requirement | Source Plan | Description (current wording) | Status | Evidence |
+| ----------- | ----------- | ----------------------------- | ------ | -------- |
+| GATE-01 | 01-01, 01-03, 01-04 | rustc 1.97.1 / edition 2024; `unsafe_code`, `unwrap_used`, `expect_used`, `indexing_slicing` all forbid, repeated as a `.cargo/config.toml` backstop | SATISFIED | Truths 2, 4, 5, 10 |
+| GATE-02 | 01-02, 01-03, 01-04 | five plain cargo commands pass, no script, `Cargo.lock` committed | SATISFIED | Truth 1 and 6 |
+| GATE-03 | 01-02, 01-03 | `deny.toml` requires `rev`, denies unknown registries/git, allowlists build scripts | SATISFIED | Truth 8 |
+| GATE-04 | 01-02, 01-03 | `cargo deny check` fails on a core/loop dependency on sandbox or backends | SATISFIED | Truth 8 (V-15..V-20) |
+| GATE-05 | 01-01, 01-03, 01-04 | core `disallowed-methods`/`disallowed-types`; no `allow(clippy::...)` anywhere, and not even `#[expect]` for the three forbid lints | SATISFIED | Truths 2, 3, 9 |
+| GATE-06 | cross-cutting | `cargo clean` after verification | SATISFIED for this phase | Truth 12; the REQUIREMENTS checkbox stays open because it applies to every phase |
 
 ### Anti-Patterns Found
 
-None blocking. No debt markers, no placeholder logic beyond the intended doc-only stubs, no `#[allow]` anywhere in `crates` (C-02 re-checked: grep empty), no scripts.
+None blocking. Scan of `crates/**/*.rs` for `allow(`, `expect(`, `unsafe`, `unwrap`, `TODO`, `FIXME`, `XXX`, `TBD` returned nothing; the stubs are 16 lines in total, and stubs are the intended Phase 1 deliverable.
 
-Observations (info):
+| File | Line | Pattern | Severity | Impact |
+| ---- | ---- | ------- | -------- | ------ |
+| `01-GATE-EVIDENCE.md` older sections ("Final gate", "Invariant check", "Decisions") | various | say "four gate commands" / "No gate command was added" | Info | These are the pre-closure before-state records; the post-closure state is in "Gap closure (01-04)", which says so explicitly. No correction needed. |
+| `.planning/ROADMAP.md` | 79 | 01-02 plan line says "all four gate commands green" | Info | Historically accurate for plan 01-02 (the fifth command did not exist yet). |
+| `deny.toml` | 1 | "`cargo deny check` is the fourth gate command" | Info | Still correct in the five-command ordering. |
 
-| Item | Severity | Impact |
-|------|----------|--------|
-| Plan acceptance greps expected `usage of an unsafe block`; clippy 0.1.97 prints ``usage of an `unsafe` block`` | Info | Evidence has the backticked form in V-01 and the gate did reject (exit 101); the plan grep was wrong, not the gate |
-| `cargo deny check` prints 7 `multiple-versions` warnings | Info | By design (`warn`), clippy's `multiple_crate_versions` is carved out |
-| A 981 MB `target/` existed at the start of verification despite 01-03's `cargo clean` | Info | A later cargo run recreated it; cleaned again by this verification |
-| `01-VALIDATION.md` frontmatter still says `status: draft` and the per-task table shows pending | Info | Documentation bookkeeping only |
+### Findings carried forward (not Phase 1 gaps)
+
+These are recorded so they are not lost; neither blocks Phase 1, and both were already surfaced by plan 01-04 and STATE.md.
+
+1. **F-01 (Phase 8 / any earlier minos-cli argument parsing):** `#[derive(clap::Parser)]` fails the clippy gate under `forbid`, because clap_derive 4.6.7 emits `#[allow(clippy::restriction)]`, which E0453 rejects. The clap builder API passes (F-02) and serde/thiserror derives pass (F-03). This is a direct consequence of UAT decision B and conflicts with the `.claude/CLAUDE.md` stack choice "clap 4.6.7 with `derive`". The user must choose between the builder API and revisiting forbid before any clap derive is written. `[workspace.dependencies]` still enables clap's `derive` feature and `cargo deny` `unused` passes. STATE.md line 96 holds the note.
+2. **Residual, accepted by the user and stated in ROADMAP SC2 / GATE-05:** an inner `#![allow(..., reason = ...)]` on a lint that is not one of the forbid lints is not caught by the gate (evidence R-03). Only the four forbid lints are airtight.
+3. **Backstop weakness, accepted and documented (D-01):** a `RUSTFLAGS` environment variable (or `CARGO_ENCODED_RUSTFLAGS`, or a `target.*.rustflags` key) silently replaces the `.cargo/config.toml` backstop. The primary control remains the `[lints] workspace = true` table in every manifest, guarded by the D-15 acceptance criterion. Phase 5 will want to re-check this when it adds the `aarch64-unknown-linux-musl` target.
 
 ### Human Verification Required
 
-#### 1. Inner `#![allow(..., reason)]` passes the clippy gate (open decision 1, G-01)
-
-**Test:** Decide between (A) accept and document, or (B) raise `unwrap_used`, `expect_used`, `indexing_slicing` to `forbid` (edits CLAUDE.md Code rules, and makes `#[expect]` unusable for those three).
-**Expected:** A recorded decision. Until then, GATE-05's "no allow(clippy::...) anywhere" and ROADMAP SC2's "only `#[expect]` passes" are enforced for outer attributes and reasonless inner attributes only.
-**Why human:** Changing a locked CLAUDE.md lint level is the user's call.
-
-#### 2. A crate without `[lints] workspace = true` escapes all lints (open decision 2, G-02)
-
-**Test:** Decide between (A) manifest review plus the one-time C-01 check, or (B) a `.cargo/config.toml` rustflags backstop.
-**Expected:** A recorded decision. Today all ten manifests are compliant.
-**Why human:** Option B adds a policy file D-01 did not list and duplicates the lint list.
-
-#### 3. rustdoc `broken_intra_doc_links = deny` is not enforced by the four commands (open decision 3, G-03)
-
-**Test:** Decide between (A) add `cargo doc --workspace --no-deps` as a fifth command, or (B) document that the rustdoc lint takes effect only on doc builds.
-**Expected:** A recorded decision. D-12 listed this lint in the baseline, but only `cargo doc` runs it.
-**Why human:** Adding a gate command changes CLAUDE.md Commands and ROADMAP SC1.
+None. The three decisions that made the previous report `human_needed` were taken by the user (01-UAT.md tests 1 to 3) and implemented and proven by plan 01-04.
 
 ### Gaps Summary
 
-No must-have failed. The phase delivers what it set out to: ten-crate workspace, full lint baseline, 31 exact pins, a deny.toml whose sources, build-script, C-crate, and layering rules each have verbatim failing output (and two of which I reproduced myself), and the four gate commands green on HEAD. Decision D-01 (no scripts) is honored. The residual risk is the three gate holes the executor found and surfaced instead of papering over; they await the user's choice and do not block starting Phases 2 and 3, but decision 2 is cheapest to settle before new crates arrive in later phases.
-
-GATE-06 note: this verification ran cargo commands (gate re-runs, `cargo metadata`, `cargo tree`, `cargo deny`, scratchpad reproductions) and then ran `cargo clean` as its final cargo action. `target/` does not exist. Nothing in the repository was modified by the verifier except this file.
+No gaps. All three UAT gaps are closed with reproducible evidence: the three clippy lints are at forbid in `Cargo.toml` and CLAUDE.md, the `.cargo/config.toml` backstop exists and fires on a manifest that omits `[lints]`, and `cargo doc --workspace --no-deps` is the documented, working fifth gate command in CLAUDE.md, ROADMAP, REQUIREMENTS GATE-02, and 01-CONTEXT.md D-01 (with D-15 added). All five gate commands pass on HEAD 8f035fa, and `cargo clean` ran last (no `target/` remains).
 
 ---
 

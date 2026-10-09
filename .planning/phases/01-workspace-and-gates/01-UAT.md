@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 01-workspace-and-gates
 source: [01-VERIFICATION.md]
 started: 2026-10-09T21:44:23Z
-updated: 2026-10-09T21:56:56Z
+updated: 2026-10-09T22:43:43Z
 ---
 
 ## Current Test
@@ -45,7 +45,7 @@ blocked: 0
 ## Gaps
 
 - truth: "An inner #![allow(clippy::unwrap_used, reason = ...)] cannot pass cargo clippy --workspace --all-targets -- -D warnings (GATE-05: no allow(clippy::...) appears anywhere)"
-  status: failed
+  status: resolved
   reason: "User reported: B (raise unwrap_used, expect_used, indexing_slicing to forbid)"
   severity: major
   test: 1
@@ -65,7 +65,7 @@ blocked: 0
   debug_session: ""
 
 - truth: "A workspace member that omits [lints] workspace = true still cannot compile unsafe code, unwrap, expect, or index a slice under the gate (GATE-01: every crate is held to the workspace lints)"
-  status: failed
+  status: resolved
   reason: "User reported: both I think, no? (decision A+B)"
   severity: major
   test: 2
@@ -86,7 +86,7 @@ blocked: 0
   debug_session: ""
 
 - truth: "A broken intra-doc link fails the gate (D-12: [workspace.lints.rustdoc] broken_intra_doc_links = deny is enforced)"
-  status: failed
+  status: resolved
   reason: "User reported: a (add cargo doc --workspace --no-deps as a fifth gate command)"
   severity: major
   test: 3
