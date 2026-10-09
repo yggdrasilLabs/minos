@@ -1,0 +1,5 @@
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
+# targets: add "aarch64-unknown-linux-musl" in Phase 5 (D-09). The musl std is not installed today.

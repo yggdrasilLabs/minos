@@ -1,0 +1,10 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+disallowed-methods = [
+  { path = "std::time::SystemTime::now", reason = "minos-core has no clock: time arrives as an argument" },
+  { path = "std::time::Instant::now", reason = "minos-core has no clock: time arrives as an argument" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "order must be stable: use BTreeMap" },
+  { path = "std::collections::HashSet", reason = "order must be stable: use BTreeSet" },
+]

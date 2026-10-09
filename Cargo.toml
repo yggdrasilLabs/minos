@@ -1,0 +1,78 @@
+[workspace]
+resolver = "3"          # edition 2024 default; MSRV-aware: incompatible-rust-versions = "fallback"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"  # patch versions are accepted
+license = "Apache-2.0 OR MIT"
+publish = false          # v1 publishes nothing; also makes clippy::cargo_common_metadata skip the crate
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Groups. priority -1 so the single-lint entries below (priority 0) override them.
+correctness = { level = "deny", priority = -1 }
+suspicious  = { level = "warn", priority = -1 }
+complexity  = { level = "warn", priority = -1 }
+perf        = { level = "warn", priority = -1 }
+style       = { level = "warn", priority = -1 }
+pedantic    = { level = "warn", priority = -1 }
+cargo       = { level = "warn", priority = -1 }
+# Locked by CLAUDE.md
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+# D-02 / GATE-05: only #[expect(..., reason = "...")] may suppress a lint
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# rules/lint-unsafe-doc.md (moot while unsafe_code is forbid, but kept as defense in depth)
+undocumented_unsafe_blocks = "deny"
+# Carve-outs. Cargo rejects a `reason` key, so reasons are comments.
+# pedantic, rules/lint-pedantic-selective.md: an arbitrary line-count threshold says nothing about correctness
+too_many_lines = "allow"
+# pedantic, rules/lint-pedantic-selective.md: domain pairs such as base/baseline and exp/expr are intentional
+similar_names = "allow"
+# pedantic, rules/lint-pedantic-selective.md: config and capability structs legitimately carry several flags
+struct_excessive_bools = "allow"
+# cargo: msb_krun, proptest, and backhand pull duplicate versions we cannot unify; cargo-deny multiple-versions = "warn" reports them
+multiple_crate_versions = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"   # enforced only by `cargo doc`, not by clippy or test (open decision 3 in 01-01-PLAN.md)
+
+[workspace.dependencies]
+minos-core         = { path = "crates/minos-core", version = "=0.1.0" }
+minos-store        = { path = "crates/minos-store", version = "=0.1.0" }
+minos-sandbox      = { path = "crates/minos-sandbox", version = "=0.1.0" }
+minos-backend-krun = { path = "crates/minos-backend-krun", version = "=0.1.0" }
+minos-propose      = { path = "crates/minos-propose", version = "=0.1.0" }
+minos-runner       = { path = "crates/minos-runner", version = "=0.1.0" }
+minos-loop         = { path = "crates/minos-loop", version = "=0.1.0" }
+serde        = { version = "=1.0.229", features = ["derive"] }
+serde_json   = "=1.0.151"
+toml         = "=1.1.8"
+thiserror    = "=2.0.21"
+anyhow       = "=1.0.104"
+clap         = { version = "=4.6.7", features = ["derive"] }
+sha2         = "=0.11.0"
+base16ct     = { version = "=1.0.0", features = ["alloc"] }
+diffy        = { version = "=0.5.2", default-features = false, features = ["std"] }
+tar          = { version = "=0.4.46", default-features = false }
+ignore       = "=0.4.33"
+regex        = "=1.13.1"
+rand_chacha  = { version = "=0.10.0", default-features = false }
+rand_core    = "=0.10.1"
+rustix       = { version = "=1.1.5", features = ["fs", "mount", "process", "system"] }
+vsock        = "=0.5.4"
+msb_krun     = { version = "=0.1.41", default-features = false, features = ["blk"] }
+backhand     = { version = "=0.25.5", default-features = false, features = ["gzip"] }
+tempfile     = "=3.27.0"
+tracing      = "=0.1.44"
+tracing-subscriber = "=0.3.23"
+proptest     = "=1.11.0"
+insta        = { version = "=1.49.0", features = ["json", "toml"] }
+trybuild     = "=1.0.122"
