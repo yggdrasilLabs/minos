@@ -6755,13 +6755,13 @@ CLAUDE.md and rules/ are unchanged by this phase. `git diff --quiet HEAD -- CLAU
 
 No lint level was changed and no gate command was added.
 
-## Open decisions for the user
+## Decisions (resolved)
 
-The four gate commands cannot catch these three gaps on stable Rust 1.97.1. Each was verified in research (RESEARCH.md Open Questions 1 to 3) and is demonstrated again as G-01 to G-03 in 01-GATE-EVIDENCE.md. This phase does not resolve them: it does not change the CLAUDE.md lint levels and it does not add a gate command.
+The user resolved all three in the UAT session of 2026-10-09 (01-UAT.md tests 1 to 3). G-01 to G-03 above are the before-state. The closing proofs are in "Gap closure (01-04)" at the end of this file.
 
-1. **An inner `#![allow(..., reason = "...")]` passes.** clippy's `allow_attributes` only lints outer `#[allow]`. `#![allow(clippy::unwrap_used, reason = "...")]` plus an `unwrap()` passes `cargo clippy --workspace --all-targets -- -D warnings`. A reasonless inner allow is still caught by `allow_attributes_without_reason`. Options: (A) accept and document the gap; (B) raise `unwrap_used`, `expect_used`, and `indexing_slicing` to `forbid`, which also makes `#[expect]` impossible for those three and is an edit to CLAUDE.md Code rules.
-2. **A crate that omits `[lints] workspace = true` escapes every workspace lint.** Cargo rejects a partial override but not a missing table. Options: (A) the one-time check this phase runs, plus review of every new crate manifest; (B) a `.cargo/config.toml` `[build] rustflags` backstop (`-Funsafe_code`, `-Dclippy::unwrap_used`, `-Dclippy::expect_used`, `-Dclippy::indexing_slicing`), which duplicates the lint list, is silently overridden by a `RUSTFLAGS` environment variable, and is not one of D-01's policy files.
-3. **`broken_intra_doc_links = "deny"` is enforced only by `cargo doc`.** `cargo clippy` and `cargo test` ignore `[workspace.lints.rustdoc]`; only `cargo doc --workspace --no-deps` fails on a broken link. Options: (A) add `cargo doc --workspace --no-deps` as a fifth command, which changes CLAUDE.md Commands and ROADMAP Phase 1 criterion 1; (B) document that the rustdoc table takes effect only when docs are built.
+1. **An inner `#![allow(..., reason = "...")]` passed.** Chosen: (B). `unwrap_used`, `expect_used`, and `indexing_slicing` are `forbid` in `Cargo.toml` and in the CLAUDE.md Code rules. Closed: G-01-CLOSED. Consequences: `#[expect]` is no longer possible for those three (R-01). For other lints `#[expect]` still passes (R-02), and the gate still does not catch an inner `allow` with a reason (R-03). `#[derive(clap::Parser)]` fails clippy (F-01), while the clap builder API (F-02) and serde and thiserror derives (F-03) pass.
+2. **A crate that omits `[lints] workspace = true` escaped every workspace lint.** Chosen: (A) and (B). (A) is D-15 in 01-CONTEXT.md: every plan that adds a crate runs the C-01 check. (B) is `.cargo/config.toml` with `[build] rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]`, at `forbid` to match decision 1. Closed: G-02-CLOSED. Dependencies are unaffected: B-01. Caveats: the four lints are duplicated, and a `RUSTFLAGS` environment variable silently replaces the backstop (shown in G-02-CLOSED).
+3. **`broken_intra_doc_links = "deny"` was enforced only by `cargo doc`.** Chosen: (A). `cargo doc --workspace --no-deps` is the fifth gate command in CLAUDE.md Commands, ROADMAP Phase 1 criterion 1, REQUIREMENTS GATE-02, and 01-CONTEXT.md D-01. Closed: G-03-CLOSED, with no `RUSTDOCFLAGS`.
 
 
 ## cargo clean
@@ -7115,3 +7115,135 @@ warning: build failed, waiting for other jobs to finish...
 ```
 
 RUSTDOCFLAGS check: `printenv RUSTDOCFLAGS` printed nothing, and `grep -c rustdocflags .cargo/config.toml` printed `0`.
+
+### C-01-RERUN: every crate manifest inherits the workspace lints
+
+Requirement: D-15
+
+Command: `for f in crates/*/Cargo.toml; do grep -A1 -xF '[lints]' "$f" | grep -qxF 'workspace = true' && echo "ok $f" || echo "MISSING $f"; done`
+
+```text
+ok crates/minos-backend-krun/Cargo.toml
+ok crates/minos-cli/Cargo.toml
+ok crates/minos-core/Cargo.toml
+ok crates/minos-guest/Cargo.toml
+ok crates/minos-loop/Cargo.toml
+ok crates/minos-propose/Cargo.toml
+ok crates/minos-runner/Cargo.toml
+ok crates/minos-sandbox/Cargo.toml
+ok crates/minos-store/Cargo.toml
+ok crates/minos-vmm/Cargo.toml
+```
+
+### Final gate (five commands)
+
+The five gate commands on the final tree (after the 01-CONTEXT.md, REQUIREMENTS.md, ROADMAP.md, and PROJECT.md wording edits), run from the repository root. Only each command's closing summary lines are shown, verbatim.
+
+Command: `cargo fmt --all --check`
+
+Exit code: 0
+
+```text
+(no output)
+```
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+```
+
+Command: `cargo test --workspace`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-52d5905ac48406d1)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos-318232a1b6d97755)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_core-c619c5be5a10c8c9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_guest-3a96ca21e5db09e7)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_loop-994e138925915d56)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_propose-1a9a8fd769d6a47b)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_runner-89243ff6043495d6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_sandbox-dcc21162d5b68e3e)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_store-4edbb133c2d25261)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_vmm-0703513a634d49f4)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_backend_krun
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_loop
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_propose
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_runner
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_sandbox
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_store
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+Command: `cargo doc --workspace --no-deps`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+   Generated /Users/seanmcauliffe/Repos/minos/target/doc/minos_backend_krun/index.html and 9 other files
+```
+
+### Invariant check (01-04)
+
+Command: `git diff --numstat c4b5bab HEAD -- CLAUDE.md`
+
+```text
+6	3	CLAUDE.md
+```
+
+Command: `git diff --quiet c4b5bab HEAD -- rules; echo $?`
+
+```text
+0
+```
+
+Command: `git ls-files .cargo`
+
+```text
+.cargo/config.toml
+```
+
+`git diff c4b5bab HEAD -- CLAUDE.md` shows changes in exactly two blocks: the Code rules TOML fence (the three clippy lints from `"deny"` to `"forbid"`, plus the one-sentence paragraph and a blank line after the fence) and the Commands block (the new `cargo doc --workspace --no-deps` line); rules/ is unchanged.
+
+### cargo clean (01-04)
+
+Run from the repository root after every verification above passed (GATE-06). No cargo command was run after it.
+
+Command: `cargo clean`
+
+Exit code: 0
+
+```text
+     Removed 5800 files, 1.3GiB total
+```

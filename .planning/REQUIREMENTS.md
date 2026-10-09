@@ -9,11 +9,11 @@ Milestone v1 is local-only on macOS arm64. Every requirement below is testable o
 
 ### Workspace and Gates (GATE)
 
-- [x] **GATE-01**: Workspace builds on rustc 1.97.1 / edition 2024 with `unsafe_code = "forbid"` and clippy `unwrap_used`, `expect_used`, `indexing_slicing` denied in `[workspace.lints]`
-- [x] **GATE-02**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo deny check` all pass as four plain cargo commands with no script in front of them, and `Cargo.lock` is committed
+- [x] **GATE-01**: Workspace builds on rustc 1.97.1 / edition 2024 with `unsafe_code` and clippy `unwrap_used`, `expect_used`, `indexing_slicing` all `forbid` in `[workspace.lints]`, repeated as a `.cargo/config.toml` `[build] rustflags` backstop for a member that omits `[lints] workspace = true`
+- [x] **GATE-02**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`, and `cargo doc --workspace --no-deps` all pass as five plain cargo commands with no script in front of them, and `Cargo.lock` is committed
 - [x] **GATE-03**: `deny.toml` requires `rev` on git dependencies, denies unknown registries and git sources, and allowlists build scripts
 - [x] **GATE-04**: `cargo deny check` fails if `minos-loop` or `minos-core` gains a dependency on `minos-sandbox` or any backend crate
-- [x] **GATE-05**: `minos-core` has a clippy `disallowed-methods` rule banning `SystemTime::now` and a `disallowed-types` rule banning `HashMap`; no `allow(clippy::...)` appears anywhere (only `#[expect(..., reason = ...)]`)
+- [x] **GATE-05**: `minos-core` has a clippy `disallowed-methods` rule banning `SystemTime::now` and a `disallowed-types` rule banning `HashMap`; no `allow(clippy::...)` appears anywhere (only `#[expect(..., reason = ...)]`, and not even that for the `forbid` lints `unwrap_used`, `expect_used`, and `indexing_slicing`)
 - [ ] **GATE-06**: Every phase ends with `cargo clean` after verification passes
 
 ### Spikes (SPIKE)
@@ -299,4 +299,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-09 after Phase 1 (GATE-02, GATE-04, GATE-05 reworded: the gate is four plain cargo commands with no script)*
+*Last updated: 2026-10-09 after Phase 1 gap closure (GATE-01, GATE-02, GATE-05 reworded: three clippy lints at forbid, a rustflags backstop, and `cargo doc --workspace --no-deps` as the fifth gate command)*

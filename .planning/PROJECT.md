@@ -29,7 +29,7 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 - [ ] `minos report` is a pure function of ledger and blobs, hashed, and `minos adopt` refuses without the acknowledged hash and only writes a patch file
 - [ ] Cost is recorded as usage, never dollars, and displayed as one `approx. cost` figure from a user-editable price table
 - [ ] A sample `optimize` project ships in the repo and the full loop runs on it end to end: `minos check`, `minos run --generations N`, `minos report`, `minos adopt`
-- [ ] Repo-wide gates: `cargo fmt --check`, clippy with `-D warnings` and the workspace lints (`unsafe_code = forbid`, `unwrap_used`, `expect_used`, `indexing_slicing` denied), `cargo test`, `cargo deny check`, committed `Cargo.lock`
+- [ ] Repo-wide gates: `cargo fmt --all --check`, clippy with `-D warnings` and the workspace lints (`unsafe_code`, `unwrap_used`, `expect_used`, `indexing_slicing`, all `forbid`), `cargo test`, `cargo deny check`, `cargo doc --no-deps`, committed `Cargo.lock`
 - [ ] The rules in `rules/` are followed in all code
 
 ### Out of Scope
