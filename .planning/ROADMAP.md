@@ -43,7 +43,7 @@ Facts that matter for scheduling:
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Workspace and Gates** - One `ci` script enforces lints, supply-chain policy, and crate layering from the first commit
+- [ ] **Phase 1: Workspace and Gates** - Four plain cargo commands enforce lints, supply-chain policy, and crate layering from the first commit
 - [ ] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md
 - [ ] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core`
 - [ ] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts
@@ -56,16 +56,16 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### Phase 1: Workspace and Gates
 
-**Goal**: Every line of code in the repo, from the first commit, is held to the workspace lints, the supply-chain policy, and the crate-layering rules by one `ci` script
+**Goal**: Every line of code in the repo, from the first commit, is held to the workspace lints, the supply-chain policy, and the crate-layering rules by four plain cargo commands (`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`), with all policy in Cargo-native configuration files and no script
 **Depends on**: Nothing (first phase)
 **Parallelism**: Unblocks Phases 2 and 3, which then run in parallel
 **Requirements**: GATE-01, GATE-02, GATE-03, GATE-04, GATE-05
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
 
-  1. On a fresh checkout with the v1 crate skeletons (including `minos-core`, `minos-loop`, and `minos-sandbox`), the single `ci` script runs `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo deny check` on rustc 1.97.1 with edition 2024 and passes, and `Cargo.lock` is committed (GATE-01, GATE-02)
-  2. Each deliberate code violation makes `ci` fail: an `unsafe` block, an `unwrap`, `expect`, or slice index, an `allow(clippy::...)` attribute (only `#[expect(..., reason = ...)]` passes), and a `SystemTime::now` or `HashMap` in `minos-core` (GATE-01, GATE-05)
-  3. Each supply-chain or layering violation makes `ci` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate (GATE-03, GATE-04)
+  1. On a fresh checkout with the v1 crate skeletons (including `minos-core`, `minos-loop`, and `minos-sandbox`), `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo deny check` all pass on rustc 1.97.1 with edition 2024, with no script in front of them, and `Cargo.lock` is committed (GATE-01, GATE-02)
+  2. Each deliberate code violation makes `cargo clippy --workspace --all-targets -- -D warnings` fail: an `unsafe` block, an `unwrap`, `expect`, or slice index, an `allow(clippy::...)` attribute (only `#[expect(..., reason = ...)]` passes), and a `SystemTime::now` or `HashMap` in `minos-core` (GATE-01, GATE-05)
+  3. Each supply-chain or layering violation makes `cargo deny check` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate; a normal `minos-core` to `minos-sandbox` edge fails earlier, as a Cargo dependency cycle (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
 
 **Plans**: 2/3 plans executed

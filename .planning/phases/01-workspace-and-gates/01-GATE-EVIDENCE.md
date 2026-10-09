@@ -6675,3 +6675,103 @@ warning[duplicate]: found 2 duplicate entries for crate 'syn'
 
 advisories ok, bans ok, licenses ok, sources ok
 ```
+
+## Final gate
+
+The four gate commands on the final tree (after the REQUIREMENTS.md and ROADMAP.md wording edits), run from the repository root. Only each command's closing summary lines are shown, verbatim.
+
+Command: `cargo fmt --all --check`
+
+Exit code: 0
+
+```text
+(no output)
+```
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
+```
+
+Command: `cargo test --workspace`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
+     Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-bda2b316f1f16fad)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos-0a774703e7599d0a)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_core-cae5489e7b9c95c9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_guest-d76265ead7088bad)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_loop-e38611b5e3892c40)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_propose-537621b17e99ad0a)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_runner-a4fda74d27c6ec2c)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_sandbox-f05f201c10f3f4b9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_store-0f568eafc6c6e157)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_vmm-ddae4c37ddaf60a6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_backend_krun
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_loop
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_propose
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_runner
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_sandbox
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_store
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+## Invariant check
+
+CLAUDE.md and rules/ are unchanged by this phase. `git diff --quiet HEAD -- CLAUDE.md rules` returned status 0 (no difference from HEAD), and `git log --format=%h 7195911..HEAD -- CLAUDE.md rules` printed nothing:
+
+```text
+```
+
+No lint level was changed and no gate command was added.
+
+## Open decisions for the user
+
+The four gate commands cannot catch these three gaps on stable Rust 1.97.1. Each was verified in research (RESEARCH.md Open Questions 1 to 3) and is demonstrated again as G-01 to G-03 in 01-GATE-EVIDENCE.md. This phase does not resolve them: it does not change the CLAUDE.md lint levels and it does not add a gate command.
+
+1. **An inner `#![allow(..., reason = "...")]` passes.** clippy's `allow_attributes` only lints outer `#[allow]`. `#![allow(clippy::unwrap_used, reason = "...")]` plus an `unwrap()` passes `cargo clippy --workspace --all-targets -- -D warnings`. A reasonless inner allow is still caught by `allow_attributes_without_reason`. Options: (A) accept and document the gap; (B) raise `unwrap_used`, `expect_used`, and `indexing_slicing` to `forbid`, which also makes `#[expect]` impossible for those three and is an edit to CLAUDE.md Code rules.
+2. **A crate that omits `[lints] workspace = true` escapes every workspace lint.** Cargo rejects a partial override but not a missing table. Options: (A) the one-time check this phase runs, plus review of every new crate manifest; (B) a `.cargo/config.toml` `[build] rustflags` backstop (`-Funsafe_code`, `-Dclippy::unwrap_used`, `-Dclippy::expect_used`, `-Dclippy::indexing_slicing`), which duplicates the lint list, is silently overridden by a `RUSTFLAGS` environment variable, and is not one of D-01's policy files.
+3. **`broken_intra_doc_links = "deny"` is enforced only by `cargo doc`.** `cargo clippy` and `cargo test` ignore `[workspace.lints.rustdoc]`; only `cargo doc --workspace --no-deps` fails on a broken link. Options: (A) add `cargo doc --workspace --no-deps` as a fifth command, which changes CLAUDE.md Commands and ROADMAP Phase 1 criterion 1; (B) document that the rustdoc table takes effect only when docs are built.
+
+
+## cargo clean
+
+Run from the repository root after every verification above passed (GATE-06). No cargo command was run after it.
+
+Command: `cargo clean`
+
+Exit code: 0
+
+```text
+     Removed 4871 files, 1.1GiB total
+```
