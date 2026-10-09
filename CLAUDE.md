@@ -104,10 +104,12 @@ The bare `minos` crate name is taken on crates.io. Publish as `minos-*`; the bin
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
-indexing_slicing = "deny"
+unwrap_used = "forbid"
+expect_used = "forbid"
+indexing_slicing = "forbid"
 ```
+
+The three clippy lints are `forbid`, not `deny`, so neither `#[allow(...)]` nor `#[expect(...)]` can silence them anywhere: write the code so they never fire.
 
 - **Adhere to rules/** ALL CODE MUST ADHERE TO RULES. there are no exceptions, whatsoever.
 - **Deserialization is validation.** Any type parsed from a manifest, ledger row, checkpoint, or sandbox output uses `#[serde(try_from = ...)]` and goes through the same constructor as hand-built values. Raw input structs use `#[serde(deny_unknown_fields)]`.

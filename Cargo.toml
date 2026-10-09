@@ -22,10 +22,10 @@ perf        = { level = "warn", priority = -1 }
 style       = { level = "warn", priority = -1 }
 pedantic    = { level = "warn", priority = -1 }
 cargo       = { level = "warn", priority = -1 }
-# Locked by CLAUDE.md
-unwrap_used = "deny"
-expect_used = "deny"
-indexing_slicing = "deny"
+# Locked by CLAUDE.md at forbid (UAT test 1): no allow at any position and no #[expect] can lower them
+unwrap_used = "forbid"
+expect_used = "forbid"
+indexing_slicing = "forbid"
 # D-02 / GATE-05: only #[expect(..., reason = "...")] may suppress a lint
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"

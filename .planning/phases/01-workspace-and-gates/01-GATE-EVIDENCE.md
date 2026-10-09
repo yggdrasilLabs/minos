@@ -6775,3 +6775,164 @@ Exit code: 0
 ```text
      Removed 4871 files, 1.1GiB total
 ```
+
+## Gap closure (01-04)
+
+Date: 2026-10-09
+
+- `rustc --version`: rustc 1.97.1 (8bab26f4f 2026-07-14)
+- `cargo clippy --version`: clippy 0.1.97 (8bab26f4f6 2026-07-14)
+- `cargo deny --version`: cargo-deny 0.20.2
+- HEAD at start of closure: `e0ca5ece62c21fc5fbc85c06662cc761098210cd`
+
+This section applies the user's three decisions from 01-UAT.md tests 1 to 3 and records each closing proof under the same protocol as the proofs above: one edit at a time, the gate command, verbatim output, and a revert from HEAD. The G-01 to G-03 sections above are the before-state and are unchanged.
+
+### G-01-CLOSED: inner allow with a reason under forbid
+
+Requirement: GATE-05, UAT test 1
+
+Edit: crates/minos-store/src/lib.rs: inserted `#![allow(clippy::unwrap_used, reason = "gate gap demonstration")]` on the line after the `//!` doc, and appended `/// Gate self-test probe.`, a `# Panics` section (`/// Panics if the input is not a number.`), `#[must_use]`, `pub fn gate_probe(s: &str) -> u8 { s.parse::<u8>().unwrap() }`
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 101
+
+```text
+error[E0453]: allow(clippy::unwrap_used) incompatible with previous forbid
+ --> crates/minos-store/src/lib.rs:2:10
+  |
+2 | #![allow(clippy::unwrap_used, reason = "gate gap demonstration")]
+  |          ^^^^^^^^^^^^^^^^^^^ overruled by previous forbid
+  |
+  = note: `forbid` lint level was set on command line (`-F clippy::unwrap_used`)
+
+For more information about this error, try `rustc --explain E0453`.
+error: could not compile `minos-store` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `minos-store` (lib test) due to 1 previous error
+```
+
+### R-01: V-07 re-run, expect on a forbidden lint
+
+Requirement: GATE-05, D-02
+
+Edit: crates/minos-store/src/lib.rs: appended `/// Gate self-test probe.`, a `# Panics` section (`/// Panics if the slice is empty.`), `#[expect(clippy::indexing_slicing, reason = "gate self-test positive control")]`, `#[must_use]`, `pub fn gate_probe(x: &[u8]) -> u8 { x[0] }` (the 01-03 V-07 probe)
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 101
+
+```text
+error[E0453]: expect(clippy::indexing_slicing) incompatible with previous forbid
+ --> crates/minos-store/src/lib.rs:8:10
+  |
+8 | #[expect(clippy::indexing_slicing, reason = "gate self-test positive control")]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^ overruled by previous forbid
+  |
+  = note: `forbid` lint level was set on command line (`-F clippy::indexing_slicing`)
+
+For more information about this error, try `rustc --explain E0453`.
+error: could not compile `minos-store` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `minos-store` (lib test) due to 1 previous error
+```
+
+### R-02: expect on a lint that is not forbidden
+
+Requirement: GATE-05, D-02
+
+Edit: crates/minos-store/src/lib.rs: appended `/// Gate self-test probe.`, `#[expect(clippy::get_first, reason = "gate self-test positive control")]`, `#[must_use]`, `pub fn gate_probe(x: &[u8]) -> Option<&u8> { x.get(0) }` (no Panics section)
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+```
+
+### R-03: inner allow with a reason on a lint that is not forbidden
+
+Requirement: GATE-05, residual of UAT test 1
+
+Edit: crates/minos-store/src/lib.rs: inserted `#![allow(clippy::get_first, reason = "gate residual demonstration")]` on the line after the `//!` doc, and appended `/// Gate self-test probe.`, `#[must_use]`, `pub fn gate_probe(x: &[u8]) -> Option<&u8> { x.get(0) }` (R-02's probe without its expect attribute; no Panics section)
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+```
+
+### F-01: clap derive under forbid
+
+Requirement: D-12, consequence of decision B (UAT test 1)
+
+Edit: crates/minos-cli/src/main.rs: replaced the line `fn main() {}` with `/// Gate self-test probe.`, `#[derive(clap::Parser)]`, `struct GateProbe { /// Gate self-test argument. #[arg(long)] n: u8 }`, and `fn main() { let probe = <GateProbe as clap::Parser>::parse(); let _ = probe.n; }`
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 101
+
+```text
+error[E0453]: allow(clippy::restriction) incompatible with previous forbid
+ --> crates/minos-cli/src/main.rs:4:10
+  |
+4 | #[derive(clap::Parser)]
+  |          ^^^^^^^^^^^^ overruled by previous forbid
+  |
+  = note: `forbid` lint level was set on command line (`-F clippy::indexing_slicing`)
+  = note: this error originates in the derive macro `clap::Parser` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0453]: allow(clippy::restriction) incompatible with previous forbid
+ --> crates/minos-cli/src/main.rs:4:10
+  |
+4 | #[derive(clap::Parser)]
+  |          ^^^^^^^^^^^^ overruled by previous forbid
+  |
+  = note: `forbid` lint level was set on command line (`-F clippy::expect_used`)
+  = note: this error originates in the derive macro `clap::Parser` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0453]: allow(clippy::restriction) incompatible with previous forbid
+ --> crates/minos-cli/src/main.rs:4:10
+  |
+4 | #[derive(clap::Parser)]
+  |          ^^^^^^^^^^^^ overruled by previous forbid
+  |
+  = note: `forbid` lint level was set on command line (`-F clippy::unwrap_used`)
+  = note: this error originates in the derive macro `clap::Parser` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+For more information about this error, try `rustc --explain E0453`.
+error: could not compile `minos-cli` (bin "minos") due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `minos-cli` (bin "minos" test) due to 3 previous errors
+```
+
+### F-02: clap builder API under forbid
+
+Requirement: D-12, positive control
+
+Edit: crates/minos-cli/src/main.rs: replaced the line `fn main() {}` with `fn main() { let matches = clap::Command::new("minos").arg(clap::Arg::new("n").long("n")).get_matches(); let _ = matches.get_one::<String>("n"); }`
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+```
+
+### F-03: serde and thiserror derives under forbid
+
+Requirement: D-12, positive control
+
+Edit: crates/minos-store/src/lib.rs: appended `/// Gate self-test probe.`, `#[derive(Debug, serde::Serialize, serde::Deserialize)]`, `#[serde(deny_unknown_fields)]`, `pub struct GateProbe { /// Gate self-test field. pub n: u8 }`, then `/// Gate self-test probe error.`, `#[derive(Debug, thiserror::Error)]`, `pub enum GateProbeError { /// Gate self-test variant. #[error("gate probe {0}")] Probe(u8) }`
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+```
