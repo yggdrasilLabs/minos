@@ -425,6 +425,8 @@ cargo doc --workspace --no-deps          # the only command that enforces [works
 cargo lambda build --release --arm64     # Lambda functions; plain cargo build links the wrong glibc
 ```
 
+Every phase verification also runs the C-02 check, `grep -rnE '#!?\[allow\(' crates --include='*.rs'`, which must print nothing. An inner `#![allow(..., reason = "...")]` on any lint that is not `forbid` passes `cargo clippy` (01-GATE-EVIDENCE.md R-03), so for those lints this grep, not the gate, is what enforces the no-`allow` rule.
+
 Run `cargo clean` at the end of every phase, after verification passes and before the phase is marked complete. No exceptions.
 
 The durable SDK requires Rust 1.94.1 or newer and edition 2024.

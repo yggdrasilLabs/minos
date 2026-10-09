@@ -26,7 +26,9 @@ cargo       = { level = "warn", priority = -1 }
 unwrap_used = "forbid"
 expect_used = "forbid"
 indexing_slicing = "forbid"
-# D-02 / GATE-05: only #[expect(..., reason = "...")] may suppress a lint
+# D-02 / GATE-05: outer #[allow] is denied and every allow/expect needs a reason. The three forbid
+# lints above cannot be suppressed at all. For every other lint an inner #![allow(..., reason)]
+# still passes clippy (01-GATE-EVIDENCE.md R-03); the per-phase C-02 grep catches it, not the gate.
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
 # rules/lint-unsafe-doc.md (moot while unsafe_code is forbid, but kept as defense in depth)

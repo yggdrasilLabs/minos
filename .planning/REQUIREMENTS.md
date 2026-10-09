@@ -13,7 +13,7 @@ Milestone v1 is local-only on macOS arm64. Every requirement below is testable o
 - [x] **GATE-02**: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`, and `cargo doc --workspace --no-deps` all pass as five plain cargo commands with no script in front of them, and `Cargo.lock` is committed
 - [x] **GATE-03**: `deny.toml` requires `rev` on git dependencies, denies unknown registries and git sources, and allowlists build scripts
 - [x] **GATE-04**: `cargo deny check` fails if `minos-loop` or `minos-core` gains a dependency on `minos-sandbox` or any backend crate
-- [x] **GATE-05**: `minos-core` has a clippy `disallowed-methods` rule banning `SystemTime::now` and a `disallowed-types` rule banning `HashMap`; no `allow(clippy::...)` appears anywhere (only `#[expect(..., reason = ...)]`, and not even that for the `forbid` lints `unwrap_used`, `expect_used`, and `indexing_slicing`)
+- [x] **GATE-05**: `minos-core` has a clippy `disallowed-methods` rule banning `SystemTime::now` and a `disallowed-types` rule banning `HashMap`; no `allow(clippy::...)` appears anywhere (only `#[expect(..., reason = ...)]`, and not even that for the `forbid` lints `unwrap_used`, `expect_used`, and `indexing_slicing`; for lints that are not `forbid`, the per-phase C-02 grep enforces this, not clippy)
 - [ ] **GATE-06**: Every phase ends with `cargo clean` after verification passes
 
 ### Spikes (SPIKE)
