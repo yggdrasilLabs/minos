@@ -377,7 +377,7 @@ pub async fn launch(&self, plan: LaunchPlan, _ok: Cleared) -> Result<Running, La
 
 The ledger stores usage, never dollars: vCPU-seconds, GB-seconds, snapshot megabytes read, GPU seconds, tokens in and out, durable operations, and the spot price at launch when spot was used. Dollars are derived from usage and a user-editable price table at `~/.config/minos/prices.toml`.
 
-- Rates are parsed from strings as exact decimals with nano-dollar precision. Totals are integer micro-dollars. No floats.
+- Rates are parsed from strings as exact decimals with pico-dollar precision (10^-12 USD; published AWS rates have 10 fractional digits). Totals are integer micro-dollars. No floats.
 - Output shows one figure, always measured: `approx. cost: $31.40`. Never print an estimate, and never use the word "exact". One type owns that formatting, so no command prints a bare dollar figure.
 - Spend caps compare the manifest limit against metered spend, checked before each generation.
 
