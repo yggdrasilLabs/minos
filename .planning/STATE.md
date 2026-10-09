@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
+current_phase: 01
 current_phase_name: Workspace and Gates
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-10-09T21:20:37.008Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-10-09T21:28:08.465Z"
 last_activity: 2026-10-09
-last_activity_desc: Roadmap created (8 phases; 96 requirements mapped to one phase each, GATE-06 cross-cutting)
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 1: Workspace and Gates
+**Current focus:** Phase 01 — Workspace and Gates
 
 ## Current Position
 
-Phase: 1 of 8 (Workspace and Gates)
-Plan: 0 of TBD in current phase
+Phase: 01 (Workspace and Gates) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-10-09 — Roadmap created (8 phases; 96 requirements mapped to one phase each, GATE-06 cross-cutting)
+Last activity: 2026-10-09 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 3min | 3 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,8 @@ Recent decisions affecting current work:
 - [Roadmap]: DOCS-05 (CLAUDE.md v1 amendments) lands in Phase 2 with the spike results, so later phases build from a corrected design of record
 - [Roadmap]: CLI-11 (deterministic, secret-scanned source tarball) lands in Phase 4 because `env build` (Phase 5) and every experiment need it
 - [Roadmap]: Phase 7 loop plans run against fakes before Phase 5 finishes; only the runner's real-VM plans wait on the backend
+- [Phase 01]: Workspace config taken verbatim from 01-RESEARCH.md Code Examples; lint carve-outs limited to too_many_lines, similar_names, struct_excessive_bools, multiple_crate_versions
+- [Phase 01]: rustix and vsock sit under a cfg(target_os = linux) target table in minos-guest
 
 ### Pending Todos
 
@@ -91,6 +94,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-09T20:25:59.518Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-workspace-and-gates/01-CONTEXT.md
+Last session: 2026-10-09T21:28:08.381Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None

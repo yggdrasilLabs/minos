@@ -9,11 +9,11 @@ Milestone v1 is local-only on macOS arm64. Every requirement below is testable o
 
 ### Workspace and Gates (GATE)
 
-- [ ] **GATE-01**: Workspace builds on rustc 1.97.1 / edition 2024 with `unsafe_code = "forbid"` and clippy `unwrap_used`, `expect_used`, `indexing_slicing` denied in `[workspace.lints]`
+- [x] **GATE-01**: Workspace builds on rustc 1.97.1 / edition 2024 with `unsafe_code = "forbid"` and clippy `unwrap_used`, `expect_used`, `indexing_slicing` denied in `[workspace.lints]`
 - [ ] **GATE-02**: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo deny check` all pass from a single `ci` script, and `Cargo.lock` is committed
 - [ ] **GATE-03**: `deny.toml` requires `rev` on git dependencies, denies unknown registries and git sources, and allowlists build scripts
 - [ ] **GATE-04**: A CI check fails if `minos-loop` or `minos-core` gains a dependency on `minos-sandbox` or any backend crate
-- [ ] **GATE-05**: `minos-core` has a clippy `disallowed-methods` rule banning `SystemTime::now` and `HashMap`; no `allow(clippy::...)` appears anywhere (only `#[expect(..., reason = ...)]`)
+- [x] **GATE-05**: `minos-core` has a clippy `disallowed-methods` rule banning `SystemTime::now` and `HashMap`; no `allow(clippy::...)` appears anywhere (only `#[expect(..., reason = ...)]`)
 - [ ] **GATE-06**: Every phase ends with `cargo clean` after verification passes
 
 ### Spikes (SPIKE)
@@ -193,11 +193,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GATE-01 | Phase 1 | Pending |
+| GATE-01 | Phase 1 | Complete |
 | GATE-02 | Phase 1 | Pending |
 | GATE-03 | Phase 1 | Pending |
 | GATE-04 | Phase 1 | Pending |
-| GATE-05 | Phase 1 | Pending |
+| GATE-05 | Phase 1 | Complete |
 | GATE-06 | All phases (cross-cutting) | Pending |
 | SPIKE-01 | Phase 2 | Pending |
 | SPIKE-02 | Phase 2 | Pending |
@@ -292,6 +292,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOCS-05 | Phase 2 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 97 total
 - Mapped to phases: 97 (96 to exactly one phase; GATE-06 is cross-cutting and applies to every phase)
 - Unmapped: 0 ✓
