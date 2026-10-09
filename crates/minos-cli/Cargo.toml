@@ -22,6 +22,9 @@ minos-backend-krun.workspace = true
 minos-propose.workspace = true
 minos-runner.workspace = true
 minos-loop.workspace = true
+# PENDING USER DECISION: the workspace enables clap's `derive` feature, but #[derive(clap::Parser)] fails the
+# gate under the forbid lints (01-GATE-EVIDENCE.md F-01); the builder API passes (F-02). Use the builder
+# API, or bring the decision to the user first. See the clap entry in the root [workspace.dependencies].
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
