@@ -193,13 +193,109 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmap) | | |
+| GATE-01 | Phase 1 | Pending |
+| GATE-02 | Phase 1 | Pending |
+| GATE-03 | Phase 1 | Pending |
+| GATE-04 | Phase 1 | Pending |
+| GATE-05 | Phase 1 | Pending |
+| GATE-06 | All phases (cross-cutting) | Pending |
+| SPIKE-01 | Phase 2 | Pending |
+| SPIKE-02 | Phase 2 | Pending |
+| SPIKE-03 | Phase 2 | Pending |
+| SPIKE-04 | Phase 2 | Pending |
+| SPIKE-05 | Phase 2 | Pending |
+| SPIKE-06 | Phase 2 | Pending |
+| SPIKE-07 | Phase 2 | Pending |
+| SPIKE-08 | Phase 2 | Pending |
+| CORE-01 | Phase 3 | Pending |
+| CORE-02 | Phase 3 | Pending |
+| CORE-03 | Phase 3 | Pending |
+| CORE-04 | Phase 3 | Pending |
+| CORE-05 | Phase 3 | Pending |
+| CORE-06 | Phase 3 | Pending |
+| CORE-07 | Phase 3 | Pending |
+| CORE-08 | Phase 3 | Pending |
+| CORE-09 | Phase 3 | Pending |
+| CORE-10 | Phase 3 | Pending |
+| CORE-11 | Phase 3 | Pending |
+| CORE-12 | Phase 3 | Pending |
+| CORE-13 | Phase 3 | Pending |
+| CORE-14 | Phase 3 | Pending |
+| CORE-15 | Phase 3 | Pending |
+| CORE-16 | Phase 3 | Pending |
+| CORE-17 | Phase 3 | Pending |
+| STORE-01 | Phase 4 | Pending |
+| STORE-02 | Phase 4 | Pending |
+| STORE-03 | Phase 4 | Pending |
+| STORE-04 | Phase 4 | Pending |
+| SBX-01 | Phase 4 | Pending |
+| SBX-02 | Phase 4 | Pending |
+| SBX-03 | Phase 4 | Pending |
+| SBX-04 | Phase 4 | Pending |
+| SBX-05 | Phase 4 | Pending |
+| SBX-06 | Phase 4 | Pending |
+| GUEST-01 | Phase 5 | Pending |
+| GUEST-02 | Phase 5 | Pending |
+| GUEST-03 | Phase 5 | Pending |
+| GUEST-04 | Phase 5 | Pending |
+| GUEST-05 | Phase 5 | Pending |
+| KRUN-01 | Phase 5 | Pending |
+| KRUN-02 | Phase 5 | Pending |
+| KRUN-03 | Phase 5 | Pending |
+| KRUN-04 | Phase 5 | Pending |
+| KRUN-05 | Phase 5 | Pending |
+| KRUN-06 | Phase 5 | Pending |
+| KRUN-07 | Phase 5 | Pending |
+| KRUN-08 | Phase 5 | Pending |
+| KRUN-09 | Phase 5 | Pending |
+| KRUN-10 | Phase 5 | Pending |
+| PROP-01 | Phase 6 | Pending |
+| PROP-02 | Phase 6 | Pending |
+| PROP-03 | Phase 6 | Pending |
+| PROP-04 | Phase 6 | Pending |
+| PROP-05 | Phase 6 | Pending |
+| PROP-06 | Phase 6 | Pending |
+| PROP-07 | Phase 6 | Pending |
+| PROP-08 | Phase 6 | Pending |
+| PROP-09 | Phase 6 | Pending |
+| PROP-10 | Phase 6 | Pending |
+| LOOP-01 | Phase 7 | Pending |
+| LOOP-02 | Phase 7 | Pending |
+| LOOP-03 | Phase 7 | Pending |
+| LOOP-04 | Phase 7 | Pending |
+| LOOP-05 | Phase 7 | Pending |
+| LOOP-06 | Phase 7 | Pending |
+| LOOP-07 | Phase 7 | Pending |
+| LOOP-08 | Phase 7 | Pending |
+| LOOP-09 | Phase 7 | Pending |
+| JUDGE-01 | Phase 7 | Pending |
+| JUDGE-02 | Phase 8 | Pending |
+| JUDGE-03 | Phase 7 | Pending |
+| JUDGE-04 | Phase 7 | Pending |
+| CLI-01 | Phase 8 | Pending |
+| CLI-02 | Phase 5 | Pending |
+| CLI-03 | Phase 5 | Pending |
+| CLI-04 | Phase 7 | Pending |
+| CLI-05 | Phase 8 | Pending |
+| CLI-06 | Phase 8 | Pending |
+| CLI-07 | Phase 8 | Pending |
+| CLI-08 | Phase 8 | Pending |
+| CLI-09 | Phase 8 | Pending |
+| CLI-10 | Phase 8 | Pending |
+| CLI-11 | Phase 4 | Pending |
+| COST-01 | Phase 3 | Pending |
+| COST-02 | Phase 8 | Pending |
+| DOCS-01 | Phase 8 | Pending |
+| DOCS-02 | Phase 8 | Pending |
+| DOCS-03 | Phase 8 | Pending |
+| DOCS-04 | Phase 8 | Pending |
+| DOCS-05 | Phase 2 | Pending |
 
 **Coverage:**
 - v1 requirements: 97 total
-- Mapped to phases: 0
-- Unmapped: 97 ⚠️
+- Mapped to phases: 97 (96 to exactly one phase; GATE-06 is cross-cutting and applies to every phase)
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-09 after initial definition*
+*Last updated: 2026-10-09 after roadmap creation (traceability filled)*
