@@ -9,6 +9,12 @@ rust-version = "1.97.1"  # patch versions are accepted
 license = "Apache-2.0 OR MIT"
 publish = false          # v1 publishes nothing; also makes clippy::cargo_common_metadata skip the crate
 
+[profile.release]
+# Every binary parses hostile input (sandbox output, diffs, job specs). Integer overflow in a size cap,
+# a length-prefixed hash, or pico-dollar accumulation must panic, not wrap, without relying on each call site.
+# panic = "abort" for minos-guest (PID 1 has nothing to unwind into) belongs to the phase that gives it a body.
+overflow-checks = true
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
