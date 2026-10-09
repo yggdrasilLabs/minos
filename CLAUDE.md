@@ -81,19 +81,29 @@ Running an off-the-shelf coding agent inside the VM is out of scope. It needs ne
 ```
 crates/
   minos-core/            types, validation, policy, routing, report; sync, no I/O
-  minos-store/           Ledger and Blobs traits; DynamoDB/S3 and in-memory impls
+  minos-store/           Ledger and Blobs traits; file-backed and in-memory impls
   minos-sandbox/         roles, specs, sealed plans, Untrusted<T>, Backend trait
-  minos-backend-lambda/  LaunchPlan -> Lambda MicroVM
-  minos-backend-krun/    LaunchPlan -> libkrun VM
-  minos-backend-chv/     LaunchPlan -> Cloud Hypervisor VM with VFIO
+  minos-backend-krun/    LaunchPlan -> libkrun VM, driven through the minos-vmm process
+  minos-vmm/             per-VM launcher; the only binary that links the VMM crate
   minos-guest/           static binary inside every VM
   minos-propose/         prompt assembly, model client, the four proposer tiers
-  minos-orchestrator/    the durable functions: run, generation
-  minos-runner/          CPU runner function and the GPU daemon
-  minos-cli/             installs the `minos` binary
+  minos-runner/          local runner pipeline, generic over Backend
+  minos-loop/            local generation driver: propose, run, judge, select
+  minos-cli/             installs the `minos` binary; the only place concrete types meet
 ```
 
-Dependency direction is strict: `core <- store, sandbox <- backends <- runner`. The orchestrator depends only on `core` and `store`, so it never links backend code and never sees raw sandbox output. Backends are separate crates, not feature flags, so a Lambda binary never links hypervisor code.
+Later milestones, not in the workspace yet: `minos-backend-lambda` (LaunchPlan -> Lambda MicroVM), `minos-backend-chv` (Cloud Hypervisor VM with VFIO), `minos-orchestrator` (the durable functions: run, generation), `minos-store-aws` (DynamoDB and S3), and the GPU daemon.
+
+Dependency direction is strict, and `deny.toml` enforces it with `[bans]` wrapper entries, so a crate that links outside its lane is refused by `cargo deny check`:
+
+- `core` depends on no internal crate; `store`, `sandbox`, `propose`, and `guest` depend on `core`.
+- `backend-krun` depends on `sandbox` (and `core`). It is the only crate that knows about `minos-vmm`.
+- `runner` depends on `core`, `store`, and `sandbox`, and is generic over `Backend`. It never names a backend crate.
+- `loop` depends on `core`, `store`, and `propose`. It never links `sandbox` or a backend, so it never sees raw sandbox output. The orchestrator, when it arrives, follows the same rule.
+- `vmm` depends on no internal crate.
+- `cli` composes everything and is the only crate that picks a concrete backend (`Runner<KrunBackend, FileStore>`).
+
+Backends are separate crates, not feature flags, so a Lambda binary never links hypervisor code.
 
 The bare `minos` crate name is taken on crates.io. Publish as `minos-*`; the binary is `minos`.
 
@@ -218,7 +228,7 @@ impl Untrusted<Bytes> {
 }
 ```
 
-`Backend` has two methods, `capabilities()` and `launch(plan)`. With three backends, use an `AnyBackend` enum, not trait objects. Dropping a `Running` handle destroys the VM.
+`Backend` has two methods, `capabilities()` and `launch(plan)`. The runner is generic over `B: Backend`. Each binary picks its backend concretely, and a binary that can choose among several at runtime defines its own enum (for example `LocalBackend { Krun, Chv }`). Never use trait objects, and never put a backend enum in `minos-sandbox`. Dropping a `Running` handle destroys the VM.
 
 Launches are idempotent: derive the client token from `ExperimentId` plus role. Every launch sets a hard maximum duration, so nothing depends on cleanup running.
 
