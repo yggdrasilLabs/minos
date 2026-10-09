@@ -1,0 +1,20 @@
+[package]
+name = "minos-guest"
+description = "Guest binary that runs as PID 1 inside every VM"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+minos-core.workspace = true
+thiserror.workspace = true
+tar.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
+vsock.workspace = true
