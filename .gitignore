@@ -1,1 +1,5 @@
 /target
+# insta pending snapshots: a local mismatch writes these next to the test; accept with cargo-insta, never commit them.
+# proptest-regressions/ stays committed.
+*.snap.new
+*.pending-snap
