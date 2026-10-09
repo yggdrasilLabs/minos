@@ -1,0 +1,22 @@
+[package]
+name = "minos-store"
+description = "Ledger and blob store traits with in-memory and file implementations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+minos-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+base16ct.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

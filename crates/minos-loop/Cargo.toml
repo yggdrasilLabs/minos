@@ -1,0 +1,17 @@
+[package]
+name = "minos-loop"
+description = "Local generation driver, resumable from the ledger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+minos-core.workspace = true
+minos-store.workspace = true
+minos-propose.workspace = true
+thiserror.workspace = true
