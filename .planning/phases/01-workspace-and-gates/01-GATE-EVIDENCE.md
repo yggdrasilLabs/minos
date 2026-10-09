@@ -510,3 +510,6168 @@ Command: `cargo clippy --workspace --all-targets -- -D warnings 2>&1 | grep -ci 
 ```text
 0
 ```
+
+## Supply-chain and layering proofs
+
+### V-11: git dependency without rev
+
+Requirement: GATE-03
+
+Edit: crates/minos-store/Cargo.toml: added `cfg-if = { git = "https://github.com/rust-lang/cfg-if", branch = "main" }` under `[dependencies]`
+
+Command: `cargo deny check sources`
+
+Exit code: 8
+
+```text
+error[git-source-underspecified]: 'git' source is underspecified, expected 'rev', but found 'branch'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:22:14
+   │
+22 │ cfg-if 1.0.5 git+https://github.com/rust-lang/cfg-if?branch=main
+   │              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ source
+   │
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:77:22
+   │
+77 │ required-git-spec = "rev"   # GATE-03: a git dependency must be pinned by rev
+   │                      ━━━ minimum spec defined here
+   │
+   ├ cfg-if v1.0.5
+     └── minos-store v0.1.0
+         ├── minos-cli v0.1.0
+         ├── minos-loop v0.1.0
+         │   └── minos-cli v0.1.0 (*)
+         └── minos-runner v0.1.0
+             └── minos-cli v0.1.0 (*)
+
+error[source-not-allowed]: detected 'git' source not explicitly allowed
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:22:14
+   │
+22 │ cfg-if 1.0.5 git+https://github.com/rust-lang/cfg-if?branch=main
+   │              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ source
+   │
+   ├ cfg-if v1.0.5 (*)
+
+sources FAILED
+```
+
+### V-12: git source not on the allow list
+
+Requirement: GATE-03
+
+Edit: crates/minos-store/Cargo.toml: added `cfg-if = { git = "https://github.com/rust-lang/cfg-if", rev = "14432a28e180ec717933714aed7828fc7ed2fd29" }` under `[dependencies]`
+
+Command: `cargo deny check sources`
+
+Exit code: 8
+
+```text
+error[source-not-allowed]: detected 'git' source not explicitly allowed
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:22:14
+   │
+22 │ cfg-if 1.0.5 git+https://github.com/rust-lang/cfg-if?rev=14432a28e180ec717933714aed7828fc7ed2fd29
+   │              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ source
+   │
+   ├ cfg-if v1.0.5
+     └── minos-store v0.1.0
+         ├── minos-cli v0.1.0
+         ├── minos-loop v0.1.0
+         │   └── minos-cli v0.1.0 (*)
+         └── minos-runner v0.1.0
+             └── minos-cli v0.1.0 (*)
+
+sources FAILED
+```
+
+### V-13: unknown registry
+
+Requirement: GATE-03
+
+Edit: created a temporary `.cargo/config.toml` at the repository root containing `[registries.mirror]` with `index = "sparse+https://rsproxy.cn/index/"` (the repository had no `.cargo` before this proof); crates/minos-store/Cargo.toml: added `cfg-if = { version = "=1.0.4", registry = "mirror" }` under `[dependencies]`. Reverted by deleting exactly `<repo root>/.cargo` (never `~/.cargo`) and restoring from HEAD. The mirror cache entry under the user cargo home was already present from research and is left in place.
+
+Command: `cargo deny check sources`
+
+Exit code: 8
+
+```text
+error[source-not-allowed]: detected 'registry' source not explicitly allowed
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:22:14
+   │
+22 │ cfg-if 1.0.4 sparse+https://rsproxy.cn/index/
+   │              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ source
+   │
+   ├ cfg-if v1.0.4
+     └── minos-store v0.1.0
+         ├── minos-cli v0.1.0
+         ├── minos-loop v0.1.0
+         │   └── minos-cli v0.1.0 (*)
+         └── minos-runner v0.1.0
+             └── minos-cli v0.1.0 (*)
+
+sources FAILED
+```
+
+### V-14: build script not on the allowlist
+
+Requirement: GATE-03
+
+Edit: crates/minos-store/Cargo.toml: added `httparse = "=1.10.1"` under `[dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:77:1
+   │  
+77 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+78 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:101:1
+    │  
+101 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+102 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:117:1
+    │  
+117 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+118 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:119:1
+    │  
+119 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+120 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:143:1
+    │  
+143 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+144 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+error[build-script-not-allowed]: crate 'httparse = 1.10.1' has a build script but is not allowed to have one
+ ├ path = '$CARGO_HOME/registry/src/index.crates.io-1949cf8c6b5b557f/httparse-1.10.1/build.rs'
+ ├ checksum = 'eba8e341d746a6cf54249c62afe9eb237e7c21fcf9937223e894549e3a34d489'
+ ├ httparse v1.10.1
+   └── minos-store v0.1.0
+       ├── minos-cli v0.1.0
+       ├── minos-loop v0.1.0
+       │   └── minos-cli v0.1.0 (*)
+       └── minos-runner v0.1.0
+           └── minos-cli v0.1.0 (*)
+
+bans FAILED
+```
+
+### V-15: loop to sandbox
+
+Requirement: GATE-04
+
+Edit: crates/minos-loop/Cargo.toml: added `minos-sandbox.workspace = true` under `[dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   ├── minos-loop v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   ├── minos-loop v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   ├── minos-loop v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   ├── minos-loop v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   ├── minos-loop v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   ├── minos-loop v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-loop v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   ├── minos-loop v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   ├── minos-loop v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-loop = 0.1.0' of banned crate 'minos-sandbox = 0.1.0' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:48:14
+   │
+48 │   { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
+   │              ━━━━━━━━━━━━━                                                                             ───────────────────────────────────── reason
+   │              │                                                                                          
+   │              banned here
+   │
+   ├ minos-sandbox v0.1.0
+     ├── minos-backend-krun v0.1.0
+     │   └── minos-cli v0.1.0
+     ├── minos-cli v0.1.0 (*)
+     ├── minos-loop v0.1.0
+     │   └── minos-cli v0.1.0 (*)
+     └── minos-runner v0.1.0
+         └── minos-cli v0.1.0 (*)
+
+error[banned]: crate 'minos-sandbox = 0.1.0' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:48:14
+   │
+48 │   { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
+   │              ━━━━━━━━━━━━━                                                                             ───────────────────────────────────── reason
+   │              │                                                                                          
+   │              banned here
+   │
+   ├ minos-sandbox v0.1.0 (*)
+
+bans FAILED
+```
+
+### V-16: loop to backend
+
+Requirement: GATE-04
+
+Edit: crates/minos-loop/Cargo.toml: added `minos-backend-krun.workspace = true` under `[dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   ├── minos-cli v0.1.0
+     │   │   │   └── minos-loop v0.1.0
+     │   │   │       └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   ├── minos-cli v0.1.0
+         │       │   │   └── minos-loop v0.1.0
+         │       │   │       └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   ├── minos-cli v0.1.0
+         │   │   │   └── minos-loop v0.1.0
+         │   │   │       └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       ├── minos-cli v0.1.0
+         │       └── minos-loop v0.1.0
+         │           └── minos-cli v0.1.0 (*)
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   ├── minos-cli v0.1.0
+      │   │   │   └── minos-loop v0.1.0
+      │   │   │       └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   ├── minos-cli v0.1.0
+          │   └── minos-loop v0.1.0
+          │       └── minos-cli v0.1.0 (*)
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   ├── minos-cli v0.1.0
+      │       │   │   └── minos-loop v0.1.0
+      │       │   │       └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   ├── minos-cli v0.1.0
+      │   │   └── minos-loop v0.1.0
+      │   │       └── minos-cli v0.1.0 (*)
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   ├── minos-cli v0.1.0
+      │   │                   └── minos-loop v0.1.0
+      │   │                       └── minos-cli v0.1.0 (*)
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0
+      │   │   │   │   │       └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-loop = 0.1.0' of banned crate 'minos-backend-krun = 0.1.0' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:49:14
+   │
+49 │   { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
+   │              ━━━━━━━━━━━━━━━━━━                                       ───────────────────────────────────── reason
+   │              │                                                         
+   │              banned here
+   │
+   ├ minos-backend-krun v0.1.0
+     ├── minos-cli v0.1.0
+     └── minos-loop v0.1.0
+         └── minos-cli v0.1.0 (*)
+
+error[banned]: crate 'minos-backend-krun = 0.1.0' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:49:14
+   │
+49 │   { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
+   │              ━━━━━━━━━━━━━━━━━━                                       ───────────────────────────────────── reason
+   │              │                                                         
+   │              banned here
+   │
+   ├ minos-backend-krun v0.1.0 (*)
+
+bans FAILED
+```
+
+### V-17: loop to runner (the transitive path to sandbox)
+
+Requirement: GATE-04
+
+Edit: crates/minos-loop/Cargo.toml: added `minos-runner.workspace = true` under `[dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-loop = 0.1.0' of banned crate 'minos-runner = 0.1.0' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:51:14
+   │
+51 │   { crate = "minos-runner", wrappers = ["minos-cli"], reason = "loop reaches the runner only through its JobRunner trait" },
+   │              ━━━━━━━━━━━━                                       ──────────────────────────────────────────────────────── reason
+   │              │                                                   
+   │              banned here
+   │
+   ├ minos-runner v0.1.0
+     ├── minos-cli v0.1.0
+     └── minos-loop v0.1.0
+         └── minos-cli v0.1.0 (*)
+
+error[banned]: crate 'minos-runner = 0.1.0' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:51:14
+   │
+51 │   { crate = "minos-runner", wrappers = ["minos-cli"], reason = "loop reaches the runner only through its JobRunner trait" },
+   │              ━━━━━━━━━━━━                                       ──────────────────────────────────────────────────────── reason
+   │              │                                                   
+   │              banned here
+   │
+   ├ minos-runner v0.1.0 (*)
+
+bans FAILED
+```
+
+### V-18: core to sandbox as a dev-dependency
+
+Requirement: GATE-04
+
+Edit: crates/minos-core/Cargo.toml: added `minos-sandbox.workspace = true` under `[dev-dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   ├── (dev) minos-core v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   ├── (dev) minos-core v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   ├── (dev) minos-core v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   ├── (dev) minos-core v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   ├── (dev) minos-core v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   ├── (dev) minos-core v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── (dev) minos-core v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   ├── (dev) minos-core v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   ├── (dev) minos-core v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-core = 0.1.0' of banned crate 'minos-sandbox = 0.1.0' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:48:14
+   │
+48 │   { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
+   │              ━━━━━━━━━━━━━                                                                             ───────────────────────────────────── reason
+   │              │                                                                                          
+   │              banned here
+   │
+   ├ minos-sandbox v0.1.0
+     ├── minos-backend-krun v0.1.0
+     │   └── minos-cli v0.1.0
+     ├── minos-cli v0.1.0 (*)
+     ├── (dev) minos-core v0.1.0
+     │   ├── minos-backend-krun v0.1.0 (*)
+     │   ├── minos-cli v0.1.0 (*)
+     │   ├── minos-guest v0.1.0
+     │   ├── minos-loop v0.1.0
+     │   │   └── minos-cli v0.1.0 (*)
+     │   ├── minos-propose v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   └── minos-loop v0.1.0 (*)
+     │   ├── minos-runner v0.1.0
+     │   │   └── minos-cli v0.1.0 (*)
+     │   ├── minos-sandbox v0.1.0 (*)
+     │   └── minos-store v0.1.0
+     │       ├── minos-cli v0.1.0 (*)
+     │       ├── minos-loop v0.1.0 (*)
+     │       └── minos-runner v0.1.0 (*)
+     └── minos-runner v0.1.0 (*)
+
+error[banned]: crate 'minos-sandbox = 0.1.0' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:48:14
+   │
+48 │   { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
+   │              ━━━━━━━━━━━━━                                                                             ───────────────────────────────────── reason
+   │              │                                                                                          
+   │              banned here
+   │
+   ├ minos-sandbox v0.1.0 (*)
+
+bans FAILED
+```
+
+### V-19: core to backend as a dev-dependency
+
+Requirement: GATE-04
+
+Edit: crates/minos-core/Cargo.toml: added `minos-backend-krun.workspace = true` under `[dev-dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   ├── minos-cli v0.1.0
+     │   │   │   └── (dev) minos-core v0.1.0 (*)
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   ├── minos-cli v0.1.0
+         │       │   │   └── (dev) minos-core v0.1.0 (*)
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   ├── minos-cli v0.1.0
+         │   │   │   └── (dev) minos-core v0.1.0 (*)
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       ├── minos-cli v0.1.0
+         │       └── (dev) minos-core v0.1.0
+         │           ├── minos-backend-krun v0.1.0 (*)
+         │           ├── minos-cli v0.1.0 (*)
+         │           ├── minos-guest v0.1.0
+         │           ├── minos-loop v0.1.0
+         │           │   └── minos-cli v0.1.0 (*)
+         │           ├── minos-propose v0.1.0
+         │           │   ├── minos-cli v0.1.0 (*)
+         │           │   └── minos-loop v0.1.0 (*)
+         │           ├── minos-runner v0.1.0
+         │           │   └── minos-cli v0.1.0 (*)
+         │           ├── minos-sandbox v0.1.0
+         │           │   ├── minos-backend-krun v0.1.0 (*)
+         │           │   ├── minos-cli v0.1.0 (*)
+         │           │   └── minos-runner v0.1.0 (*)
+         │           └── minos-store v0.1.0
+         │               ├── minos-cli v0.1.0 (*)
+         │               ├── minos-loop v0.1.0 (*)
+         │               └── minos-runner v0.1.0 (*)
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   ├── minos-cli v0.1.0
+      │   │   │   └── (dev) minos-core v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   ├── minos-cli v0.1.0
+          │   └── (dev) minos-core v0.1.0 (*)
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   ├── minos-cli v0.1.0
+      │       │   │   └── (dev) minos-core v0.1.0 (*)
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   ├── minos-cli v0.1.0
+      │   │   └── (dev) minos-core v0.1.0 (*)
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   ├── minos-cli v0.1.0
+      │   │                   └── (dev) minos-core v0.1.0
+      │   │                       ├── minos-backend-krun v0.1.0 (*)
+      │   │                       ├── minos-cli v0.1.0 (*)
+      │   │                       ├── minos-guest v0.1.0
+      │   │                       ├── minos-loop v0.1.0
+      │   │                       │   └── minos-cli v0.1.0 (*)
+      │   │                       ├── minos-propose v0.1.0
+      │   │                       │   ├── minos-cli v0.1.0 (*)
+      │   │                       │   └── minos-loop v0.1.0 (*)
+      │   │                       ├── minos-runner v0.1.0
+      │   │                       │   └── minos-cli v0.1.0 (*)
+      │   │                       ├── minos-sandbox v0.1.0
+      │   │                       │   ├── minos-backend-krun v0.1.0 (*)
+      │   │                       │   ├── minos-cli v0.1.0 (*)
+      │   │                       │   └── minos-runner v0.1.0 (*)
+      │   │                       └── minos-store v0.1.0
+      │   │                           ├── minos-cli v0.1.0 (*)
+      │   │                           ├── minos-loop v0.1.0 (*)
+      │   │                           └── minos-runner v0.1.0 (*)
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── (dev) minos-core v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-core = 0.1.0' of banned crate 'minos-backend-krun = 0.1.0' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:49:14
+   │
+49 │   { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
+   │              ━━━━━━━━━━━━━━━━━━                                       ───────────────────────────────────── reason
+   │              │                                                         
+   │              banned here
+   │
+   ├ minos-backend-krun v0.1.0
+     ├── minos-cli v0.1.0
+     └── (dev) minos-core v0.1.0
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-cli v0.1.0 (*)
+         ├── minos-guest v0.1.0
+         ├── minos-loop v0.1.0
+         │   └── minos-cli v0.1.0 (*)
+         ├── minos-propose v0.1.0
+         │   ├── minos-cli v0.1.0 (*)
+         │   └── minos-loop v0.1.0 (*)
+         ├── minos-runner v0.1.0
+         │   └── minos-cli v0.1.0 (*)
+         ├── minos-sandbox v0.1.0
+         │   ├── minos-backend-krun v0.1.0 (*)
+         │   ├── minos-cli v0.1.0 (*)
+         │   └── minos-runner v0.1.0 (*)
+         └── minos-store v0.1.0
+             ├── minos-cli v0.1.0 (*)
+             ├── minos-loop v0.1.0 (*)
+             └── minos-runner v0.1.0 (*)
+
+error[banned]: crate 'minos-backend-krun = 0.1.0' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:49:14
+   │
+49 │   { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
+   │              ━━━━━━━━━━━━━━━━━━                                       ───────────────────────────────────── reason
+   │              │                                                         
+   │              banned here
+   │
+   ├ minos-backend-krun v0.1.0 (*)
+
+bans FAILED
+```
+
+### V-20: core to sandbox as a normal dependency
+
+Requirement: GATE-04
+
+Edit: crates/minos-core/Cargo.toml: added `minos-sandbox.workspace = true` under `[dependencies]`
+
+Command: `cargo deny check`
+
+Exit code: 1
+
+```text
+2026-10-09 21:36:22 [ERROR] failed to fetch crates: error: cyclic package dependency: package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)` depends on itself. Cycle:
+package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)`
+    ... which satisfies path dependency `minos-core` (locked to 0.1.0) of package `minos-sandbox v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-sandbox)`
+    ... which satisfies path dependency `minos-sandbox` (locked to 0.1.0) of package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)`
+    ... which satisfies path dependency `minos-core` (locked to 0.1.0) of package `minos-backend-krun v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-backend-krun)`
+
+2026-10-09 21:36:22 [ERROR] `cargo metadata` exited with an error: error: cyclic package dependency: package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)` depends on itself. Cycle:
+package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)`
+    ... which satisfies path dependency `minos-core` (locked to 0.1.0) of package `minos-sandbox v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-sandbox)`
+    ... which satisfies path dependency `minos-sandbox` (locked to 0.1.0) of package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)`
+    ... which satisfies path dependency `minos-core` (locked to 0.1.0) of package `minos-backend-krun v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-backend-krun)`
+
+```
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 101
+
+```text
+error: cyclic package dependency: package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)` depends on itself. Cycle:
+package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)`
+    ... which satisfies path dependency `minos-core` (locked to 0.1.0) of package `minos-sandbox v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-sandbox)`
+    ... which satisfies path dependency `minos-sandbox` (locked to 0.1.0) of package `minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)`
+    ... which satisfies path dependency `minos-core` (locked to 0.1.0) of package `minos-backend-krun v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-backend-krun)`
+```
+
+### V-21: anyhow in a library
+
+Requirement: rules/err-anyhow-app.md (beyond D-11)
+
+Edit: crates/minos-store/Cargo.toml: added `anyhow.workspace = true` under `[dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-store = 0.1.0' of banned crate 'anyhow = 1.0.104' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:39:14
+   │
+39 │   { crate = "anyhow", wrappers = ["minos-cli"], reason = "anyhow only at the CLI main (rules/err-anyhow-app.md)" },
+   │              ━━━━━━                                       ───────────────────────────────────────────────────── reason
+   │              │                                             
+   │              banned here
+   │
+   ├ anyhow v1.0.104
+     ├── minos-cli v0.1.0
+     └── minos-store v0.1.0
+         ├── minos-cli v0.1.0 (*)
+         ├── minos-loop v0.1.0
+         │   └── minos-cli v0.1.0 (*)
+         └── minos-runner v0.1.0
+             └── minos-cli v0.1.0 (*)
+
+error[banned]: crate 'anyhow = 1.0.104' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:39:14
+   │
+39 │   { crate = "anyhow", wrappers = ["minos-cli"], reason = "anyhow only at the CLI main (rules/err-anyhow-app.md)" },
+   │              ━━━━━━                                       ───────────────────────────────────────────────────── reason
+   │              │                                             
+   │              banned here
+   │
+   ├ anyhow v1.0.104 (*)
+
+bans FAILED
+```
+
+### V-22: VMM linked outside minos-vmm
+
+Requirement: KRUN-01 (beyond D-11)
+
+Edit: crates/minos-backend-krun/Cargo.toml: added `msb_krun.workspace = true` under `[dependencies]`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   │   └── minos-cli v0.1.0
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   ├── minos-backend-krun v0.1.0
+             │   │   └── minos-cli v0.1.0
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 ├── minos-backend-krun v0.1.0 (*)
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   ├── minos-backend-krun v0.1.0 (*)
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   └── minos-cli v0.1.0
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   ├── minos-backend-krun v0.1.0 (*)
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   ├── minos-backend-krun v0.1.0
+      │           │   │   └── minos-cli v0.1.0
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0 (*)
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+warning[unmatched-wrapper]: direct parent 'minos-backend-krun = 0.1.0' of banned crate 'msb_krun = 0.1.41' was not marked as a wrapper
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:40:14
+   │
+40 │   { crate = "msb_krun", wrappers = ["minos-vmm"], reason = "only minos-vmm links the VMM (KRUN-01)" },
+   │              ━━━━━━━━                                       ────────────────────────────────────── reason
+   │              │                                               
+   │              banned here
+   │
+   ├ msb_krun v0.1.41
+     ├── minos-backend-krun v0.1.0
+     │   └── minos-cli v0.1.0
+     └── minos-vmm v0.1.0
+
+error[banned]: crate 'msb_krun = 0.1.41' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:40:14
+   │
+40 │   { crate = "msb_krun", wrappers = ["minos-vmm"], reason = "only minos-vmm links the VMM (KRUN-01)" },
+   │              ━━━━━━━━                                       ────────────────────────────────────── reason
+   │              │                                               
+   │              banned here
+   │
+   ├ msb_krun v0.1.41 (*)
+
+bans FAILED
+```
+
+### V-23: C code through a feature
+
+Requirement: CLAUDE.md no-C rule (beyond D-11)
+
+Edit: crates/minos-backend-krun/Cargo.toml: replaced the line `backhand.workspace = true` with `backhand = { workspace = true, features = ["zstd"] }`
+
+Command: `cargo deny check bans`
+
+Exit code: 2
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:55:1
+   │  
+55 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+56 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:79:1
+   │  
+79 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+80 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:103:1
+    │  
+103 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+104 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:120:1
+    │  
+120 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+121 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:122:1
+    │  
+122 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+123 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:147:1
+    │  
+147 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+148 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+error[banned]: crate 'cc = 1.6.0' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:37:14
+   │
+37 │   { crate = "cc", reason = "no C compiled in our tree" },
+   │              ━━             ───────────────────────── reason
+   │              │               
+   │              banned here
+   │
+   ├ cc v1.6.0
+     └── (build) zstd-sys v2.1.1+zstd.1.5.7
+         └── zstd-safe v7.3.0
+             ├── backhand v0.25.5
+             │   └── minos-backend-krun v0.1.0
+             │       └── minos-cli v0.1.0
+             └── zstd v0.13.3
+                 └── backhand v0.25.5 (*)
+
+error[build-script-not-allowed]: crate 'zstd-safe = 7.3.0' has a build script but is not allowed to have one
+ ├ path = '$CARGO_HOME/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-safe-7.3.0/build.rs'
+ ├ checksum = '2342e59833e2ebca2980884d4f242a6bf1b0143037c212e05514626ad5213505'
+ ├ zstd-safe v7.3.0
+   ├── backhand v0.25.5
+   │   └── minos-backend-krun v0.1.0
+   │       └── minos-cli v0.1.0
+   └── zstd v0.13.3
+       └── backhand v0.25.5 (*)
+
+error[banned]: crate 'zstd-sys = 2.1.1+zstd.1.5.7' is explicitly banned
+   ┌─ /Users/seanmcauliffe/Repos/minos/deny.toml:35:14
+   │
+35 │   { crate = "zstd-sys", reason = "C; backhand uses gzip only" },
+   │              ━━━━━━━━             ────────────────────────── reason
+   │              │                     
+   │              banned here
+   │
+   ├ zstd-sys v2.1.1+zstd.1.5.7
+     └── zstd-safe v7.3.0
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── zstd v0.13.3
+             └── backhand v0.25.5 (*)
+
+error[build-script-not-allowed]: crate 'zstd-sys = 2.1.1+zstd.1.5.7' has a build script but is not allowed to have one
+ ├ path = '$CARGO_HOME/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.1.1+zstd.1.5.7/build.rs'
+ ├ checksum = 'ff97fca52b72ba76c2c71f0d4ca3475d5fa746e184e7d01c6085f9efee360171'
+ ├ zstd-sys v2.1.1+zstd.1.5.7 (*)
+
+bans FAILED
+```
+
+### Deny re-check
+
+The tree after every supply-chain and layering proof was reverted.
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:16:1
+   │  
+16 │ ╭ bitflags 1.3.2 registry+https://github.com/rust-lang/crates.io-index
+17 │ │ bitflags 2.13.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ bitflags v1.3.2
+     ├── msb_krun_devices v0.1.41
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   └── msb_krun_vmm v0.1.41
+     │       └── msb_krun v0.1.41 (*)
+     ├── msb_krun_utils v0.1.41
+     │   ├── msb_krun v0.1.41 (*)
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_kernel v0.1.41
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_polly v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     └── vmm-sys-util v0.15.0
+         ├── kvm-bindings v0.14.2
+         │   ├── kvm-ioctls v0.25.1
+         │   │   ├── msb_krun v0.1.41 (*)
+         │   │   ├── msb_krun_arch v0.1.41 (*)
+         │   │   ├── msb_krun_devices v0.1.41 (*)
+         │   │   └── msb_krun_vmm v0.1.41 (*)
+         │   ├── msb_krun v0.1.41 (*)
+         │   ├── msb_krun_arch v0.1.41 (*)
+         │   ├── msb_krun_devices v0.1.41 (*)
+         │   ├── msb_krun_utils v0.1.41 (*)
+         │   └── msb_krun_vmm v0.1.41 (*)
+         ├── kvm-ioctls v0.25.1 (*)
+         └── msb_krun_utils v0.1.41 (*)
+   ├ bitflags v2.13.2
+     ├── kvm-ioctls v0.25.1
+     │   ├── msb_krun v0.1.41
+     │   │   └── minos-vmm v0.1.0
+     │   ├── msb_krun_arch v0.1.41
+     │   │   ├── msb_krun_devices v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41
+     │   │   │       └── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_hvf v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.30.1
+     │   ├── msb-imago v0.1.7
+     │   │   └── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_devices v0.1.41 (*)
+     │   ├── msb_krun_utils v0.1.41
+     │   │   ├── msb_krun v0.1.41 (*)
+     │   │   ├── msb_krun_arch v0.1.41 (*)
+     │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   ├── msb_krun_kernel v0.1.41
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   ├── msb_krun_polly v0.1.41
+     │   │   │   ├── msb_krun v0.1.41 (*)
+     │   │   │   ├── msb_krun_devices v0.1.41 (*)
+     │   │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   │   └── msb_krun_vmm v0.1.41 (*)
+     │   └── msb_krun_vmm v0.1.41 (*)
+     ├── nix v0.31.3
+     │   └── vsock v0.5.4
+     │       └── minos-guest v0.1.0
+     ├── proptest v1.11.0
+     │   ├── (dev) minos-core v0.1.0
+     │   │   ├── minos-backend-krun v0.1.0
+     │   │   │   └── minos-cli v0.1.0
+     │   │   ├── minos-cli v0.1.0 (*)
+     │   │   ├── minos-guest v0.1.0 (*)
+     │   │   ├── minos-loop v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-propose v0.1.0
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-loop v0.1.0 (*)
+     │   │   ├── minos-runner v0.1.0
+     │   │   │   └── minos-cli v0.1.0 (*)
+     │   │   ├── minos-sandbox v0.1.0
+     │   │   │   ├── minos-backend-krun v0.1.0 (*)
+     │   │   │   ├── minos-cli v0.1.0 (*)
+     │   │   │   └── minos-runner v0.1.0 (*)
+     │   │   └── minos-store v0.1.0
+     │   │       ├── minos-cli v0.1.0 (*)
+     │   │       ├── minos-loop v0.1.0 (*)
+     │   │       └── minos-runner v0.1.0 (*)
+     │   └── (dev) minos-store v0.1.0 (*)
+     └── rustix v1.1.5
+         ├── minos-guest v0.1.0 (*)
+         └── tempfile v3.27.0
+             ├── insta v1.49.0
+             │   ├── (dev) minos-core v0.1.0 (*)
+             │   └── (dev) minos-propose v0.1.0 (*)
+             ├── minos-backend-krun v0.1.0 (*)
+             ├── minos-store v0.1.0 (*)
+             ├── proptest v1.11.0 (*)
+             └── rusty-fork v0.3.1
+                 └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:53:1
+   │  
+53 │ ╭ getrandom 0.3.4 registry+https://github.com/rust-lang/crates.io-index
+54 │ │ getrandom 0.4.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ getrandom v0.3.4
+     └── rand_core v0.9.5
+         ├── rand v0.9.5
+         │   ├── msb_krun_devices v0.1.41
+         │   │   ├── msb_krun v0.1.41
+         │   │   │   └── minos-vmm v0.1.0
+         │   │   └── msb_krun_vmm v0.1.41
+         │   │       └── msb_krun v0.1.41 (*)
+         │   └── proptest v1.11.0
+         │       ├── (dev) minos-core v0.1.0
+         │       │   ├── minos-backend-krun v0.1.0
+         │       │   │   └── minos-cli v0.1.0
+         │       │   ├── minos-cli v0.1.0 (*)
+         │       │   ├── minos-guest v0.1.0
+         │       │   ├── minos-loop v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-propose v0.1.0
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-loop v0.1.0 (*)
+         │       │   ├── minos-runner v0.1.0
+         │       │   │   └── minos-cli v0.1.0 (*)
+         │       │   ├── minos-sandbox v0.1.0
+         │       │   │   ├── minos-backend-krun v0.1.0 (*)
+         │       │   │   ├── minos-cli v0.1.0 (*)
+         │       │   │   └── minos-runner v0.1.0 (*)
+         │       │   └── minos-store v0.1.0
+         │       │       ├── minos-cli v0.1.0 (*)
+         │       │       ├── minos-loop v0.1.0 (*)
+         │       │       └── minos-runner v0.1.0 (*)
+         │       └── (dev) minos-store v0.1.0 (*)
+         ├── rand_chacha v0.9.0
+         │   ├── proptest v1.11.0 (*)
+         │   └── rand v0.9.5 (*)
+         └── rand_xorshift v0.4.0
+             └── proptest v1.11.0 (*)
+   ├ getrandom v0.4.3
+     └── tempfile v3.27.0
+         ├── insta v1.49.0
+         │   ├── (dev) minos-core v0.1.0
+         │   │   ├── minos-backend-krun v0.1.0
+         │   │   │   └── minos-cli v0.1.0
+         │   │   ├── minos-cli v0.1.0 (*)
+         │   │   ├── minos-guest v0.1.0
+         │   │   ├── minos-loop v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-propose v0.1.0
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-loop v0.1.0 (*)
+         │   │   ├── minos-runner v0.1.0
+         │   │   │   └── minos-cli v0.1.0 (*)
+         │   │   ├── minos-sandbox v0.1.0
+         │   │   │   ├── minos-backend-krun v0.1.0 (*)
+         │   │   │   ├── minos-cli v0.1.0 (*)
+         │   │   │   └── minos-runner v0.1.0 (*)
+         │   │   └── minos-store v0.1.0
+         │   │       ├── minos-cli v0.1.0 (*)
+         │   │       ├── minos-loop v0.1.0 (*)
+         │   │       └── minos-runner v0.1.0 (*)
+         │   └── (dev) minos-propose v0.1.0 (*)
+         ├── minos-backend-krun v0.1.0 (*)
+         ├── minos-store v0.1.0 (*)
+         ├── proptest v1.11.0
+         │   ├── (dev) minos-core v0.1.0 (*)
+         │   └── (dev) minos-store v0.1.0 (*)
+         └── rusty-fork v0.3.1
+             └── proptest v1.11.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+   ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:76:1
+   │  
+76 │ ╭ miniz_oxide 0.8.9 registry+https://github.com/rust-lang/crates.io-index
+77 │ │ miniz_oxide 0.9.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ miniz_oxide v0.8.9
+     └── msb-imago v0.1.7
+         └── msb_krun_devices v0.1.41
+             ├── msb_krun v0.1.41
+             │   └── minos-vmm v0.1.0
+             └── msb_krun_vmm v0.1.41
+                 └── msb_krun v0.1.41 (*)
+   ├ miniz_oxide v0.9.1
+     └── flate2 v1.1.10
+         ├── backhand v0.25.5
+         │   └── minos-backend-krun v0.1.0
+         │       └── minos-cli v0.1.0
+         └── msb_krun_vmm v0.1.41
+             └── msb_krun v0.1.41
+                 └── minos-vmm v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:100:1
+    │  
+100 │ ╭ nix 0.30.1 registry+https://github.com/rust-lang/crates.io-index
+101 │ │ nix 0.31.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ nix v0.30.1
+      ├── msb-imago v0.1.7
+      │   └── msb_krun_devices v0.1.41
+      │       ├── msb_krun v0.1.41
+      │       │   └── minos-vmm v0.1.0
+      │       └── msb_krun_vmm v0.1.41
+      │           └── msb_krun v0.1.41 (*)
+      ├── msb_krun_devices v0.1.41 (*)
+      ├── msb_krun_utils v0.1.41
+      │   ├── msb_krun v0.1.41 (*)
+      │   ├── msb_krun_arch v0.1.41
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_devices v0.1.41 (*)
+      │   ├── msb_krun_kernel v0.1.41
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   ├── msb_krun_polly v0.1.41
+      │   │   ├── msb_krun v0.1.41 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   └── msb_krun_vmm v0.1.41 (*)
+      └── msb_krun_vmm v0.1.41 (*)
+    ├ nix v0.31.3
+      └── vsock v0.5.4
+          └── minos-guest v0.1.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:116:1
+    │  
+116 │ ╭ rand_chacha 0.9.0 registry+https://github.com/rust-lang/crates.io-index
+117 │ │ rand_chacha 0.10.0 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_chacha v0.9.0
+      ├── proptest v1.11.0
+      │   ├── (dev) minos-core v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   └── minos-cli v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-guest v0.1.0
+      │   │   ├── minos-loop v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   ├── minos-runner v0.1.0
+      │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   ├── minos-sandbox v0.1.0
+      │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   └── minos-store v0.1.0
+      │   │       ├── minos-cli v0.1.0 (*)
+      │   │       ├── minos-loop v0.1.0 (*)
+      │   │       └── minos-runner v0.1.0 (*)
+      │   └── (dev) minos-store v0.1.0 (*)
+      └── rand v0.9.5
+          ├── msb_krun_devices v0.1.41
+          │   ├── msb_krun v0.1.41
+          │   │   └── minos-vmm v0.1.0
+          │   └── msb_krun_vmm v0.1.41
+          │       └── msb_krun v0.1.41 (*)
+          └── proptest v1.11.0 (*)
+    ├ rand_chacha v0.10.0
+      └── minos-core v0.1.0
+          ├── minos-backend-krun v0.1.0
+          │   └── minos-cli v0.1.0
+          ├── minos-cli v0.1.0 (*)
+          ├── minos-guest v0.1.0
+          ├── minos-loop v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-propose v0.1.0
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-loop v0.1.0 (*)
+          ├── minos-runner v0.1.0
+          │   └── minos-cli v0.1.0 (*)
+          ├── minos-sandbox v0.1.0
+          │   ├── minos-backend-krun v0.1.0 (*)
+          │   ├── minos-cli v0.1.0 (*)
+          │   └── minos-runner v0.1.0 (*)
+          └── minos-store v0.1.0
+              ├── minos-cli v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              └── minos-runner v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:118:1
+    │  
+118 │ ╭ rand_core 0.9.5 registry+https://github.com/rust-lang/crates.io-index
+119 │ │ rand_core 0.10.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ rand_core v0.9.5
+      ├── rand v0.9.5
+      │   ├── msb_krun_devices v0.1.41
+      │   │   ├── msb_krun v0.1.41
+      │   │   │   └── minos-vmm v0.1.0
+      │   │   └── msb_krun_vmm v0.1.41
+      │   │       └── msb_krun v0.1.41 (*)
+      │   └── proptest v1.11.0
+      │       ├── (dev) minos-core v0.1.0
+      │       │   ├── minos-backend-krun v0.1.0
+      │       │   │   └── minos-cli v0.1.0
+      │       │   ├── minos-cli v0.1.0 (*)
+      │       │   ├── minos-guest v0.1.0
+      │       │   ├── minos-loop v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-propose v0.1.0
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-loop v0.1.0 (*)
+      │       │   ├── minos-runner v0.1.0
+      │       │   │   └── minos-cli v0.1.0 (*)
+      │       │   ├── minos-sandbox v0.1.0
+      │       │   │   ├── minos-backend-krun v0.1.0 (*)
+      │       │   │   ├── minos-cli v0.1.0 (*)
+      │       │   │   └── minos-runner v0.1.0 (*)
+      │       │   └── minos-store v0.1.0
+      │       │       ├── minos-cli v0.1.0 (*)
+      │       │       ├── minos-loop v0.1.0 (*)
+      │       │       └── minos-runner v0.1.0 (*)
+      │       └── (dev) minos-store v0.1.0 (*)
+      ├── rand_chacha v0.9.0
+      │   ├── proptest v1.11.0 (*)
+      │   └── rand v0.9.5 (*)
+      └── rand_xorshift v0.4.0
+          └── proptest v1.11.0 (*)
+    ├ rand_core v0.10.1
+      ├── minos-core v0.1.0
+      │   ├── minos-backend-krun v0.1.0
+      │   │   └── minos-cli v0.1.0
+      │   ├── minos-cli v0.1.0 (*)
+      │   ├── minos-guest v0.1.0
+      │   ├── minos-loop v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-propose v0.1.0
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-loop v0.1.0 (*)
+      │   ├── minos-runner v0.1.0
+      │   │   └── minos-cli v0.1.0 (*)
+      │   ├── minos-sandbox v0.1.0
+      │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   └── minos-runner v0.1.0 (*)
+      │   └── minos-store v0.1.0
+      │       ├── minos-cli v0.1.0 (*)
+      │       ├── minos-loop v0.1.0 (*)
+      │       └── minos-runner v0.1.0 (*)
+      └── rand_chacha v0.10.0
+          └── minos-core v0.1.0 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/seanmcauliffe/Repos/minos/Cargo.lock:142:1
+    │  
+142 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+143 │ │ syn 3.0.6 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── darling_core v0.21.3
+      │   ├── darling v0.21.3
+      │   │   └── deku_derive v0.20.3
+      │   │       └── deku v0.20.3
+      │   │           └── backhand v0.25.5
+      │   │               └── minos-backend-krun v0.1.0
+      │   │                   └── minos-cli v0.1.0
+      │   └── darling_macro v0.21.3
+      │       └── darling v0.21.3 (*)
+      ├── darling_macro v0.21.3 (*)
+      ├── deku_derive v0.20.3 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── minos-cli v0.1.0 (*)
+      │       └── msb-imago v0.1.7
+      │           └── msb_krun_devices v0.1.41
+      │               ├── msb_krun v0.1.41
+      │               │   └── minos-vmm v0.1.0
+      │               └── msb_krun_vmm v0.1.41
+      │                   └── msb_krun v0.1.41 (*)
+      └── zerocopy-derive v0.8.62
+          └── zerocopy v0.8.62
+              ├── kvm-bindings v0.14.2
+              │   ├── kvm-ioctls v0.25.1
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   ├── msb_krun_hvf v0.1.41
+              │   │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   ├── msb_krun v0.1.41 (*)
+              │   ├── msb_krun_arch v0.1.41 (*)
+              │   ├── msb_krun_devices v0.1.41 (*)
+              │   ├── msb_krun_utils v0.1.41
+              │   │   ├── msb_krun v0.1.41 (*)
+              │   │   ├── msb_krun_arch v0.1.41 (*)
+              │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   ├── msb_krun_kernel v0.1.41
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   ├── msb_krun_polly v0.1.41
+              │   │   │   ├── msb_krun v0.1.41 (*)
+              │   │   │   ├── msb_krun_devices v0.1.41 (*)
+              │   │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   │   └── msb_krun_vmm v0.1.41 (*)
+              │   └── msb_krun_vmm v0.1.41 (*)
+              └── ppv-lite86 v0.2.21
+                  ├── rand_chacha v0.10.0
+                  │   └── minos-core v0.1.0
+                  │       ├── minos-backend-krun v0.1.0 (*)
+                  │       ├── minos-cli v0.1.0 (*)
+                  │       ├── minos-guest v0.1.0
+                  │       ├── minos-loop v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-propose v0.1.0
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-loop v0.1.0 (*)
+                  │       ├── minos-runner v0.1.0
+                  │       │   └── minos-cli v0.1.0 (*)
+                  │       ├── minos-sandbox v0.1.0
+                  │       │   ├── minos-backend-krun v0.1.0 (*)
+                  │       │   ├── minos-cli v0.1.0 (*)
+                  │       │   └── minos-runner v0.1.0 (*)
+                  │       └── minos-store v0.1.0
+                  │           ├── minos-cli v0.1.0 (*)
+                  │           ├── minos-loop v0.1.0 (*)
+                  │           └── minos-runner v0.1.0 (*)
+                  └── rand_chacha v0.9.0
+                      ├── proptest v1.11.0
+                      │   ├── (dev) minos-core v0.1.0 (*)
+                      │   └── (dev) minos-store v0.1.0 (*)
+                      └── rand v0.9.5
+                          ├── msb_krun_devices v0.1.41 (*)
+                          └── proptest v1.11.0 (*)
+    ├ syn v3.0.6
+      ├── async-trait v0.1.92
+      │   └── msb-imago v0.1.7
+      │       └── msb_krun_devices v0.1.41
+      │           ├── msb_krun v0.1.41
+      │           │   └── minos-vmm v0.1.0
+      │           └── msb_krun_vmm v0.1.41
+      │               └── msb_krun v0.1.41 (*)
+      ├── clap_derive v4.6.7
+      │   └── clap v4.6.7
+      │       └── minos-cli v0.1.0
+      ├── serde_derive v1.0.229
+      │   ├── serde v1.0.229
+      │   │   ├── bincode v2.0.1
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── insta v1.49.0
+      │   │   │   ├── (dev) minos-core v0.1.0
+      │   │   │   │   ├── minos-backend-krun v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-guest v0.1.0
+      │   │   │   │   ├── minos-loop v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-propose v0.1.0
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-loop v0.1.0 (*)
+      │   │   │   │   ├── minos-runner v0.1.0
+      │   │   │   │   │   └── minos-cli v0.1.0 (*)
+      │   │   │   │   ├── minos-sandbox v0.1.0
+      │   │   │   │   │   ├── minos-backend-krun v0.1.0 (*)
+      │   │   │   │   │   ├── minos-cli v0.1.0 (*)
+      │   │   │   │   │   └── minos-runner v0.1.0 (*)
+      │   │   │   │   └── minos-store v0.1.0
+      │   │   │   │       ├── minos-cli v0.1.0 (*)
+      │   │   │   │       ├── minos-loop v0.1.0 (*)
+      │   │   │   │       └── minos-runner v0.1.0 (*)
+      │   │   │   └── (dev) minos-propose v0.1.0 (*)
+      │   │   ├── kvm-bindings v0.14.2
+      │   │   │   ├── kvm-ioctls v0.25.1
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_hvf v0.1.41
+      │   │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   ├── msb_krun_utils v0.1.41
+      │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_arch v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_kernel v0.1.41
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   ├── msb_krun_polly v0.1.41
+      │   │   │   │   │   ├── msb_krun v0.1.41 (*)
+      │   │   │   │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   │   └── msb_krun_vmm v0.1.41 (*)
+      │   │   ├── minos-cli v0.1.0 (*)
+      │   │   ├── minos-core v0.1.0 (*)
+      │   │   ├── minos-propose v0.1.0 (*)
+      │   │   ├── minos-store v0.1.0 (*)
+      │   │   ├── minos-vmm v0.1.0 (*)
+      │   │   ├── msb_krun_devices v0.1.41 (*)
+      │   │   ├── msb_krun_hvf v0.1.41 (*)
+      │   │   ├── msb_krun_vmm v0.1.41 (*)
+      │   │   └── trybuild v1.0.122
+      │   │       └── (dev) minos-sandbox v0.1.0 (*)
+      │   └── trybuild v1.0.122 (*)
+      └── thiserror-impl v2.0.21
+          └── thiserror v2.0.21
+              ├── backhand v0.25.5
+              │   └── minos-backend-krun v0.1.0 (*)
+              ├── minos-backend-krun v0.1.0 (*)
+              ├── minos-core v0.1.0 (*)
+              ├── minos-guest v0.1.0 (*)
+              ├── minos-loop v0.1.0 (*)
+              ├── minos-propose v0.1.0 (*)
+              ├── minos-runner v0.1.0 (*)
+              ├── minos-sandbox v0.1.0 (*)
+              ├── minos-store v0.1.0 (*)
+              ├── minos-vmm v0.1.0 (*)
+              └── msb-vm-memory v0.18.0-msb.2
+                  ├── msb-imago v0.1.7 (*)
+                  ├── msb_krun v0.1.41 (*)
+                  ├── msb_krun_arch v0.1.41 (*)
+                  ├── msb_krun_devices v0.1.41 (*)
+                  ├── msb_krun_kernel v0.1.41 (*)
+                  ├── msb_krun_smbios v0.1.41
+                  │   └── msb_krun_arch v0.1.41 (*)
+                  └── msb_krun_vmm v0.1.41 (*)
+
+advisories ok, bans ok, licenses ok, sources ok
+```
