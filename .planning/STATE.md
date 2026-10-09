@@ -6,14 +6,14 @@ current_phase: 01
 current_phase_name: Workspace and Gates
 status: executing
 stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-10-09T21:28:08.465Z"
+last_updated: "2026-10-09T21:31:58.027Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 01 (Workspace and Gates) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-10-09 — Phase 01 execution started
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 3min | 3 tasks | 28 files |
+| Phase 01 P02 | 1min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,8 @@ Recent decisions affecting current work:
 - [Roadmap]: Phase 7 loop plans run against fakes before Phase 5 finishes; only the runner's real-VM plans wait on the backend
 - [Phase 01]: Workspace config taken verbatim from 01-RESEARCH.md Code Examples; lint carve-outs limited to too_many_lines, similar_names, struct_excessive_bools, multiple_crate_versions
 - [Phase 01]: rustix and vsock sit under a cfg(target_os = linux) target table in minos-guest
+- [Phase 01]: deny.toml encodes crate layering as one wrappers entry per internal library crate (direct edges only)
+- [Phase 01]: cargo-deny multiple-versions stays warn; 7 duplicates from msb_krun, proptest, getrandom
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-09T21:28:08.381Z
+Last session: 2026-10-09T21:31:46.952Z
 Stopped at: Completed 01-01-PLAN.md
 Resume file: None

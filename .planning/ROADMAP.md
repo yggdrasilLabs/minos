@@ -68,7 +68,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Each supply-chain or layering violation makes `ci` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 Plans:
 **Wave 1**
 
@@ -76,7 +76,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — deny.toml supply-chain policy and per-crate layering bans; all four gate commands green (wave 2)
+- [x] 01-02-PLAN.md — deny.toml supply-chain policy and per-crate layering bans; all four gate commands green (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -220,7 +220,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace and Gates | 1/3 | In Progress|  |
+| 1. Workspace and Gates | 2/3 | In Progress|  |
 | 2. Platform Spikes | 0/TBD | Not started | - |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
