@@ -37,6 +37,7 @@ Facts that matter for scheduling:
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
@@ -54,128 +55,161 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Workspace and Gates
+
 **Goal**: Every line of code in the repo, from the first commit, is held to the workspace lints, the supply-chain policy, and the crate-layering rules by one `ci` script
 **Depends on**: Nothing (first phase)
 **Parallelism**: Unblocks Phases 2 and 3, which then run in parallel
 **Requirements**: GATE-01, GATE-02, GATE-03, GATE-04, GATE-05
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. On a fresh checkout with the v1 crate skeletons (including `minos-core`, `minos-loop`, and `minos-sandbox`), the single `ci` script runs `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo deny check` on rustc 1.97.1 with edition 2024 and passes, and `Cargo.lock` is committed (GATE-01, GATE-02)
   2. Each deliberate code violation makes `ci` fail: an `unsafe` block, an `unwrap`, `expect`, or slice index, an `allow(clippy::...)` attribute (only `#[expect(..., reason = ...)]` passes), and a `SystemTime::now` or `HashMap` in `minos-core` (GATE-01, GATE-05)
   3. Each supply-chain or layering violation makes `ci` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: 3 plans
 Plans:
+**Wave 1**
+
 - [ ] 01-01-PLAN.md — Workspace skeleton: toolchain pin, root manifest with the lint baseline and exact pins, ten stub crates, minos-core clippy.toml, licenses (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 01-02-PLAN.md — deny.toml supply-chain policy and per-crate layering bans; all four gate commands green (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 01-03-PLAN.md — Gate self-test (every D-11 violation captured verbatim, then reverted), gate wording fix in REQUIREMENTS/ROADMAP, open decisions recorded, `cargo clean` (wave 3)
+
 **Research**: Standard patterns (cargo-deny and lint recipes are verified in research/STACK.md); skip research-phase
 
 ### Phase 2: Platform Spikes
+
 **Goal**: Every unverified fact that the backend and proposer designs rest on has an evidence-backed answer recorded in CLAUDE.md, and CLAUDE.md describes the v1 local-first design
 **Depends on**: Phase 1
 **Parallelism**: Runs in parallel with Phase 3; no core work waits on a spike result
 **Requirements**: SPIKE-01, SPIKE-02, SPIKE-03, SPIKE-04, SPIKE-05, SPIKE-06, SPIKE-07, SPIKE-08, DOCS-05
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. The safe libkrun wrapper, called from crates under `forbid(unsafe_code)`, boots libkrunfw on this Mac from an initramfs whose `/init` is a static musl binary, with a raw read-only root disk and no virtiofs; an ad-hoc codesigned helper with the `com.apple.security.hypervisor` entitlement starts that VM, and an unsigned copy is refused (SPIKE-01, SPIKE-04)
   2. With implicit vsock disabled and a plain vsock added, a guest `connect()` to host loopback and to a public IP both fail, and a vsock port mapped to a host Unix socket carries a byte-capped guest-to-host stream end to end (SPIKE-02, SPIKE-03)
   3. Three open questions have recorded, evidence-backed answers: whether a Seatbelt deny-default profile still permits VM creation (with the dedicated unprivileged user fallback recorded), which documented tool chain turns a user Dockerfile into a root image on macOS, and whether `claude -p` with all tools disabled, `--json-schema`, `--no-session-persistence`, an empty cwd, and an allowlisted environment returns `structured_output` under subscription login, including the usage field names and `--max-turns 1` behavior (SPIKE-05, SPIKE-06, SPIKE-07)
   4. CLAUDE.md records every spike result and the v1 amendments (local-first build order, the `ModelProvider` decision, no tokio in v1, pico-dollar money, the `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate), and the workspace contains no `unsafe` exception; if the boot spike failed, work stopped and the user's decision was recorded before any alternative was tried (DOCS-05, SPIKE-08)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Stop-and-ask point**: If SPIKE-01 fails (the safe libkrun wrapper cannot boot libkrunfw on this machine), stop and ask the user before doing anything else. The remaining options, such as an `unsafe` binding crate, a different VMM, or waiting for upstream, need the user's explicit approval. Never add `#![allow(unsafe_code)]` or any other `unsafe` exception quietly (SPIKE-08).
 **Research**: Needs research-phase. The spikes are the research; each SPIKE item is a deliverable with a recorded result.
 
 ### Phase 3: Core Types and Pure Logic
+
 **Goal**: Every value the loop decides on exists only as a validated, pure, deterministic type in `minos-core`. An experiment that edits the judge, a NaN metric, or a float dollar amount cannot be represented, and the ledger wire format is frozen and guarded from its first golden file.
 **Depends on**: Phase 1
 **Parallelism**: Runs in parallel with Phase 2
 **Requirements**: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, CORE-06, CORE-07, CORE-08, CORE-09, CORE-10, CORE-11, CORE-12, CORE-13, CORE-14, CORE-15, CORE-16, CORE-17, COST-01
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. Invalid input cannot become a value. `RelPath` rejects `..`, absolute, empty, and non-normal paths under property tests. `Manifest::try_from` rejects unknown fields, `writable` paths that overlap readable or judge paths, image tags, out-of-limit budgets, a policy that does not match the objectives, and a ladder with no eligible tier. `Diff::parse` rejects non-writable paths, renames, mode changes, symlinks, binary patches, and oversize diffs. `Metric` rejects NaN and infinities and normalizes `-0.0`. `Outcome` carries failure as a value (CORE-02, CORE-03, CORE-04, CORE-06, CORE-07)
   2. Identity and wire formats are stable. An accepted diff re-serializes to canonical bytes that `ExperimentId` hashes, and the strict exact-position applier applies it to an in-memory tree and fails on any context mismatch. Golden vectors pass for every distinct ID type. The `Event` set (including `Steered`, `StopRequested`, the trial index on `Judged`, and model ID, prompt hash, and rationale blob on `Proposed`) is frozen with a documented `EventKey` per event before any golden file exists, after which `Record::V1` golden files pass and property tests show the fold rebuilds identical run state from the same events (CORE-01, CORE-04, CORE-05, CORE-08, CORE-09)
   3. Pure decisions are deterministic. `select_greedy` returns the same choice under any permutation of results while honoring `min_improvement` and breaking ties on `ExperimentId`. Routing climbs one tier after `STALL_STEP` stalled generations and gives a reason for every ineligible tier. The seeded sweep sampler repeats exactly for the same seed. The circuit breaker returns stop after K generations with no valid candidate or K consecutive infrastructure failures. `build_report` yields the same bytes and hash for the same ledger and blobs, with the noise-floor summary, cumulative diff, lineage, provenance, and the five v1 flags (CORE-10, CORE-11, CORE-12, CORE-16, CORE-17)
   4. Money, contracts, and display are safe by construction. `Spent` carries usage only, never dollars. Price rates parse from strings into pico-dollar `u128` with integer micro-dollar totals and no float. `JobRequest` and `JobResult` define the loop-to-runner contract. The renderer strips C0, C1, and ESC sequences and shows bidi and zero-width characters visibly (CORE-13, CORE-14, CORE-15, COST-01)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Ordering constraint**: CORE-08 (freeze the `Event` set and document every `EventKey`) lands before any golden wire-format file is committed
 **Research**: Standard patterns; skip research-phase
 
 ### Phase 4: Store, Source Snapshot, and Sandbox Types
+
 **Goal**: Run history survives crashes in an append-only ledger and a content-addressed blob store. Project source enters the system only as a deterministic, secret-scanned snapshot. The compiler rejects any sandbox configuration that would give a candidate judge data or a network, before any VM exists.
 **Depends on**: Phase 3
 **Parallelism**: Can overlap Phase 2 and Phase 6
 **Requirements**: STORE-01, STORE-02, STORE-03, STORE-04, SBX-01, SBX-02, SBX-03, SBX-04, SBX-05, SBX-06, CLI-11
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. The file ledger survives a crash: a torn final line is tolerated on reopen, unknown `v` tags are refused, no record is ever rewritten, and appending an already-recorded `EventKey` is a no-op. The file blob store writes temp-then-rename, and a tampered blob fails its SHA-256 check on read. The in-memory `Ledger` and `Blobs` pass the same synchronous trait tests (STORE-01, STORE-02, STORE-03, STORE-04)
   2. `trybuild` compile-fail tests prove that a `SandboxSpec<Candidate>` cannot receive judge data, that no role can attach a network, that a `LaunchPlan` comes only from `seal()`, and that `launch` cannot be called without a `Cleared`, which only `preflight` mints and which owns its plan. Every plan carries a hard maximum duration and a launch key derived from `ExperimentId`, role, and trial (SBX-01, SBX-02, SBX-03, SBX-06)
   3. `Untrusted<T>` exposes no `Deref`, `Display`, or `Debug` and exits only through the capped `into_scorecard`, `into_log_excerpt`, and `into_diff_texts`. The output tar reader accepts regular files only, rejects path traversal and over-cap entry counts, entry sizes, and totals, never writes to disk, and survives its fuzz corpus (SBX-04, SBX-05)
   4. Packing the same working tree twice yields byte-identical tarballs and the same `TreeId` (sorted paths, zeroed metadata, regular files only), honoring `.gitignore`, `.minosignore`, and the hard denylist. A planted secret blocks the pack, and a dirty tree is refused unless `--allow-dirty` is given (CLI-11)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Research**: Standard patterns; skip research-phase
 
 ### Phase 5: Guest, krun Backend, and Environment Build
+
 **Goal**: An experiment runs inside a libkrun microVM on this Mac with no network path, no host environment, read-only disk-image inputs, and a capped tar stream out, and no VM outlives the process that launched it
 **Depends on**: Phase 2, Phase 4
 **Parallelism**: Runs in parallel with Phase 6 and with the loop plans of Phase 7
 **Requirements**: GUEST-01, GUEST-02, GUEST-03, GUEST-04, GUEST-05, KRUN-01, KRUN-02, KRUN-03, KRUN-04, KRUN-05, KRUN-06, KRUN-07, KRUN-08, KRUN-09, KRUN-10, CLI-02, CLI-03
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. The three permanent exit tests pass on this Mac. A guest `connect()` to host loopback and to a public IP fails closed (KRUN-03). Reading `env` and `/proc/cmdline` inside the VM shows no host values (GUEST-05). `kill -9` on the process that launched a VM, which stands in for `minos run`, leaves no VM and no `minos-vmm` helper running (KRUN-05)
   2. Every VM runs in its own signed `minos-vmm` helper, spawned with a cleared environment, stdin from `/dev/null`, and a capped console pipe. It is the only binary that links the VMM and carries the hypervisor entitlement, which the `xtask` applies and verifies with `codesign -d --entitlements -`. Every launch disables implicit vsock and adds a plain vsock with no socket proxying, clippy rejects the hijack and host-directory-sharing APIs, and the supervisor kills the helper's process group at the hard maximum duration (KRUN-01, KRUN-02, KRUN-05, KRUN-08)
   3. Two sequential experiments on this host each boot the static musl guest as PID 1, which reaps children and creates nothing per-run at startup, from a shared read-only root disk and a per-job read-only input disk. Each applies the base tarball plus canonical diff with the core applier (a mismatch yields `Rejected`), runs manifest argv commands as a non-root uid under rlimits writing only to a size-capped scratch disk, and returns a byte-capped tar stream over vsock. Both record outcomes and share no build output, scratch is deleted unread, no host directory is ever shared, and only the judge-role channel can deliver a scorecard (GUEST-01, GUEST-02, GUEST-03, GUEST-04, KRUN-04, KRUN-10)
   4. `minos env build` turns the project Dockerfile into a root image and an initramfs and writes their digests to `minos.lock`, from a build context with no judge data and no secrets. `minos host doctor` runs the launch preflight (entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, active confinement layers) and prints every refusal with an explanation and a fix. The active confinement layers are recorded in `BackendInfo`, with no silent fallback (KRUN-06, KRUN-07, KRUN-09, CLI-02, CLI-03)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Exit criteria**: Success criterion 1 (fail-closed egress, no host environment, no VM after `kill -9`) must pass before this phase is marked complete. It is never traded for schedule.
 **Research**: Needs research-phase (Seatbelt and `hv_vm_create`, first boot, root-image tooling on macOS, concurrent VM and memory limits)
 
 ### Phase 6: Proposers
+
 **Goal**: The loop can get candidate diffs from a seeded sweep with no model, or from one text-only call to the user's own `claude` install that runs no tools, loads no project configuration, and handles no credentials, with model output treated as hostile
 **Depends on**: Phase 2, Phase 3
 **Parallelism**: Runs in parallel with Phases 4 and 5
 **Requirements**: PROP-01, PROP-02, PROP-03, PROP-04, PROP-05, PROP-06, PROP-07, PROP-08, PROP-09, PROP-10
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. The `ClaudeCli` argv matches its golden file. The provider runs the user's own `claude` from a fresh empty temp directory outside any repo, with only `HOME`, `PATH`, `USER`, `LOGNAME`, `TMPDIR`, and `LANG` in its environment, all built-in tools disabled, a strict empty MCP config, session persistence off, and the prompt on stdin. A fixture project with a hostile `.claude/settings.json`, hooks, and `.mcp.json` proves none of them run during a proposal (PROP-02, PROP-03)
   2. A preflight confirms that the subscription login is the active auth method and refuses when an API key variable would take over. No code path reads, stores, or forwards Claude credentials. A fake provider plugs into the `ModelProvider` abstraction with no change to callers, as a later Bedrock or API-key provider will (PROP-01, PROP-04)
   3. Prompts are byte-identical for shuffled inputs under golden tests, with `program.md` and the surface files as the stable prefix and a bounded history table plus sanitized failure excerpts, labelled as untrusted text, in the dynamic suffix. A test proves held-out metric values never appear in any prompt (PROP-05, PROP-06)
   4. `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types, and invalid diffs are dropped, not repaired. `sweep` produces proposals from declared params with no model call. Each call's token usage is returned for a `Spent` event and any CLI dollar figure is ignored. A rate-limit or usage-cap response surfaces as an infrastructure failure that stops the run with `StopRequested`, never as an `Outcome` (PROP-07, PROP-08, PROP-09, PROP-10)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Research**: Needs research-phase (`claude -p` flag interplay and subscription behavior, especially anything SPIKE-07 left open)
 
 ### Phase 7: Runner and Loop
+
 **Goal**: Generations run end to end (route, propose, validate, candidate VM, judge VM, select, record), and an interrupted, over-budget, or failing run resumes or stops from the ledger with the same result as an uninterrupted one
 **Depends on**: Phase 4, Phase 5, Phase 6
 **Parallelism**: The loop plans (LOOP-04 through LOOP-09) are built and tested against the in-memory store, a fake provider, and a fake job runner once Phases 4 and 6 are done, before Phase 5 finishes. Only the runner's real-VM plans wait on Phase 5.
 **Requirements**: LOOP-01, LOOP-02, LOOP-03, LOOP-04, LOOP-05, LOOP-06, LOOP-07, LOOP-08, LOOP-09, JUDGE-01, JUDGE-03, JUDGE-04, CLI-04
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. Against the in-memory store, a fake provider, and a fake job runner with no VM, the loop drives generations (route tier, propose, validate diffs, run jobs, fold `Judged`, `select_greedy`, append `Selected`) and records before acting. A run interrupted at any point resumes from the ledger to the same result as an uninterrupted run, a second driver on the same run is refused by the run lock, and `minos-loop` depends only on core, store, and propose (LOOP-04, LOOP-05, LOOP-06, LOOP-09)
   2. The run stops with a recorded `StopRequested` reason when the spend cap or the model-call or token cap would be exceeded (checked before each generation and each model call), after K generations with no valid candidate, or after K consecutive infrastructure failures (LOOP-07, LOOP-08)
   3. On real VMs, the runner runs the candidate VM and then the judge VM for a `JobRequest`. Only the judge mounts judge data, read-only, and the two share no process and no disk. Time and resource usage come from host measurement, never candidate output. A failed gate yields `Rejected` without scoring objectives. Every `Judged` records backend and architecture, a run with a speed objective stays pinned to one backend class, and `minos-runner` is the only crate that turns `Untrusted` output into an `Outcome` (LOOP-01, LOOP-02, LOOP-03, JUDGE-03, JUDGE-04)
   4. `minos judge push <dir>` stores judge data in the local blob store as a new judge version with its hash recorded, and that data never appears in the source tarball or the image build context (JUDGE-01, CLI-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Research**: Standard patterns; skip research-phase
 
 ### Phase 8: CLI, Sample Project, and Docs
+
 **Goal**: A user takes the shipped sample project from `minos check` through `run`, `report`, and `adopt` with every experiment in a VM, sees only sanitized output and measured cost, receives a patch file only after acknowledging the report, and reads docs that do not overclaim
 **Depends on**: Phase 5, Phase 7
 **Parallelism**: None; this is the integration phase
 **Requirements**: CLI-01, CLI-05, CLI-06, CLI-07, CLI-08, CLI-09, CLI-10, JUDGE-02, COST-02, DOCS-01, DOCS-02, DOCS-03, DOCS-04
 **Cross-cutting**: GATE-06 (`cargo clean` after verification) and `rules/` adherence
 **Success Criteria** (what must be TRUE):
+
   1. On the shipped `examples/` `optimize` project, whose judge computes metrics from harness measurements and candidate output files and never from candidate-reported numbers, `minos check`, `minos run --generations N`, `minos report`, and `minos adopt` complete end to end with every experiment in a VM (DOCS-01, DOCS-02)
   2. `minos init --kind <tune|optimize|explore>` scaffolds `minos.toml`, `program.md`, and `minos.Dockerfile`. `minos check` validates the manifest, builds, judges the baseline several times with the trial index on each `Judged`, and prints the noise floor beside `min_improvement` and the route table with reasons, with actionable errors when something is wrong (CLI-01, CLI-05, JUDGE-02)
   3. `minos run` prints one sanitized progress line per experiment (ID, tier, outcome, delta, elapsed) and resumes an interrupted run. `minos stop <run>` records `StopRequested` and the driver exits at the next safe point. `minos status`, `minos log`, and `minos show <exp>` render only through the sanitizing renderer. Cost appears only as one `approx. cost: $X.XX` line with token counts beside it, and no command prints an estimate or the word "exact" (CLI-06, CLI-07, CLI-10, COST-02)
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
+
 **Plans**: TBD
 **Research**: Standard patterns; skip research-phase
 
