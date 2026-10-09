@@ -1,0 +1,63 @@
+# cargo-deny 0.20.2 policy. `cargo deny check` is the fourth gate command (CLAUDE.md Commands).
+# Every entry here is reviewed policy. Never add an exception, ignore, or allowlist entry just to get green.
+
+[graph]
+# D-09: the guest graph is checked now even though Phase 1 builds only for the host.
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl"]
+all-features = false   # never true: it would pull backhand zstd/xz (C) into the checked graph
+
+[advisories]
+# RustSec vulnerabilities fail by default. The DB is fetched over the network;
+# `cargo deny --offline check` uses the cached copy. An advisory hit is a stop-and-report, never an `ignore`.
+unmaintained = "workspace"
+yanked = "deny"
+
+[licenses]
+# Exactly what the v1 graph needs (each entry was removed in turn to confirm it is required):
+#   BSD-3-Clause: msb_krun_* sub-crates ("Apache-2.0 AND BSD-3-Clause"), vm-fdt, virtio-bindings
+#   BSL-1.0:      xxhash-rust (via backhand)
+#   ISC:          libloading (via msb_krun)
+#   Unicode-3.0:  unicode-ident
+#   Zlib:         foldhash (via diffy -> hashbrown), zlib-rs (via flate2)
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "BSL-1.0", "ISC", "Unicode-3.0", "Zlib"]
+
+[bans]
+multiple-versions = "warn"   # duplicates stay visible while clippy's multiple_crate_versions is carved out
+wildcards = "deny"           # internal path dependencies carry version = "=0.1.0", so no exception is needed
+deny = [
+  # No C in our tree (CLAUDE.md). `cc` must get a wrapper when the rustls provider arrives (AWS milestone).
+  { crate = "openssl-sys", reason = "no OpenSSL" },
+  { crate = "openssl", reason = "no OpenSSL" },
+  { crate = "native-tls", reason = "no OpenSSL" },
+  { crate = "git2", reason = "no libgit2" },
+  { crate = "libgit2-sys", reason = "no libgit2" },
+  { crate = "gix", reason = "no git in the trusted path" },
+  { crate = "zstd-sys", reason = "C; backhand uses gzip only" },
+  { crate = "liblzma-sys", reason = "C; backhand uses gzip only" },
+  { crate = "cc", reason = "no C compiled in our tree" },
+]
+
+[bans.workspace-dependencies]
+duplicates = "deny"               # a member may not redeclare a workspace dep without `workspace = true`
+include-path-dependencies = true
+unused = "deny"                   # every [workspace.dependencies] entry must be used
+
+[bans.build]
+# Every crate in the aarch64-apple-darwin + aarch64-unknown-linux-musl graph that has a build.rs.
+# A new build-script-not-allowed error is a review point: read the crate's build.rs before adding it here.
+# Never add an entry automatically.
+allow-build-scripts = [
+  { crate = "anyhow" }, { crate = "crc32fast" }, { crate = "crossbeam-deque" }, { crate = "crossbeam-epoch" },
+  { crate = "crossbeam-utils" }, { crate = "getrandom" }, { crate = "kvm-ioctls" },      # kvm-ioctls: linux-musl only (msb_krun)
+  { crate = "libc" }, { crate = "memoffset" }, { crate = "msb-imago" }, { crate = "msb_krun_hvf" },  # msb_krun_hvf: only links Hypervisor.framework
+  { crate = "nix" }, { crate = "num-traits" }, { crate = "proc-macro2" }, { crate = "quote" }, { crate = "radium" },
+  { crate = "rustix" }, { crate = "rustversion" }, { crate = "serde" }, { crate = "serde_core" }, { crate = "serde_json" },
+  { crate = "target-tuple" }, { crate = "thiserror" }, { crate = "zerocopy" }, { crate = "zmij" },
+]
+executables = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+required-git-spec = "rev"   # GATE-03: a git dependency must be pinned by rev
+allow-git = []              # the AWS milestone adds aws-durable-execution-sdk-rust
