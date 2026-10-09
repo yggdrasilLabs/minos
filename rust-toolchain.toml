@@ -3,3 +3,5 @@ channel = "1.97.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
 # targets: add "aarch64-unknown-linux-musl" in Phase 5 (D-09). The musl std is not installed today.
+# Until then no gate command compiles or lints minos-guest for the target it runs on; CLAUDE.md Commands
+# lists the Phase 5 clippy line for it.

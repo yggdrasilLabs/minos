@@ -422,8 +422,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check
 cargo doc --workspace --no-deps          # the only command that enforces [workspace.lints.rustdoc]
+cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings   # Phase 5 onward
 cargo lambda build --release --arm64     # Lambda functions; plain cargo build links the wrong glibc
 ```
+
+The sixth command is Phase 5 onward (D-09 adds `targets = ["aarch64-unknown-linux-musl"]` to `rust-toolchain.toml` in that phase, with the matching `cargo test` once a Linux runner exists). Until then the host gate builds `minos-guest` for `aarch64-apple-darwin`, where its Linux-only dependencies do not exist, so the forbid backstop and every clippy lint are blind to anything behind `#[cfg(target_os = "linux")]`. Keep the guest free of that gate on anything the host can compile (the tar and `minos-core` paths) so the host gate covers as much of it as possible.
 
 Every phase verification also runs the C-02 check, `grep -rnE '#!?\[allow\(' crates --include='*.rs'`, which must print nothing. An inner `#![allow(..., reason = "...")]` on any lint that is not `forbid` passes `cargo clippy` (01-GATE-EVIDENCE.md R-03), so for those lints this grep, not the gate, is what enforces the no-`allow` rule.
 
