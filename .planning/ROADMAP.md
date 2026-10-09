@@ -43,7 +43,7 @@ Facts that matter for scheduling:
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Workspace and Gates** - Four plain cargo commands enforce lints, supply-chain policy, and crate layering from the first commit
+- [x] **Phase 1: Workspace and Gates** - Four plain cargo commands enforce lints, supply-chain policy, and crate layering from the first commit (completed 2026-10-09)
 - [ ] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md
 - [ ] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core`
 - [ ] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts
@@ -68,7 +68,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Each supply-chain or layering violation makes `cargo deny check` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate; a normal `minos-core` to `minos-sandbox` edge fails earlier, as a Cargo dependency cycle (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans complete
 Plans:
 **Wave 1**
 
@@ -80,7 +80,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md — Gate self-test (every D-11 violation captured verbatim, then reverted), gate wording fix in REQUIREMENTS/ROADMAP, open decisions recorded, `cargo clean` (wave 3)
+- [x] 01-03-PLAN.md — Gate self-test (every D-11 violation captured verbatim, then reverted), gate wording fix in REQUIREMENTS/ROADMAP, open decisions recorded, `cargo clean` (wave 3)
 
 **Research**: Standard patterns (cargo-deny and lint recipes are verified in research/STACK.md); skip research-phase
 
@@ -220,7 +220,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace and Gates | 2/3 | In Progress|  |
+| 1. Workspace and Gates | 3/3 | Complete   | 2026-10-09 |
 | 2. Platform Spikes | 0/TBD | Not started | - |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |

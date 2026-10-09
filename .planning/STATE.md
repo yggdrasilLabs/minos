@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 01
 current_phase_name: Workspace and Gates
-status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-10-09T21:31:58.027Z"
+status: verifying
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-10-09T21:39:28.007Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 0
+  completed_plans: 3
+  percent: 13
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 Phase: 01 (Workspace and Gates) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-09 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -57,6 +57,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 01 P01 | 3min | 3 tasks | 28 files |
 | Phase 01 P02 | 1min | 2 tasks | 1 files |
+| Phase 01 P03 | 4min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 01]: rustix and vsock sit under a cfg(target_os = linux) target table in minos-guest
 - [Phase 01]: deny.toml encodes crate layering as one wrappers entry per internal library crate (direct edges only)
 - [Phase 01]: cargo-deny multiple-versions stays warn; 7 duplicates from msb_krun, proptest, getrandom
+- [Phase 01]: 01-03: all 23 gate violations rejected with verbatim evidence in 01-GATE-EVIDENCE.md; V-23 zstd-sys ban fired as expected
+- [Phase 01]: 01-03: three gate gaps (inner allow with reason, missing [lints], rustdoc only under cargo doc) left open for the user, not resolved
 
 ### Pending Todos
 
@@ -97,6 +100,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-09T21:31:46.952Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-10-09T21:39:28.001Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
