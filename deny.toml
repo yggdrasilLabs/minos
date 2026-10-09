@@ -8,9 +8,17 @@ all-features = false   # never true: it would pull backhand zstd/xz (C) into the
 
 [advisories]
 # RustSec vulnerabilities fail by default. The DB is fetched over the network;
-# `cargo deny --offline check` uses the cached copy. An advisory hit is a stop-and-report, never an `ignore`.
-unmaintained = "workspace"
+# `cargo deny --offline check` uses the cached copy. An advisory hit is a stop-and-report. The only way past
+# one is an `ignore` entry that names the advisory and carries a reviewed reason; cargo-deny warns when an
+# entry stops matching, so it cannot go stale silently. Never narrow the scope instead.
+unmaintained = "all"      # default scope; the transitive VMM path is exactly where this matters
 yanked = "deny"
+ignore = [
+  # Reviewed 2026-10-09. bincode 2.0.1 is pulled only by msb_krun_devices and msb_krun_vmm (the pinned
+  # VMM). No alternative without replacing msb_krun. Re-review on every msb_krun bump. cargo-deny warns
+  # when this entry stops matching, so it cannot go stale silently.
+  { id = "RUSTSEC-2025-0141", reason = "bincode 2 via msb_krun =0.1.41; VMM is replaced, not patched" },
+]
 
 [licenses]
 # Exactly what the v1 graph needs (each entry was removed in turn to confirm it is required):

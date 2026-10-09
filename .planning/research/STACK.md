@@ -42,7 +42,7 @@
 | Technology | Version | Purpose | Why Recommended |
 |---|---|---|---|
 | Rust toolchain | **1.97.1**, pinned in `rust-toolchain.toml`, edition 2024 | Everything | The durable SDK later needs at least 1.94.1. Pinning keeps `trybuild` stderr snapshots and clippy output stable across machines. Add targets `aarch64-apple-darwin` and `aarch64-unknown-linux-musl`. |
-| `msb_krun` | **=0.1.41** (exact pin), `default-features = false`, `features = ["blk"]` | VMM inside the `minos-vmm` launcher | The only maintained crate that exposes libkrun as a **safe Rust builder API** (`VmBuilder`, `DiskBuilder`, `VsockBuilder`, `KernelBuilder`). Our crate keeps `forbid(unsafe_code)`, and all `unsafe` lives in the external VMM crate, as it would with any hypervisor. microsandbox (8.6k stars) pins the same `=0.1.41`. On macOS the tree is pure Rust: it links `Hypervisor.framework` and `dlopen`s libkrunfw. Verified with a compile probe. |
+| `msb_krun` | **=0.1.41** (exact pin), `default-features = false`, `features = ["blk"]` | VMM inside the `minos-vmm` launcher | The only maintained crate that exposes libkrun as a **safe Rust builder API** (`VmBuilder`, `DiskBuilder`, `VsockBuilder`, `KernelBuilder`). Our crate keeps `forbid(unsafe_code)`, and all `unsafe` lives in the external VMM crate, as it would with any hypervisor. microsandbox (8.6k stars) pins the same `=0.1.41`. On macOS the tree is pure Rust: it links `Hypervisor.framework` and `dlopen`s libkrunfw. Verified with a compile probe. **Known advisory:** `msb_krun_devices` and `msb_krun_vmm` pull `bincode 2.0.1` (RUSTSEC-2025-0141, unmaintained). It is carried by a named, reasoned `ignore` entry in `deny.toml`, reviewed 2026-10-09; re-review on every `msb_krun` bump. |
 | libkrunfw | **5.6.2** (Homebrew `libkrun/krun`) | Guest Linux kernel (6.12.91) packaged as a dylib | msb_krun loads the kernel from it. Its config has `VIRTIO_BLK`, `VIRTIO_VSOCKETS`, `EXT4_FS`, `SQUASHFS` (zlib and zstd), `EROFS_FS`, `OVERLAY_FS`, `TMPFS`, `SECCOMP`, `CGROUPS`, and `MODULES` off. Pass its **absolute path** via `KernelBuilder::krunfw_path` and record its SHA-256 in provenance. |
 | `diffy` | **0.5.2**, `default-features = false`, `features = ["std"]` | Parsing unified and git diffs; generating diffs for reports | Maintained (2026-08), contains no `unsafe`, MSRV 1.85. `PatchSet` exposes `FileOperation::{Create, Delete, Modify, Rename, Copy}`, `old_mode`/`new_mode`, and `is_binary()`, which is exactly what `Diff::parse` must reject. `create_patch` produces the report's cumulative diff. Leave the `binary` feature off; it pulls in `zlib-rs`. |
 | `tar` | **0.4.46**, `default-features = false` | Deterministic source tarball, and output streams over vsock | The standard crate. The repo now lives at `composefs/tar-rs`. Turning off default features drops `xattr`. Build headers by hand and **never call `Archive::unpack`**. |
@@ -254,8 +254,12 @@ Pitfalls:
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl"]   # add Linux/Lambda triples later
 
 [advisories]
-unmaintained = "workspace"
+unmaintained = "all"   # default scope; never narrow it to hide a transitive hit
 yanked = "deny"
+ignore = [
+  # RUSTSEC-2025-0141: bincode 2.0.1 via msb_krun_devices / msb_krun_vmm (the pinned VMM). Reviewed 2026-10-09.
+  { id = "RUSTSEC-2025-0141", reason = "bincode 2 via msb_krun =0.1.41; VMM is replaced, not patched" },
+]
 
 [licenses]
 allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "MPL-2.0", "CC0-1.0"]

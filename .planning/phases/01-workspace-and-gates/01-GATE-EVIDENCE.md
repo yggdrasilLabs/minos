@@ -7247,3 +7247,28 @@ Exit code: 0
 ```text
      Removed 5800 files, 1.3GiB total
 ```
+
+## Review fix (01-REVIEW.md CR-01): RUSTSEC-2025-0141 recorded
+
+Finding: `deny.toml` had `[advisories] unmaintained = "workspace"`, which reports unmaintained advisories for direct workspace dependencies only. With cargo-deny 0.20.2's default scope (`"all"`), the advisories check fails on `bincode 2.0.1`, reachable only through `msb_krun_devices` and `msb_krun_vmm` inside `minos-vmm`, the hypervisor-entitled binary. The hit was never reported.
+
+Decision (2026-10-09): restore the default scope and carry the advisory as one named, reasoned `ignore` entry. Scope narrowing is a blanket, unnamed ignore of every present and future transitive unmaintained advisory; an `ignore` entry names the advisory, carries a reason, and makes cargo-deny warn when it stops matching. `bincode` has no replacement without replacing `msb_krun`; the VMM is replaced, not patched. Re-review on every `msb_krun` bump. Also recorded next to the `msb_krun` row in `.planning/research/STACK.md`.
+
+Reproduction before the fix. Command: `cargo deny --config <scratch copy with unmaintained = "all"> check advisories`
+
+```text
+error[unmaintained]: Bincode is unmaintained
+   ├ ID: RUSTSEC-2025-0141
+   ├ Advisory: https://rustsec.org/advisories/RUSTSEC-2025-0141
+advisories FAILED
+```
+
+After the fix. Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+No `target/` directory was created (`cargo deny` only resolves the graph).
