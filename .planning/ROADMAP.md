@@ -64,7 +64,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Each deliberate code violation makes `ci` fail: an `unsafe` block, an `unwrap`, `expect`, or slice index, an `allow(clippy::...)` attribute (only `#[expect(..., reason = ...)]` passes), and a `SystemTime::now` or `HashMap` in `minos-core` (GATE-01, GATE-05)
   3. Each supply-chain or layering violation makes `ci` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 01-01-PLAN.md — Workspace skeleton: toolchain pin, root manifest with the lint baseline and exact pins, ten stub crates, minos-core clippy.toml, licenses (wave 1)
+- [ ] 01-02-PLAN.md — deny.toml supply-chain policy and per-crate layering bans; all four gate commands green (wave 2)
+- [ ] 01-03-PLAN.md — Gate self-test (every D-11 violation captured verbatim, then reverted), gate wording fix in REQUIREMENTS/ROADMAP, open decisions recorded, `cargo clean` (wave 3)
 **Research**: Standard patterns (cargo-deny and lint recipes are verified in research/STACK.md); skip research-phase
 
 ### Phase 2: Platform Spikes
