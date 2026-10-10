@@ -142,3 +142,7 @@ No other deviations. No Cargo.toml, Cargo.lock, or deny.toml change; no new depe
 
 - 02-07 (K7 exit map), 02-08 (egress and vsock), and 02-09 (Seatbelt) can start: the D-18 boot works.
 - 02-10's precondition holds: evidence/02-06.md contains `### S08: SPIKE-08 not triggered`.
+
+## Self-Check: PASSED
+
+All six task commits (0c79791, 7dd8120, 048d00b, 4863655, 727e952, 41f4d47) and all five key files exist.
