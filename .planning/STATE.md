@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Platform Spikes
+current_phase: 02
+current_phase_name: platform-spikes
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-10-10T12:34:21.038Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-10-10T12:54:37.904Z"
 last_activity: 2026-10-10
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
+last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 16
+  completed_plans: 6
   percent: 13
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 01 — workspace-and-gates
+**Current focus:** Phase 02 — platform-spikes
 
 ## Current Position
 
-Phase: 2 — Platform Spikes
-Plan: Not started
+Phase: 02 (platform-spikes) — EXECUTING
+Plan: 2 of 11
 Status: Ready to execute
-Last activity: 2026-10-10 — Phase 01 complete, transitioned to Phase 2
+Last activity: 2026-10-10 — Phase 02 execution started
 
 Progress: [██████████] 100%
 
@@ -60,6 +60,7 @@ Progress: [██████████] 100%
 | Phase 01 P03 | 4min | 3 tasks | 3 files |
 | Phase 01 P04 | 5min | 3 tasks | 9 files |
 | Phase 01 P05 | 6 min | 3 tasks | 8 files |
+| Phase 02 P01 | 12min | 4 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,9 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-04: .cargo/config.toml [build] rustflags forbid backstop plus D-15 per-manifest lints check (UAT test 2)
 - [Phase 01]: 01-04: cargo doc --workspace --no-deps is the fifth gate command (UAT test 3)
 - [Phase 01]: UAT test 6 (A): minos-cli uses the clap builder API; clap derive feature off; re-enabling it is a user decision, never a lint change
+- [Phase 02]: 02-01: Cargo rejects panic in a package profile (P-PANIC); minos-guest keeps unwinding and a PID 1 panic surfaces as no status frame (Crashed)
+- [Phase 02]: 02-01: the guest reaps orphans with rustix wait(NOHANG); waitpid(None) in rustix 1.x covers only the caller's process group
+- [Phase 02]: 02-01: libkrunfw 5.6.2 canonical path /opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib, SHA-256 59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217
 
 ### Pending Todos
 
@@ -107,6 +111,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T00:53:15.359Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-platform-spikes/02-CONTEXT.md
+Last session: 2026-10-10T12:54:37.900Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
