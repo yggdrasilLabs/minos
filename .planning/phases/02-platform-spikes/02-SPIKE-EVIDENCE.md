@@ -8362,3 +8362,9 @@ layer if the denials do not hold. The helper exits 0 even when the profile break
 the frame, not the exit code, decides success.
 
 <!-- fragments-end -->
+
+## Boot-path decision (D-18)
+
+Decided by the user on 2026-10-09, after research, and recorded in 02-CONTEXT.md D-18. Stock libkrunfw 5.6.2 has `# CONFIG_BLK_DEV_INITRD is not set`, so the kernel cannot unpack an initramfs; the one literal attempt failed as predicted (S01-INITRAMFS: the kernel never ran `/init` from the initramfs and panicked with `VFS: Unable to mount root fs on "/dev/root" or unknown-block(0,0)`, and the helper still exited 0). The VM instead boots from the raw read-only SquashFS root on `/dev/vda`, with `/init` = the static musl `minos-guest` written in last by the trusted packer, no initramfs, and no virtio-fs device. `minos-vmm` carries `root=/dev/vda` past msb_krun's own `root=/dev/root` through `KernelBuilder::init_path`, and the boot test asserts the exact `/proc/cmdline` tokens (S01-ROOTDISK, S01-CMDLINE). By the user's decision in S01-NETIFACES ("option 2"), the fixed root-disk arguments also carry one Minos-originated token, `dummy.numdummies=0`, and the boot test asserts it with the rest. SPIKE-08: not triggered (S08).
+
+Superseded on 2026-10-09 by this decision, in the same change: REQUIREMENTS.md SPIKE-01 ("from an initramfs"), KRUN-09 ("a root image and an initramfs"), and ROADMAP.md Phase 2 success criterion 1 and Phase 5 criterion 4. Superseded by D-11 in the same change: KRUN-08 ("An `xtask` signs the helper") and ROADMAP.md Phase 5 criterion 2.

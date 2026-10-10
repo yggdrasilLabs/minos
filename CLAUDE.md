@@ -345,7 +345,7 @@ The judge is a command plus private data that runs in its own sandbox and writes
 
 ## Environments and source
 
-**Environment.** The user's Dockerfile feeds every backend. Dependencies are baked in during a build phase that has registry access and no secrets; the experiment phase is offline. Base images are pinned by digest and lockfiles are required. `minos` appends a final stage that installs `minos-guest` as the entrypoint. `minos.lock` records one image digest per backend, since Lambda is arm64 and a GPU box is usually x86_64.
+**Environment.** The user's Dockerfile feeds every backend. Dependencies are baked in during a build phase that has registry access and no secrets; the experiment phase is offline. Base images are pinned by digest and lockfiles are required. The trusted packer writes `minos-guest` into the root image as `/init` after every file from the user's image, so the Dockerfile cannot replace it, and the VM never runs a Docker entrypoint (02-CONTEXT.md D-18). `minos.lock` records one image digest per backend, since Lambda is arm64 and a GPU box is usually x86_64.
 
 An optional `[environment.prepare]` step runs once with allowlisted network access. Its output is frozen as a read-only blob identified by hash.
 
@@ -362,6 +362,8 @@ Local is where a breakout costs the most, because it lands next to the user's ke
 - Hardware virtualization is the default. Process-only isolation (Landlock plus seccomp) is a labelled dev mode, and runs made with it are marked `WeakIsolation` in the ledger and the report.
 - The hypervisor process runs as a dedicated unprivileged user with its own seccomp filter and cgroup limits.
 - Files go in as disk images: a shared read-only root, a per-job read-only input disk, and a size-capped scratch disk. Never share a host directory. The host writes the tarball and diff to the input disk without unpacking or applying them.
+- The VM boots straight from the raw read-only SquashFS root image on `/dev/vda` (02-CONTEXT.md D-18; 02-SPIKE-EVIDENCE.md S01-ROOTDISK). Stock libkrunfw has `CONFIG_BLK_DEV_INITRD` unset, so there is no initramfs. `/init` is the static musl `minos-guest`, written into the image last by the trusted packer, so a Dockerfile cannot supply its own. `minos-vmm` passes `rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0` through `KernelBuilder::cmdline` and `/init root=/dev/vda` through `KernelBuilder::init_path`, which lands after msb_krun's own `root=/dev/root`; Linux keeps the last `root=`. `dummy.numdummies=0` stops the kernel's built-in dummy driver from creating `dummy0`, by the user's decision (S01-NETIFACES). The boot test asserts the exact `/proc/cmdline` tokens (S01-CMDLINE), so an msb_krun bump cannot change this silently. No VM has a virtio-fs device.
+- The packer creates `/dev`, `/proc`, `/sys`, `/tmp`, and `/mnt` in every root image, because nothing can create a directory on a read-only SquashFS root.
 - Output comes back as a tar stream over vsock, parsed in Rust with caps. Never mount a disk the guest wrote.
 - GPU passthrough requires an IOMMU and a GPU the host does not use for display. Reset the device between runs.
 - Preflight fails closed and is enforced by the type system:
@@ -424,8 +426,13 @@ cargo deny check
 cargo doc --workspace --no-deps          # the only command that enforces [workspace.lints.rustdoc]
 cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings   # Phase 2 onward (02-CONTEXT.md D-03)
 cargo build -p minos-guest --release --target aarch64-unknown-linux-musl   # the static /init; a build step, not a gate command
+cargo build -p minos-vmm
+codesign --force --sign - --options runtime --entitlements crates/minos-vmm/minos-vmm.entitlements target/debug/minos-vmm   # after every build of minos-vmm
+codesign --display --entitlements - target/debug/minos-vmm   # must list com.apple.security.hypervisor
 cargo lambda build --release --arm64     # Lambda functions; plain cargo build links the wrong glibc
 ```
+
+Signing (02-CONTEXT.md D-11): every `cargo build` relinks `minos-vmm` and drops its entitlement, so the sequence is always build, then sign, then run. `cargo test --workspace` can relink it too, so re-sign before a VM run. There is no xtask, script, `build.rs`, or cargo alias; `minos host setup` may run the same argv from Rust later. The hardened runtime is on, and the entitlement set is `com.apple.security.hypervisor` plus `com.apple.security.cs.disable-library-validation`, because the hardened runtime's library validation refuses the Homebrew libkrunfw dylib ("mapping process and mapped file (non-platform) have different Team IDs"); `minos-vmm`'s preflight SHA-256 check of libkrunfw, before the `dlopen`, is the integrity check that remains (02-SPIKE-EVIDENCE.md K5). Only `minos-vmm` is signed; the `minos` CLI has no entitlement. A helper without the entitlement cannot create a VM: `hv_vm_create` fails and `minos-vmm` exits 70 before the VM starts (S04-UNSIGNED). The VM spikes are ignored integration tests: `cargo test -p minos-backend-krun --test <spike_boot|spike_exits|spike_net|spike_seatbelt|spike_rootimg> -- --ignored --nocapture --test-threads=1`, with `MINOS_VMM`, `MINOS_GUEST`, and `MINOS_KRUNFW` set as in 02-06-PLAN.md E-1 (`spike_net` also needs `MINOS_SPIKE_HOST_IP`).
 
 The sixth command runs from Phase 2 onward (02-CONTEXT.md D-03). The guest is always Linux, because libkrunfw ships a Linux kernel, so `minos-guest` needs a Linux target even though Minos runs on macOS. `/init` is written into whatever root image the user's Dockerfile produces, so it must be a fully static binary that loads no libc from that image: hence `aarch64-unknown-linux-musl`, listed in `rust-toolchain.toml` and linked with `rust-lld`. `.cargo/config.toml` gives that target a `linker` key and nothing else. A flags key there would silently replace the `[build]` forbid backstop for the guest (01-GATE-EVIDENCE.md G-02-CLOSED). The host gate still builds `minos-guest` for `aarch64-apple-darwin`, so keep everything the host can compile (the job and frame codecs, the tar and `minos-core` paths) out of `#[cfg(target_os = "linux")]`; Linux-only code lives in `crates/minos-guest/src/linux.rs`. `cargo test --workspace` cannot run that Linux code on macOS; it waits for a Linux runner, and the VM spikes exercise it meanwhile.
 

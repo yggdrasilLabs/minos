@@ -52,7 +52,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 |---|---|---|---|
 | Rust toolchain | **1.97.1**, pinned in `rust-toolchain.toml`, edition 2024 | Everything | The durable SDK later needs at least 1.94.1. Pinning keeps `trybuild` stderr snapshots and clippy output stable across machines. Add targets `aarch64-apple-darwin` and `aarch64-unknown-linux-musl`. |
 | `msb_krun` | **=0.1.41** (exact pin), `default-features = false`, `features = ["blk"]` | VMM inside the `minos-vmm` launcher | The only maintained crate that exposes libkrun as a **safe Rust builder API** (`VmBuilder`, `DiskBuilder`, `VsockBuilder`, `KernelBuilder`). Our crate keeps `forbid(unsafe_code)`, and all `unsafe` lives in the external VMM crate, as it would with any hypervisor. microsandbox (8.6k stars) pins the same `=0.1.41`. On macOS the tree is pure Rust: it links `Hypervisor.framework` and `dlopen`s libkrunfw. Verified with a compile probe. |
-| libkrunfw | **5.6.2** (Homebrew `libkrun/krun`) | Guest Linux kernel (6.12.91) packaged as a dylib | msb_krun loads the kernel from it. Its config has `VIRTIO_BLK`, `VIRTIO_VSOCKETS`, `EXT4_FS`, `SQUASHFS` (zlib and zstd), `EROFS_FS`, `OVERLAY_FS`, `TMPFS`, `SECCOMP`, `CGROUPS`, and `MODULES` off. Pass its **absolute path** via `KernelBuilder::krunfw_path` and record its SHA-256 in provenance. |
+| libkrunfw | **5.6.2** (Homebrew `libkrun/krun`) | Guest Linux kernel (6.12.91) packaged as a dylib | msb_krun loads the kernel from it. Its config has `VIRTIO_BLK`, `VIRTIO_VSOCKETS`, `EXT4_FS`, `SQUASHFS` (zlib and zstd), `EROFS_FS`, `OVERLAY_FS`, `TMPFS`, `SECCOMP`, `CGROUPS`, and `MODULES` off. Pass its **absolute path** via `KernelBuilder::krunfw_path` and record its SHA-256 in provenance. Its config has `CONFIG_BLK_DEV_INITRD` unset, so it cannot unpack an initramfs: the guest boots from the root disk (02-CONTEXT.md D-18). |
 | `diffy` | **0.5.2**, `default-features = false`, `features = ["std"]` | Parsing unified and git diffs; generating diffs for reports | Maintained (2026-08), contains no `unsafe`, MSRV 1.85. `PatchSet` exposes `FileOperation::{Create, Delete, Modify, Rename, Copy}`, `old_mode`/`new_mode`, and `is_binary()`, which is exactly what `Diff::parse` must reject. `create_patch` produces the report's cumulative diff. Leave the `binary` feature off; it pulls in `zlib-rs`. |
 | `tar` | **0.4.46**, `default-features = false` | Deterministic source tarball, and output streams over vsock | The standard crate. The repo now lives at `composefs/tar-rs`. Turning off default features drops `xattr`. Build headers by hand and **never call `Archive::unpack`**. |
 | `sha2` | **0.11.0** | Every ID hash | RustCrypto, pure Rust, and S3 verifies SHA-256 natively. Version 0.11 moved from `GenericArray` to `hybrid-array`. `h.finalize().into()` into `[u8; 32]` was verified by compiling it. |
@@ -80,7 +80,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | `regex` | 1.13.1 | Secret scan before packing | Pure Rust, with linear-time matching, so a hostile file cannot cause catastrophic backtracking. |
 | `rand_chacha` and `rand_core` | 0.10.0 and 0.10.1 | Seeded sweep sampling in core | Seed with `ChaCha8Rng::from_seed(sha256("minos/sweep/v1" ‖ run ‖ generation))`. **Do not use `rand`'s distributions or `gen_range`.** They are not value-stable across versions, which would break durable replay and golden vectors. Map to ranges with a hand-written unbiased method and golden-test the output. |
 | `backhand` | 0.25.5, `default-features = false`, `features = ["gzip"]` | Pure-Rust SquashFS writer that converts the environment's rootfs tar into a read-only root image | **The defaults pull in `liblzma-sys` and `zstd-sys` (C).** The `gzip` feature uses `flate2` with `miniz_oxide`, which is pure Rust, and the libkrunfw kernel has `SQUASHFS_ZLIB=y`. MSRV 1.90. |
-| `cpio` | 0.4.1, or a hand-rolled `newc` writer (about 60 lines) | Deterministic initramfs containing only `/init` = `minos-guest` | Hand-rolled is preferable. The format is trivial, and owning it guarantees zeroed metadata and a stable hash. |
+| `cpio` | not used: a hand-rolled `newc` writer in `minos-backend-krun` | Deterministic initramfs containing only `/init` = `minos-guest` | Zeroed metadata and a golden hash (D-17). Stock libkrunfw cannot unpack it, so the boot uses the root disk (D-18); the writer exists for the recorded negative-evidence run. |
 | `tempfile` | 3.27.0 | Atomic blob writes (`NamedTempFile::persist` in the same directory), and test fixtures | Production code uses it in `minos-store`'s file implementation only. |
 | `serde_with` | 3.24.0 (optional) | Hex and byte encodings in serde | Only if hand-written `Serialize`/`Deserialize` for IDs becomes repetitive. Each ID still goes through its constructor. |
 | `tracing` and `tracing-subscriber` | 0.1.44 and 0.3.23 | Operator diagnostics in the CLI and launcher | **Never log `Untrusted<T>` content.** The type has no `Debug`, which helps. |
@@ -93,7 +93,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | `cargo-insta` | 1.49.0 | Reviewing golden wire-format snapshots | Run with `INSTA_UPDATE=no` (or `CI=true`) in the gate so a missing snapshot fails instead of being written. |
 | `trybuild` | 1.0.122 (dev-dependency) | Compile-fail tests: `SandboxSpec<Candidate>` cannot take judge data, and `launch` requires `Cleared` | stderr snapshots depend on the rustc version, which is why the toolchain is pinned. |
 | `cargo-nextest` | 0.9.148 (optional) | Faster test runs and per-test timeouts | VM integration tests benefit from per-test timeouts. |
-| `/usr/bin/codesign` | system | Ad-hoc signing `minos-vmm` with the hypervisor entitlement | Called from an `xtask` (argv array), not from `build.rs`, because build scripts run before linking. |
+| `/usr/bin/codesign` | system | Ad-hoc signing `minos-vmm` with the hypervisor entitlement | One documented argv in CLAUDE.md Commands, run after every build (D-11); no xtask, script, `build.rs`, or cargo alias. |
 | `/usr/bin/sandbox-exec` | system (present on macOS 27.0) | Confines the `minos-vmm` process (research flag below) | Deprecated by Apple but shipped and functional. |
 | `cargo-lambda` | 1.9.2 (installed: 1.8.6) | Later milestone only | Not used in v1. |
 
@@ -118,8 +118,8 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 
 | # | Item | Why it matters | How to check |
 |---|---|---|---|
-| K1 | A full boot: msb_krun 0.1.41 + libkrunfw 5.6.2 + initramfs `/init` + raw root disk, with no virtiofs device, on macOS 27 | The entire backend depends on it | `brew tap libkrun/krun && brew trust libkrun/krun && brew install libkrunfw`, then sign the probe and boot. |
-| K2 | The kernel ignores `root=/dev/root` when an initramfs supplies `/init` | Otherwise a NullFs virtiofs root is needed (upstream `krun_set_root_disk_remount` uses NullFs, and msb_krun's `FsBuilder::custom` could provide one) | The K1 boot log |
+| K1 | A full boot: msb_krun 0.1.41 + libkrunfw 5.6.2 + raw read-only SquashFS root on `/dev/vda` with `/init` = `minos-guest`, no initramfs, no virtiofs, on macOS 27 | The entire backend depends on it | **Answered (D-18):** boots; 02-SPIKE-EVIDENCE.md S01-ROOTDISK, S01-CMDLINE. The initramfs form cannot work with stock libkrunfw (S01-INITRAMFS). |
+| K2 | Superseded 2026-10-09: the kernel never unpacks an initramfs (`CONFIG_BLK_DEV_INITRD` unset) | The root-disk boot puts `root=/dev/vda` last through `init_path`, so no NullFs root is needed (D-18) | 02-SPIKE-EVIDENCE.md H-02, S01-INITRAMFS |
 | K3 | With no `inet_hijack`, the guest has **no** INET egress: `connect()` to `1.1.1.1:443` fails, and so does the host loopback | This is the core isolation claim | Guest test binary. Make it a permanent integration test. |
 | K4 | `unix_connect` vsock route semantics and throughput for a tar stream of tens of MB | The output channel | Integration test with a byte cap |
 | K5 | Ad-hoc signing with `--options runtime` (hardened runtime) still allows `dlopen` of Homebrew libkrunfw without `com.apple.security.cs.disable-library-validation` | Keep the entitlement minimal. microsandbox and krunkit add the disable-library-validation entitlement. | Try without it first, add it only if needed, and document the reason. |
@@ -131,7 +131,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 
 - Hypervisor.framework refuses `hv_vm_create` (`HV_DENIED`) unless the binary carries `com.apple.security.hypervisor`. **Ad-hoc signing is enough for local use.** The Homebrew krunkit formula does exactly this: `codesign --entitlements krunkit.entitlements --force -s - krunkit`. The `applevisor` crate and QEMU document the same.
 - Only **`minos-vmm`** gets the entitlement. Every `cargo build` relinks and drops custom entitlements, so:
-- Entitlements plist (minimal; add `com.apple.security.cs.disable-library-validation` only if K5 forces it):
+- Entitlements plist (`crates/minos-vmm/minos-vmm.entitlements`): `com.apple.security.hypervisor` plus `com.apple.security.cs.disable-library-validation`. K5 forced the second key: under the hardened runtime the Homebrew libkrunfw dylib is refused because its signature has a different Team ID (02-SPIKE-EVIDENCE.md K5).
 
 ## Question 2: diff parsing and patch application
 
@@ -175,7 +175,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | Golden wire formats (`Record`, checkpoints, guest protocol, `VmmConfig`, report) | `insta` 1.49.0 with `json` and `toml` features; `cargo-insta` 1.49.0 | Snapshot the serialized string. Run the gate with `INSTA_UPDATE=no`. |
 | Golden hash vectors | Plain `assert_eq!` against hex literals | Keep them separate from insta so they can never be auto-accepted. |
 | Compile-fail invariants | `trybuild` 1.0.122 | Pinned toolchain keeps the stderr stable. |
-| VM integration (K1 through K4) | `#[ignore]`d tests, or a feature-gated test crate run by `cargo xtask vm-test` | Needs the signed `minos-vmm` and libkrunfw present. |
+| VM integration (K1 through K7) | `#[ignore]`d integration tests in `crates/minos-backend-krun/tests/spike_*.rs`, run with `cargo test -p minos-backend-krun --test <name> -- --ignored` | Needs the signed `minos-vmm` and libkrunfw present. |
 
 ## Question 7: supply chain (`cargo-deny` 0.20.2)
 
@@ -231,7 +231,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 |---|---|---|
 | msb_krun (fork, safe Rust API) | Upstream libkrun 1.19.6 via the C ABI | Only if the user explicitly approves an `unsafe`-permitting binding crate, or once upstream publishes its v2 Rust-native API as a crate (then switch). |
 | Per-VM `minos-vmm` launcher | Re-exec the `minos` binary itself (microsandbox's pattern) | Never for Minos. It would put the hypervisor entitlement and the VMM code on the main CLI binary. |
-| Initramfs `/init` + virtio-blk root | virtio-fs root (`FsBuilder::root`) | Never. virtio-fs shares a host directory, and libkrun says it gives no protection. |
+| Root-disk boot: `/init` on the raw read-only SquashFS root over virtio-blk (D-18; superseded 2026-10-09: "Initramfs `/init` + virtio-blk root") | virtio-fs root (`FsBuilder::root`) | Never. virtio-fs shares a host directory, and libkrun says it gives no protection. |
 | SquashFS via `backhand` (gzip) | EROFS via `composefs` 0.9.4 | If SquashFS mount performance or page-cache behavior disappoints. EROFS is the modern read-only rootfs. |
 | SquashFS via `backhand` (gzip) | ext4 built inside a builder VM | If the guest needs a writable root. It does not: use an overlayfs upper on tmpfs or scratch. |
 | Hand-rolled pico-dollar integers | `rust_decimal` 1.43.0 | If the price table needs arithmetic beyond multiply, add, and round. |
@@ -246,7 +246,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 |---|---|---|
 | `krun-sys`, `libkrun-sys`, `bux-krun`, `a3s-libkrun-sys`, the `libkrun` crate's `extern "C"` fns | Raw FFI that needs `unsafe` in our crates, which violates `unsafe_code = "forbid"` | `msb_krun` behind `minos-vmm` |
 | libkrun **implicit vsock** (upstream default) | Silently enables TSI `HIJACK_INET` when no NIC exists, which gives the guest the host's network | msb_krun with `inet_hijack` at its default `false`, the `net` feature off, and a clippy ban |
-| virtio-fs (`krun_set_root`, `FsBuilder::root`/`path`) | Shares a host directory; libkrun: *"does not provide any protection"* | Raw read-only block devices and an initramfs |
+| virtio-fs (`krun_set_root`, `FsBuilder::root`/`path`) | Shares a host directory; libkrun: *"does not provide any protection"* | Raw read-only block devices, booting from the root disk (D-18) |
 | qcow2 or vmdk images, any format probing | libkrun's header: a guest can rewrite a raw image into qcow2 that references host files, and that becomes an escape if the image is re-probed | `DiskImageFormat::Raw` always, chosen by code, never detected |
 | krunkit / krunvm as helpers | EFI-boot model, a REST status endpoint, a buildah dependency, coarse device control | Own launcher |
 | `tar::Archive::unpack` / `Entry::unpack_in` on the host | Writes guest-chosen paths, symlinks, and modes to the host filesystem | Iterate entries in memory with caps into `Untrusted<_>` |
@@ -264,8 +264,8 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 
 ## Stack Patterns by Variant
 
-- Use `FsBuilder::custom` with a NullFs-style backend (no host directory) serving only `/init`, mirroring upstream's `krun_set_root_disk_remount`.
-- This is still no host directory sharing, so the invariant holds.
+- Superseded 2026-10-09 (D-18): no NullFs or `FsBuilder::custom` root; the root disk boots directly, and `minos-vmm`'s clippy.toml bans `FsBuilder::root`, `FsBuilder::path`, and `FsBuilder::custom` (02-SPIKE-EVIDENCE.md D-PROBE).
+- No VM has a virtio-fs device, so no host directory is ever shared.
 - Stop and ask the user. The remaining options are an `unsafe` binding crate (an invariant exception) or waiting for upstream's v2 Rust API.
 - Do not quietly add `#![allow(unsafe_code)]` anywhere.
 - Fall back to a dedicated `_minos` user created by `minos host setup`, and file the gap in the report's provenance as reduced local hardening. Never fall back silently.
@@ -305,6 +305,13 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 - Local compile probes in the session scratchpad (`krunprobe`, `shaprobe`, `guesttest`). HIGH for what they prove (build and link only).
 
 <!-- GSD:stack-end -->
+
+## Phase 2 corrections to the stack block (2026-10-09)
+
+The stack block above is generated from `.planning/research/STACK.md`, which stays as written because it is a dated input (02-CONTEXT.md D-09). The corrections below are recorded in `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md` and win over the block if it is ever regenerated.
+
+- Boot path: no initramfs. The VM boots from the raw read-only SquashFS root on `/dev/vda`, with `/init` written in by the packer and `root=/dev/vda` placed last through `init_path` (D-18; H-02, S01-INITRAMFS, S01-ROOTDISK).
+- Signing: one documented `codesign` argv in CLAUDE.md Commands with the hardened runtime, no `xtask` (D-11, D-13; S04-SIGN, K5). The entitlement set is `com.apple.security.hypervisor` plus `com.apple.security.cs.disable-library-validation`; K5 forced the second key (the hardened runtime refuses the Homebrew libkrunfw dylib: "different Team IDs").
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
 
