@@ -142,3 +142,9 @@ None. This plan writes evidence only.
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`, `cargo doc --workspace --no-deps`, and the musl `minos-guest` clippy: all exit 0.
 - Ten `[lints] workspace = true` crates; the `#[allow(` grep prints nothing; `git diff --name-only` lists only `.planning/` paths.
 - `cargo clean` not run (02-11 does, GATE-06).
+
+## Self-Check: PASSED
+
+- FOUND: .planning/phases/02-platform-spikes/evidence/02-02.md
+- FOUND: .planning/phases/02-platform-spikes/02-02-SUMMARY.md
+- FOUND: 789538c, 51c0e0f

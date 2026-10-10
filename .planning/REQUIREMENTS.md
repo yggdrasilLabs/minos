@@ -26,7 +26,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **SPIKE-04**: An ad-hoc codesigned helper with the `com.apple.security.hypervisor` entitlement starts a VM, and an unsigned one is refused
 - [ ] **SPIKE-05**: Whether a Seatbelt deny-default profile still permits VM creation is answered with evidence, and the fallback (dedicated unprivileged user) is recorded
 - [ ] **SPIKE-06**: A root image can be produced from a user Dockerfile on macOS by a documented tool chain
-- [ ] **SPIKE-07**: `claude -p` with all tools disabled, `--json-schema`, `--no-session-persistence`, an empty cwd, and an allowlisted environment returns `structured_output` under subscription login; usage field names and `--max-turns 1` behavior are recorded
+- [x] **SPIKE-07**: `claude -p` with all tools disabled, `--json-schema`, `--no-session-persistence`, an empty cwd, and an allowlisted environment returns `structured_output` under subscription login; usage field names and `--max-turns 1` behavior are recorded
 - [ ] **SPIKE-08**: If SPIKE-01 fails, the run stops and asks the user; no `unsafe` exception is added
 
 ### Core Types (CORE)
@@ -205,7 +205,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPIKE-04 | Phase 2 | Pending |
 | SPIKE-05 | Phase 2 | Pending |
 | SPIKE-06 | Phase 2 | Pending |
-| SPIKE-07 | Phase 2 | Pending |
+| SPIKE-07 | Phase 2 | Complete |
 | SPIKE-08 | Phase 2 | Pending |
 | CORE-01 | Phase 3 | Pending |
 | CORE-02 | Phase 3 | Pending |

@@ -107,12 +107,12 @@ Plans:
   4. CLAUDE.md records every spike result and the v1 amendments (local-first build order, the `ModelProvider` decision, no tokio in v1, pico-dollar money, the `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate), and the workspace contains no `unsafe` exception; if the boot spike failed, work stopped and the user's decision was recorded before any alternative was tried (DOCS-05, SPIKE-08)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 1/11 plans executed
+**Plans**: 2/11 plans executed
 Plans:
 **Wave 1**
 
 - [x] 02-01-PLAN.md — Foundation and guest: musl target with the backstop proven, every wave-2 dependency edge, libkrunfw install, the static `/init` and its job and status-frame protocol (wave 1)
-- [ ] 02-02-PLAN.md — SPIKE-07: `claude -p` contract under subscription login, recorded verbatim with PII and cost estimates redacted (wave 1)
+- [x] 02-02-PLAN.md — SPIKE-07: `claude -p` contract under subscription login, recorded verbatim with PII and cost estimates redacted (wave 1)
 
 **Wave 2** *(blocked on 02-01)*
 
@@ -259,7 +259,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
-| 2. Platform Spikes | 1/11 | In Progress|  |
+| 2. Platform Spikes | 2/11 | In Progress|  |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |

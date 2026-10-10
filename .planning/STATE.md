@@ -6,14 +6,14 @@ current_phase: 02
 current_phase_name: platform-spikes
 status: executing
 stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-10-10T12:54:37.904Z"
+last_updated: "2026-10-10T13:03:44.134Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 16
-  completed_plans: 6
+  completed_plans: 7
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 02 (platform-spikes) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 02 execution started
 
@@ -61,6 +61,7 @@ Progress: [██████████] 100%
 | Phase 01 P04 | 5min | 3 tasks | 9 files |
 | Phase 01 P05 | 6 min | 3 tasks | 8 files |
 | Phase 02 P01 | 12min | 4 tasks | 21 files |
+| Phase 02 P02 | 7min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-01: Cargo rejects panic in a package profile (P-PANIC); minos-guest keeps unwinding and a PID 1 panic surfaces as no status frame (Crashed)
 - [Phase 02]: 02-01: the guest reaps orphans with rustix wait(NOHANG); waitpid(None) in rustix 1.x covers only the caller's process group
 - [Phase 02]: 02-01: libkrunfw 5.6.2 canonical path /opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib, SHA-256 59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217
+- [Phase 02]: SPIKE-07: claude -p with --tools "" and --json-schema returns structured_output under subscription login, six-variable env allowlist, empty temp dir (evidence/02-02.md C-03)
+- [Phase 02]: SPIKE-07: unsatisfiable schema ends in error_max_turns (exit 1), never error_max_structured_output_retries; read top-level usage, not usage.iterations (C-11, C-12)
+- [Phase 02]: SPIKE-07: --disable-slash-commands empties slash_commands and skills but agents stay listed; --tools "" leaves only StructuredOutput (C-04, C-05)
 
 ### Pending Todos
 
@@ -111,6 +115,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T12:54:37.900Z
+Last session: 2026-10-10T13:03:39.535Z
 Stopped at: Completed 02-01-PLAN.md
 Resume file: None
