@@ -89,6 +89,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Least time a connection gets to deliver bytes already queued, even after the host deadline has passed.
 const MIN_READ_WINDOW: Duration = Duration::from_millis(50);
 const READ_CHUNK_BYTES: usize = 65_536;
+/// Pause between reads of a connection that has no bytes ready.
+const READ_POLL: Duration = Duration::from_millis(1);
 
 /// Why the supervisor could not prepare or run a launch. A guest that misbehaves is not an error: its bytes come
 /// back capped in [`VmRun`], and a helper that outlives the deadline is killed and reported there.
@@ -184,7 +186,12 @@ pub enum FrameError {
 ///
 /// [`SuperviseError::Io`] if the directory cannot be created.
 pub fn short_job_dir() -> Result<TempDir, SuperviseError> {
-    todo!()
+    tempfile::Builder::new()
+        .prefix("mns")
+        .rand_bytes(8)
+        .permissions(Permissions::from_mode(0o700))
+        .tempdir_in(JOB_ROOT)
+        .map_err(io_at("create a job directory in", Path::new(JOB_ROOT)))
 }
 
 /// The fixed file names of one job (E-5), resolved under a canonical job directory.
@@ -210,7 +217,24 @@ impl JobFiles {
     /// [`SuperviseError::Io`] if `dir` cannot be canonicalized, and [`SuperviseError::SocketPathTooLong`] if the
     /// socket path would exceed [`MAX_SOCKET_PATH_BYTES`].
     pub fn in_dir(dir: &Path) -> Result<Self, SuperviseError> {
-        todo!()
+        let dir = fs::canonicalize(dir).map_err(io_at("canonicalize", dir))?;
+        let socket = dir.join(SOCKET_FILE);
+        let len = socket.as_os_str().len();
+        if len > MAX_SOCKET_PATH_BYTES {
+            return Err(SuperviseError::SocketPathTooLong { path: socket, len });
+        }
+        Ok(Self {
+            root: dir.join(ROOT_FILE),
+            input: dir.join(INPUT_FILE),
+            scratch: dir.join(SCRATCH_FILE),
+            socket,
+            console: dir.join(CONSOLE_FILE),
+            config: dir.join(CONFIG_FILE),
+            vmm_stdout: dir.join(VMM_STDOUT_FILE),
+            vmm_stderr: dir.join(VMM_STDERR_FILE),
+            initramfs: dir.join(INITRAMFS_FILE),
+            dir,
+        })
     }
 
     /// The canonical job directory.
@@ -285,7 +309,12 @@ pub fn write_disks(
     input_image: &[u8],
     scratch_cap_bytes: u64,
 ) -> Result<(), SuperviseError> {
-    todo!()
+    write_new(files.root(), root_image)?;
+    write_new(files.input(), input_image)?;
+    let scratch = File::create_new(files.scratch()).map_err(io_at("create", files.scratch()))?;
+    scratch
+        .set_len(scratch_cap_bytes)
+        .map_err(io_at("size", files.scratch()))
 }
 
 /// Binds the vsock output listener on the job's socket path and makes it non-blocking.
@@ -294,7 +323,11 @@ pub fn write_disks(
 ///
 /// [`SuperviseError::Io`] if the socket cannot be bound or configured.
 pub fn bind_output(files: &JobFiles) -> Result<UnixListener, SuperviseError> {
-    todo!()
+    let listener = UnixListener::bind(files.socket()).map_err(io_at("bind", files.socket()))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(io_at("make non-blocking", files.socket()))?;
+    Ok(listener)
 }
 
 /// Creates `vmm.json` holding `config` as compact JSON.
@@ -304,7 +337,8 @@ pub fn bind_output(files: &JobFiles) -> Result<UnixListener, SuperviseError> {
 /// [`SuperviseError::Json`] if the config cannot be serialized, and [`SuperviseError::Io`] if the file exists or
 /// cannot be written.
 pub fn write_config(files: &JobFiles, config: &LaunchConfig) -> Result<(), SuperviseError> {
-    todo!()
+    let json = config.to_json().map_err(SuperviseError::Json)?;
+    write_new(files.config(), json.as_bytes())
 }
 
 /// The lowercase hex SHA-256 of the file at `path`, read in chunks.
@@ -313,7 +347,22 @@ pub fn write_config(files: &JobFiles, config: &LaunchConfig) -> Result<(), Super
 ///
 /// [`SuperviseError::Io`] if the file cannot be read.
 pub fn sha256_file(path: &Path) -> Result<String, SuperviseError> {
-    todo!()
+    let mut file = File::open(path).map_err(io_at("open", path))?;
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0_u8; READ_CHUNK_BYTES];
+    loop {
+        let read = match file.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(source) => return Err(io_at("read", path)(source)),
+        };
+        if let Some(part) = chunk.get(..read) {
+            hasher.update(part);
+        }
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    Ok(base16ct::lower::encode_string(&digest))
 }
 
 /// Whether the binary at `vmm` is signed with `com.apple.security.hypervisor` set to true.
@@ -326,12 +375,39 @@ pub fn sha256_file(path: &Path) -> Result<String, SuperviseError> {
 /// [`SuperviseError::Io`] if `vmm` does not exist or codesign cannot be waited on, [`SuperviseError::Spawn`] if
 /// codesign cannot start, and [`SuperviseError::CodesignOutput`] if it writes more than the cap.
 pub fn has_hypervisor_entitlement(vmm: &Path) -> Result<bool, SuperviseError> {
-    todo!()
+    fs::metadata(vmm).map_err(io_at("inspect", vmm))?;
+    let codesign = Path::new(CODESIGN);
+    let child = Command::new(codesign)
+        .args(["--display", "--entitlements", "-", "--xml"])
+        .arg(vmm)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|source| SuperviseError::Spawn {
+            program: codesign.to_path_buf(),
+            source,
+        })?;
+    let mut child = Reaper(child);
+    let mut output = Vec::new();
+    if let Some(stdout) = child.0.stdout.take() {
+        stdout
+            .take(CODESIGN_OUTPUT_CAP.saturating_add(1))
+            .read_to_end(&mut output)
+            .map_err(io_at("read the output of", codesign))?;
+    }
+    if u64::try_from(output.len()).map_or(true, |len| len > CODESIGN_OUTPUT_CAP) {
+        return Err(SuperviseError::CodesignOutput);
+    }
+    child.0.wait().map_err(io_at("wait for", codesign))?;
+    Ok(entitled(&output))
 }
 
 /// Whether codesign's XML entitlements set the hypervisor key to true.
 fn entitled(xml: &[u8]) -> bool {
-    todo!()
+    xml.windows(ENTITLED_XML.len())
+        .any(|window| window == ENTITLED_XML)
 }
 
 /// One helper launch: the argv, the job's files, the pre-bound listener, and the host-side limits.
@@ -416,7 +492,80 @@ impl<'a> Launch<'a> {
 /// [`SuperviseError::EmptyArgv`], [`SuperviseError::Spawn`], [`SuperviseError::DeadlineOverflow`], or
 /// [`SuperviseError::Io`] for a host-side failure. The helper is killed and reaped on every error path.
 pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
-    todo!()
+    let (program, args) = launch.argv.split_first().ok_or(SuperviseError::EmptyArgv)?;
+    let files = launch.files;
+    let socket = files.socket();
+    launch
+        .listener
+        .set_nonblocking(true)
+        .map_err(io_at("make non-blocking", socket))?;
+    let stdout =
+        File::create_new(files.vmm_stdout()).map_err(io_at("create", files.vmm_stdout()))?;
+    let stderr =
+        File::create_new(files.vmm_stderr()).map_err(io_at("create", files.vmm_stderr()))?;
+    let program_path = Path::new(program);
+    let start = Instant::now();
+    let deadline = start
+        .checked_add(launch.host_deadline)
+        .ok_or(SuperviseError::DeadlineOverflow)?;
+    let child = Command::new(program)
+        .args(args)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
+        .process_group(0)
+        .spawn()
+        .map_err(|source| SuperviseError::Spawn {
+            program: program_path.to_path_buf(),
+            source,
+        })?;
+    let mut child = Reaper(child);
+    let pid = child.0.id();
+    let mut connections = Vec::new();
+    let mut killed_at_deadline = false;
+    let status = loop {
+        if connections.len() < launch.max_connections
+            && let Some(stream) = accept_pending(&launch.listener, socket)?
+        {
+            let cap = launch.conn_cap(connections.len());
+            connections.push(read_connection(&stream, cap, deadline, socket)?);
+            continue;
+        }
+        if let Some(status) = child
+            .0
+            .try_wait()
+            .map_err(io_at("wait for", program_path))?
+        {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.0.kill().map_err(io_at("kill", program_path))?;
+            let status = child.0.wait().map_err(io_at("wait for", program_path))?;
+            killed_at_deadline = true;
+            break status;
+        }
+        thread::sleep(POLL_INTERVAL);
+    };
+    let elapsed = start.elapsed();
+    while connections.len() < launch.max_connections {
+        let Some(stream) = accept_pending(&launch.listener, socket)? else {
+            break;
+        };
+        let cap = launch.conn_cap(connections.len());
+        connections.push(read_connection(&stream, cap, deadline, socket)?);
+    }
+    drop(launch.listener);
+    Ok(VmRun {
+        status,
+        killed_at_deadline,
+        elapsed,
+        pid,
+        connections,
+        console: read_capped_file(files.console(), launch.console_cap)?,
+        vmm_stdout: read_capped_file(files.vmm_stdout(), VMM_STDIO_CAP)?,
+        vmm_stderr: read_capped_file(files.vmm_stderr(), VMM_STDIO_CAP)?,
+    })
 }
 
 /// What one helper launch left behind. Everything guest-influenced is a [`GuestBytes`].
@@ -533,19 +682,26 @@ impl GuestBytes {
     /// Lowercase hex SHA-256 of the kept bytes.
     #[must_use]
     pub fn sha256_hex(&self) -> String {
-        todo!()
+        let digest: [u8; 32] = Sha256::digest(&self.bytes).into();
+        base16ct::lower::encode_string(&digest)
     }
 
     /// Whether `needle` occurs in the kept bytes. An empty needle always does.
     #[must_use]
     pub fn contains(&self, needle: &[u8]) -> bool {
-        todo!()
+        needle.is_empty()
+            || self
+                .bytes
+                .windows(needle.len())
+                .any(|window| window == needle)
     }
 
     /// Whether every kept byte at index `i` equals `pattern(i)`.
     #[must_use]
     pub fn matches_pattern(&self, pattern: impl Fn(u64) -> u8) -> bool {
-        todo!()
+        (0_u64..)
+            .zip(&self.bytes)
+            .all(|(index, byte)| *byte == pattern(index))
     }
 
     /// Up to `max_chars` characters safe to print to a terminal.
@@ -555,7 +711,21 @@ impl GuestBytes {
     /// invalid UTF-8 becomes U+FFFD. The count applies after filtering.
     #[must_use]
     pub fn excerpt(&self, max_chars: usize) -> String {
-        todo!()
+        let mut out = String::new();
+        let mut kept = 0_usize;
+        for chunk in self.bytes.utf8_chunks() {
+            let replacement = (!chunk.invalid().is_empty()).then_some(char::REPLACEMENT_CHARACTER);
+            for character in chunk.valid().chars().chain(replacement) {
+                if kept >= max_chars {
+                    return out;
+                }
+                if displayable(character) {
+                    out.push(character);
+                    kept = kept.saturating_add(1);
+                }
+            }
+        }
+        out
     }
 
     /// Decodes a `MINOSST1` status frame whose payload is at most `max_bytes` (and never more than
@@ -567,7 +737,37 @@ impl GuestBytes {
     /// overflowed connection, a payload that is not exactly the declared length, invalid JSON, or JSON that is
     /// not an object with `v` = 1.
     pub fn status_frame(&self, max_bytes: u64) -> Result<serde_json::Value, FrameError> {
-        todo!()
+        let (magic, rest) = self
+            .bytes
+            .split_first_chunk::<8>()
+            .ok_or(FrameError::Short)?;
+        let (version, rest) = rest.split_first_chunk::<4>().ok_or(FrameError::Short)?;
+        let (length, payload) = rest.split_first_chunk::<8>().ok_or(FrameError::Short)?;
+        if *magic != FRAME_MAGIC {
+            return Err(FrameError::BadMagic { found: *magic });
+        }
+        let version = u32::from_be_bytes(*version);
+        if version != FRAME_VERSION {
+            return Err(FrameError::Version(version));
+        }
+        let declared = u64::from_be_bytes(*length);
+        let max = max_bytes.min(MAX_FRAME_BYTES);
+        if declared > max {
+            return Err(FrameError::TooLarge { declared, max });
+        }
+        if self.overflowed {
+            return Err(FrameError::Overflowed);
+        }
+        let present = u64::try_from(payload.len()).unwrap_or(u64::MAX);
+        if present != declared {
+            return Err(FrameError::LengthMismatch { declared, present });
+        }
+        let value: serde_json::Value = serde_json::from_slice(payload).map_err(FrameError::Json)?;
+        if value.is_object() && value.get("v").and_then(serde_json::Value::as_u64) == Some(1) {
+            Ok(value)
+        } else {
+            Err(FrameError::NotV1Object)
+        }
     }
 }
 
@@ -610,33 +810,27 @@ fn accept_pending(
 }
 
 /// Reads one connection through `cap + 1` bytes, bounded in total by the later of `deadline` and a short window
-/// from now. A peer error or a timeout ends the connection with the bytes already read; the stream is dropped
-/// by the caller, so a guest still writing past the cap gets an error.
+/// from now. A peer error or the end of the window ends the connection with the bytes already read; the caller
+/// drops the stream, so a guest still writing past the cap gets an error.
+///
+/// The stream is read non-blocking and polled, so the total bound needs no `SO_RCVTIMEO`: that is a per-read
+/// timeout a trickling peer can renew, and macOS refuses to set it (`EINVAL`) once the peer has closed.
 fn read_connection(
     stream: &UnixStream,
     cap: u64,
     deadline: Instant,
     socket: &Path,
 ) -> Result<GuestBytes, SuperviseError> {
-    // On macOS an accepted socket inherits the listener's O_NONBLOCK.
     stream
-        .set_nonblocking(false)
-        .map_err(io_at("make blocking a connection on", socket))?;
-    let now = Instant::now();
-    let read_until = now
+        .set_nonblocking(true)
+        .map_err(io_at("make non-blocking a connection on", socket))?;
+    let read_until = Instant::now()
         .checked_add(MIN_READ_WINDOW)
         .map_or(deadline, |window| window.max(deadline));
     let mut reader = stream.take(cap.saturating_add(1));
     let mut bytes = Vec::new();
     let mut chunk = vec![0_u8; READ_CHUNK_BYTES];
-    loop {
-        let remaining = read_until.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            break;
-        }
-        stream
-            .set_read_timeout(Some(remaining))
-            .map_err(io_at("set a read timeout on a connection on", socket))?;
+    while Instant::now() < read_until {
         match reader.read(&mut chunk) {
             Ok(0) => break,
             Ok(read) => {
@@ -644,6 +838,7 @@ fn read_connection(
                     bytes.extend_from_slice(part);
                 }
             }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => thread::sleep(READ_POLL),
             Err(error) if error.kind() == ErrorKind::Interrupted => {}
             Err(_) => break,
         }
@@ -724,7 +919,7 @@ mod tests {
         Ok(frame)
     }
 
-    fn frame(magic: &[u8; 8], version: u32, declared: u64, payload: &[u8]) -> Vec<u8> {
+    fn frame(magic: [u8; 8], version: u32, declared: u64, payload: &[u8]) -> Vec<u8> {
         let mut out = magic.to_vec();
         out.extend_from_slice(&version.to_be_bytes());
         out.extend_from_slice(&declared.to_be_bytes());
@@ -1032,11 +1227,11 @@ mod tests {
             Err(FrameError::Short)
         ));
         assert!(matches!(
-            guest(&frame(b"MINOSSTX", 1, 35, E3_PAYLOAD)).status_frame(MAX_FRAME_BYTES),
+            guest(&frame(*b"MINOSSTX", 1, 35, E3_PAYLOAD)).status_frame(MAX_FRAME_BYTES),
             Err(FrameError::BadMagic { found }) if found == *b"MINOSSTX"
         ));
         assert!(matches!(
-            guest(&frame(b"MINOSST1", 2, 35, E3_PAYLOAD)).status_frame(MAX_FRAME_BYTES),
+            guest(&frame(*b"MINOSST1", 2, 35, E3_PAYLOAD)).status_frame(MAX_FRAME_BYTES),
             Err(FrameError::Version(2))
         ));
         Ok(())
@@ -1045,7 +1240,7 @@ mod tests {
     #[test]
     fn supervise_status_frame_rejects_a_declared_length_over_the_limit() -> TestResult {
         assert!(matches!(
-            guest(&frame(b"MINOSST1", 1, 1_048_577, b"")).status_frame(u64::MAX),
+            guest(&frame(*b"MINOSST1", 1, 1_048_577, b"")).status_frame(u64::MAX),
             Err(FrameError::TooLarge {
                 declared: 1_048_577,
                 max: 1_048_576
@@ -1093,7 +1288,7 @@ mod tests {
     #[test]
     fn supervise_status_frame_rejects_invalid_json_and_non_v1_objects() {
         assert!(matches!(
-            guest(&frame(b"MINOSST1", 1, 3, b"{x}")).status_frame(MAX_FRAME_BYTES),
+            guest(&frame(*b"MINOSST1", 1, 3, b"{x}")).status_frame(MAX_FRAME_BYTES),
             Err(FrameError::Json(_))
         ));
         for payload in [
@@ -1105,7 +1300,7 @@ mod tests {
         ] {
             let declared = u64::try_from(payload.len()).unwrap_or(u64::MAX);
             assert!(matches!(
-                guest(&frame(b"MINOSST1", 1, declared, payload)).status_frame(MAX_FRAME_BYTES),
+                guest(&frame(*b"MINOSST1", 1, declared, payload)).status_frame(MAX_FRAME_BYTES),
                 Err(FrameError::NotV1Object)
             ));
         }
