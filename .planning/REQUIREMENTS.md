@@ -20,7 +20,7 @@ Milestone v1 is local-only on macOS arm64. Every requirement below is testable o
 
 Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
-- [ ] **SPIKE-01**: The safe libkrun wrapper crate boots libkrunfw on this machine from an initramfs whose `/init` is a static musl binary, with a raw read-only root disk and no virtiofs
+- [x] **SPIKE-01**: The safe libkrun wrapper crate boots libkrunfw on this machine from an initramfs whose `/init` is a static musl binary, with a raw read-only root disk and no virtiofs
 - [ ] **SPIKE-02**: A guest `connect()` to host loopback and to a public IP both fail when the launcher disables implicit vsock and adds a plain vsock
 - [ ] **SPIKE-03**: A vsock port maps to a host Unix socket and a byte-capped stream from guest to host works end to end
 - [x] **SPIKE-04**: An ad-hoc codesigned helper with the `com.apple.security.hypervisor` entitlement starts a VM, and an unsigned one is refused
@@ -199,7 +199,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-04 | Phase 1 | Complete |
 | GATE-05 | Phase 1 | Complete |
 | GATE-06 | All phases (cross-cutting) | Pending |
-| SPIKE-01 | Phase 2 | Pending |
+| SPIKE-01 | Phase 2 | Complete |
 | SPIKE-02 | Phase 2 | Pending |
 | SPIKE-03 | Phase 2 | Pending |
 | SPIKE-04 | Phase 2 | Complete |

@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: platform-spikes
 status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-10-10T14:12:22.870Z"
+stopped_at: Completed 02-07-PLAN.md
+last_updated: "2026-10-10T14:28:53.221Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 16
-  completed_plans: 11
+  completed_plans: 12
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 02 (platform-spikes) — EXECUTING
-Plan: 7 of 11
+Plan: 8 of 11
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 02 execution started
 
@@ -66,6 +66,7 @@ Progress: [██████████] 100%
 | Phase 02 P04 | 12min | 3 tasks | 6 files |
 | Phase 02 P05 | 10min | 2 tasks | 3 files |
 | Phase 02 P06 | 24min | 3 tasks | 6 files |
+| Phase 02 P07 | 15min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-06 K5: minos-vmm entitlements carry com.apple.security.cs.disable-library-validation beside the hypervisor key; the hardened runtime refuses Homebrew libkrunfw (different Team IDs)
 - [Phase 02]: 02-06 user decision (option 2): minos-vmm appends dummy.numdummies=0 to the root-disk kernel arguments and boot_root_disk asserts no virtio-net (0x0001) device; net_ifaces must be empty or exactly lo
 - [Phase 02]: 02-06: guest kernel is 6.12.109, not 6.12.91; SPIKE-08 not triggered; the D-18 root-disk boot works
+- [Phase 02]: K7: the helper exit status never carries the guest result; power-off, init return, and SIGTERM all exit 0; Phase 5 classifies from the vsock frame (overturns ARCHITECTURE.md Pattern 5)
+- [Phase 02]: DEFECT-01 fixed (orchestrator-approved): minos-vmm records its parent PID at main entry and a PID 1 parent counts as gone (exit 126)
 
 ### Pending Todos
 
@@ -129,6 +132,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T14:12:22.866Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-10-10T14:28:53.217Z
+Stopped at: Completed 02-07-PLAN.md
 Resume file: None
