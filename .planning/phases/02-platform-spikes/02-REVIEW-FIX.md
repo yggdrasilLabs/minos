@@ -1,28 +1,28 @@
 ---
 phase: 02-platform-spikes
-fixed_at: 2026-10-10T16:56:59Z
+fixed_at: 2026-10-10T17:50:16Z
 review_path: .planning/phases/02-platform-spikes/02-REVIEW.md
-iteration: 1
-findings_in_scope: 8
-fixed: 8
+iteration: 2
+findings_in_scope: 15
+fixed: 15
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 02: Code Review Fix Report
 
-**Fixed at:** 2026-10-10T16:56:59Z
+**Fixed at:** 2026-10-10T17:50:16Z
 **Source review:** .planning/phases/02-platform-spikes/02-REVIEW.md
-**Iteration:** 1
+**Iteration:** 2
 
 **Summary:**
-- Findings in scope: 8 (CR-01, WR-01 to WR-07; `fix_scope: critical_warning`, so IN-01 to IN-07 were not attempted)
-- Fixed: 8
+- Findings in scope: 15 (CR-01 and WR-01 to WR-07 in iteration 1 under `fix_scope: critical_warning`; IN-01 to IN-07 in iteration 2 under `fix_scope: all`)
+- Fixed: 15
 - Skipped: 0
 
-Every fix was verified against the claim in the code first, then gated with `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings`, and the C-02 `#[allow]` grep before each commit; `cargo deny check` and `cargo doc --workspace --no-deps` ran at the end (deny reports the same seven warn-level duplicate-version entries as `main`; doc is clean after the follow-up commit). The `#[ignore]`d VM spikes were not run. `.planning/config.json` was left out of every commit. Backend unit tests went from 59 to 70, minos-vmm from 46 to 48.
+Every fix was verified against the claim in the code first, then gated with `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings`, and the C-02 `#[allow]` grep before each commit; `cargo deny check` and `cargo doc --workspace --no-deps` ran at the end of each iteration, and `cargo deny check` again after the one Cargo.toml change (IN-01). The `#[ignore]`d VM spikes were not run in either iteration. `.planning/config.json` was left out of every commit. Across both iterations backend unit tests went from 59 to 74 and minos-vmm from 46 to 50.
 
-Work was done in an isolated worktree on a temp branch and fast-forwarded onto `main` (`aab5c2c` -> `7bab78f`); the worktree, temp branch, and recovery sentinel were removed afterwards.
+Each iteration was done in an isolated worktree on a temp branch and fast-forwarded onto `main` (iteration 1: `aab5c2c` -> `7bab78f`; iteration 2: `9b08c2f` -> `4b659e2`); the worktree, temp branch, and recovery sentinel were removed afterwards.
 
 ## Fixed Issues
 
@@ -76,12 +76,62 @@ Deliberately not applied from the suggestion: pre-creating the console with `cre
 **Commit:** eea8a5c
 **Applied fix:** Verified against msb_krun 0.1.41 `api/vm.rs` (`"{default}{ user_cmdline}{ debug} root=/dev/root init={init}"`) and `msb_krun_vmm` `kernel_cmdline.rs` (the non-x86 default). Two unit tests in `minos-vmm` mirror that assembly with the pinned default text and assert that the last `root=` token is `/dev/vda`, the last `rootfstype=` is `squashfs`, `init=/init` is a token, `ro` follows the default's `rw`, that `ROOT_DISK_INIT` splits into exactly `/init` and `root=/dev/vda`, and that no `root=` or `init=` hides in `ROOT_DISK_CMDLINE`. The `ROOT_DISK_INIT` doc names the two msb_krun facts it rides on and the VM spike that proves them; the `msb_krun` pin in `Cargo.toml` carries a comment that a bump requires re-running `spike_boot::boot_root_disk` (S01-CMDLINE). CLAUDE.md's sentence claiming the boot test stops a bump from changing this silently was corrected in the same commit, since that test is ignored. The msb_krun default cmdline is hardcoded in the test because the crate does not re-export it and `minos-vmm` must not link `msb_krun_vmm` directly.
 
+## Fixed Issues (iteration 2: Info findings)
+
+The line numbers cited in REVIEW.md for these findings predate the iteration 1 commits; each site was located by description and the claim re-verified against the current code before anything was changed. Every one of the seven was confirmed as described; none was judged not-a-bug.
+
+### IN-01: Declared dependencies that no source file uses
+
+**Files modified:** `crates/minos-guest/Cargo.toml`, `crates/minos-backend-krun/Cargo.toml`, `Cargo.lock`
+**Commit:** 756c838
+**Applied fix:** Verified: `grep` finds no `minos_core`, `minos_sandbox`, or `tar` reference in `minos-guest`, and no `minos_core` or `minos_sandbox` reference in `minos-backend-krun` (its `tar` use in `rootfs.rs` is real); iteration 1 did not make any of the four live (CR-01 added `rustix`, WR-06 touched `job.rs`, `report.rs`, and `linux.rs` only). The robust option, `unused_crate_dependencies = "warn"` in `[workspace.lints.rust]`, was tried first and cannot pass the `-D warnings` gate today: both clippy commands stop at `minos-core`, whose one-line placeholder `lib.rs` declares nine Phase 3 dependencies (`serde`, `serde_json`, `toml`, `thiserror`, `sha2`, `base16ct`, `diffy`, `rand_chacha`, `rand_core`), and `store`, `sandbox`, `propose`, `runner`, `loop`, and `cli` are placeholders in the same way; stripping all of those would then trip `deny.toml`'s `[bans.workspace-dependencies] unused = "deny"` on the workspace entries nothing would use any more, a restructuring well beyond this finding. So the fallback was taken, as the task allowed: the four dead edges are removed and the lint is not added. The `deny.toml` `wrappers` entries that allow these edges were deliberately kept, because they encode the dependency-direction table in CLAUDE.md that Phase 4 and 5 code will use (guest and backend on core, backend on sandbox); trimming them would make `cargo deny check` refuse exactly the edges those phases add. Consequence to know about: `cargo deny check` now prints three warn-level `unused-wrapper` lines ("wrapper for banned crate was not encountered") for `minos-core` -> `minos-backend-krun`, `minos-core` -> `minos-guest`, and `minos-sandbox` -> `minos-backend-krun`, on top of the seven duplicate-version warnings `main` already had; they disappear when the real dependencies land. `cargo deny check` still passes (`advisories ok, bans ok, licenses ok, sources ok`). No CLAUDE.md change: its dependency list states the allowed direction, which is unchanged.
+
+### IN-02: `LaunchError::Watchdog` exits 70, which the exit-code table reserves for "msb_krun refused to build or start the VM"
+
+**Files modified:** `crates/minos-vmm/src/main.rs`, `CLAUDE.md`
+**Commit:** d9048f0
+**Applied fix:** Verified: `exit_code` mapped `Build`, `Watchdog`, and `Enter` together to `EXIT_VMM` (70) and the table had no row for the watchdog. `LaunchError::Watchdog` now exits the new `EXIT_WATCHDOG` (71) with its own table row ("the watchdog thread could not be started (a host thread or memory limit), so the VM was never entered"). A unit test, `launch_error_codes_match_the_table`, pins every pre-takeover code the launcher can construct without an `msb_krun::Error` (64, 65 for both `Read` and `Config`, 66, 67, 71) and asserts 71 differs from 70. CLAUDE.md's classification sentence now reads "pre-takeover codes 64, 65, 66, 67, 70, and 71" in the same commit; the classification itself is unchanged (all are infrastructure failures).
+
+### IN-03: The entitlement check needs `</key><true/>` to be byte-adjacent
+
+**Files modified:** `crates/minos-backend-krun/src/supervise.rs`
+**Commit:** db5eb40
+**Applied fix:** Verified: `entitled` was a `windows()` search for the literal `<key>com.apple.security.hypervisor</key><true/>`. It now searches for the key element (`ENTITLED_KEY`) and, at each match, requires `<true/>` (`ENTITLED_TRUE`) after `trim_ascii_start` of the remainder, with no slicing (`get(..)` plus `unwrap_or_default`). `<false/>`, a `<string>` value, a later key set to true after this key set to false, and a key at the very end of the output (with or without a trailing newline) still read as unentitled. The existing test gained one assertion per case. A minimal plist parser was not written: the output is one `codesign` invocation's XML, and the whitespace-tolerant match is the smallest change that removes the brittleness the review named.
+
+### IN-04: The watchdog deadline starts at `watchdog::spawn`, not at `main` entry
+
+**Files modified:** `crates/minos-vmm/src/main.rs`, `crates/minos-vmm/src/watchdog.rs`, `crates/minos-vmm/src/config.rs`, `CLAUDE.md`
+**Commit:** ad29d6b
+**Applied fix:** Verified: `spawn` did `let start = Instant::now();` after the config read, preflight (which hashes the libkrunfw dylib), and `launch::build`. `main` now records `Instant::now()` as its second statement, directly after `parent_id()`, and passes both through `run(parent, started)` to `watchdog::spawn(.., parent, started)`, which no longer reads the clock. The `spawn` and `Trip::Deadline` docs and the `VmmConfig::max_duration` accessor doc say the limit is counted from `main` entry and bounds the helper's whole lifetime; a new test, `watchdog_deadline_counts_from_the_recorded_start`, hands `tripped` a start two seconds in the past and expects `Deadline` against a one-second limit and nothing against an hour. CLAUDE.md's sentence on what `minos-vmm` records first was reworded in the same commit to name both the parent PID and the start instant and to state that `max_duration_ms` counts from that instant. No spike test asserts `elapsed` against `max_duration_ms` (they only print it), so none needed a change.
+
+### IN-05: `Launch` does not relate `host_deadline` to the config's `max_duration_ms`
+
+**Files modified:** `crates/minos-backend-krun/src/supervise.rs`, `crates/minos-backend-krun/src/launch_config.rs`, `crates/minos-backend-krun/tests/spike_boot.rs`, `crates/minos-backend-krun/tests/spike_exits.rs`, `crates/minos-backend-krun/tests/spike_net.rs`, `crates/minos-backend-krun/tests/spike_rootimg.rs`, `crates/minos-backend-krun/tests/spike_seatbelt.rs`
+**Commit:** 3baae1d
+**Applied fix:** Verified: `Launch::host_deadline` was a free `Duration` and every spike set the pair by hand. `LaunchConfig` gains a `max_duration()` accessor. `Launch::for_config(argv, files, listener, &config)` builds a launch whose host deadline is `max_duration_ms` plus the new `HOST_DEADLINE_GRACE` (30 s, documented as the time for the helper's own watchdog to exit 124, print its marker, and flush the console before the host gives up) and records `max_duration`; `run` then refuses, before creating any file, a launch whose explicit `host_deadline` is not longer than that `max_duration` with the new `SuperviseError::DeadlineTooShort { deadline, max_duration }`. One deviation from the suggestion's shape: the rejection lives in `run` rather than in the `host_deadline` setter, because the setter is a `const` builder used at about twenty call sites and `run` already returns `Result`; the effect is the same and the setter doc says so. `Launch::new` is unchanged and carries no `max_duration`, so a hand-built launch is not checked. All five VM spikes now build from the config they already write, keeping their explicit deadlines (each already exceeds its `max_duration_ms`: 30 s/60 s, 60 s/90 s, 60 s/120 s, 5 s/30 s, 120 s/150 s); `spike_exits`'s `Job` carries its `LaunchConfig` for that. They compile under the gate but, being `#[ignore]`d VM tests, were not run. Unit tests cover the derived deadline, the refusal at 1 s and at exactly 60 s (with no `vmm.stdout`/`vmm.stderr` created), and acceptance at 60.001 s with `/usr/bin/true`.
+
+### IN-06: The guest mounts `/proc` and `/sys` with no restriction flags
+
+**Files modified:** `crates/minos-guest/src/linux.rs`
+**Commit:** 21d3ec9
+**Applied fix:** Verified: `mount_pseudo` passed `MountFlags::empty()` for both. `/proc` and `/sys` are now mounted with `NOSUID | NODEV | NOEXEC` (`PSEUDO_FLAGS`, built with the `const` `union`), `/sys` additionally `RDONLY`, and a tmpfs is mounted on `/tmp` (which the packer's `MOUNT_POINTS` already creates, mode 1777) with `NOSUID | NODEV` and `size=25%` of guest memory. Two judgement calls, both documented in the constants' docs: `/proc` is not read-only, because programs legitimately write their own `/proc/self/*` entries and the review asked for `RDONLY` on sysfs only; and `/tmp` keeps exec, because build-time checks compile and run small programs in a temporary directory, while the size cap stops a command from filling guest memory through it. The mount helper became `mount_at(source, target, fstype, flags, data)`, and the module doc names the three mounts. This is Linux-only code and cannot execute here; it was verified with the musl clippy gate and a release build of the static guest (`ELF 64-bit LSB executable, ARM aarch64, statically linked`). The host-side guest tests (18) are unaffected. The boot report's `net_ifaces` and `virtio_devices` listings still read `/sys` (reads are unaffected by `RDONLY`), so the spikes that assert on them are not changed by this; re-running `spike_boot::boot_root_disk` with a rebuilt guest is the Phase 5 confirmation.
+
+### IN-07: `supervise::run` resolves a relative `argv[0]` through the supervisor's own `PATH`
+
+**Files modified:** `crates/minos-backend-krun/src/supervise.rs`
+**Commit:** 4b659e2
+**Applied fix:** Verified: `run` passed `program` straight to `Command::new` after only the `EmptyArgv` check, and std resolves a relative name through the parent's `PATH` regardless of `env_clear()`. `run` now returns the new `SuperviseError::RelativeProgram { program }` for any program that is not an absolute path, checked immediately after `EmptyArgv` and before the deadline check and any file creation; the `Launch::new` and `run` docs state the requirement. A unit test refuses `true`, `bin/true`, `./true`, and `../usr/bin/true` and confirms no `vmm.stdout`/`vmm.stderr` was created. Every existing caller passes an absolute path (`/usr/bin/true`, `/usr/bin/env`, `/bin/echo`, `/bin/cat`, the spikes' `MINOS_VMM`, which `env_path` requires absolute, and `/usr/bin/sandbox-exec`).
+
 ## Skipped Issues
 
 None.
 
+## Process note (iteration 2)
+
+While applying IN-06 and IN-07 in one chained command, the musl clippy gate for IN-06 failed on `clippy::doc_markdown` (`SquashFS` in a new doc comment needed backticks) but the failure was masked by a pipe into `tail`, so a commit with a failing gate was made and IN-07 was committed on top of it. Both commits existed only on the temp branch; the branch was reset to the IN-05 commit, the doc comment corrected, and IN-06 and IN-07 re-applied and re-committed under a strict chain (`set -o pipefail`, unpiped clippy runs, negated `#[allow]` grep). The commits that reached `main` (`21d3ec9`, `4b659e2`) are the gated ones; the masked ones were discarded before the fast-forward.
+
 ---
 
-_Fixed: 2026-10-10T16:56:59Z_
+_Fixed: 2026-10-10T17:50:16Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_
