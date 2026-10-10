@@ -16,9 +16,11 @@ use msb_krun::{KernelBuilder, Vm, VmBuilder};
 
 use crate::config::{Boot, VmmConfig};
 
-/// Kernel arguments appended in root-disk mode (D-18): mount the `SquashFS` root read-only and print every
-/// kernel message. They follow `msb_krun`'s defaults, so they override its `rootfstype=virtiofs rw`.
-pub const ROOT_DISK_CMDLINE: &str = "rootfstype=squashfs ro ignore_loglevel";
+/// Kernel arguments appended in root-disk mode (D-18): mount the `SquashFS` root read-only, print every kernel
+/// message, and create no dummy network interface. They follow `msb_krun`'s defaults, so they override its
+/// `rootfstype=virtiofs rw`. libkrunfw builds the dummy driver in (`CONFIG_DUMMY=y`) and it creates `dummy0` by
+/// default; `dummy.numdummies=0` leaves the guest with loopback only (02-06 S01-NETIFACES, user decision).
+pub const ROOT_DISK_CMDLINE: &str = "rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0";
 
 /// `init=` value in root-disk mode. `msb_krun` writes `root=/dev/root init=<this>`, so `root=/dev/vda` lands after
 /// its `root=/dev/root`, and Linux keeps the last `root=` (02-RESEARCH.md Pattern 1).
