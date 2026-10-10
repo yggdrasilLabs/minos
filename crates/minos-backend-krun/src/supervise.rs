@@ -738,8 +738,10 @@ impl GuestBytes {
     /// Up to `max_chars` characters safe to print to a terminal.
     ///
     /// An allowlist: printable characters, newline, and tab are kept. C0 controls (including ESC and carriage
-    /// return), DEL, C1 controls, and the bidi overrides U+202A to U+202E and U+2066 to U+2069 are dropped, and
-    /// invalid UTF-8 becomes U+FFFD. The count applies after filtering.
+    /// return), DEL, C1 controls, and every invisible format character listed at [`displayable`] (the bidi
+    /// overrides and marks, zero-width characters, the line and paragraph separators, the byte order mark, the
+    /// interlinear annotation controls, and the tag characters) are dropped, and invalid UTF-8 becomes U+FFFD.
+    /// The count applies after filtering.
     #[must_use]
     pub fn excerpt(&self, max_chars: usize) -> String {
         let mut out = String::new();
@@ -802,11 +804,30 @@ impl GuestBytes {
     }
 }
 
-/// The excerpt allowlist: newline, tab, and every character that is neither a control nor a bidi override.
+/// The excerpt allowlist: newline, tab, and every character that is neither a control (`Cc`) nor an invisible
+/// format character that can hide, reorder, or split what a terminal or log viewer shows.
+///
+/// `char::is_control` covers only `Cc`. The ranges below cover the `Cf` characters that matter for display and
+/// the two `Zl`/`Zp` separators: the soft hyphen (U+00AD), the Arabic letter mark (U+061C), the Mongolian vowel
+/// separator (U+180E), the zero-width space, joiners, and bidi marks (U+200B to U+200F), the line and paragraph
+/// separators plus the bidi embeddings and overrides (U+2028 to U+202E), the word joiner, invisible operators,
+/// and bidi isolates (U+2060 to U+206F), the byte order mark (U+FEFF), the interlinear annotation controls
+/// (U+FFF9 to U+FFFB), and the tag characters (U+E0000 to U+E007F).
 fn displayable(character: char) -> bool {
     matches!(character, '\n' | '\t')
         || !(character.is_control()
-            || matches!(character, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
+            || matches!(
+                character,
+                '\u{00AD}'
+                    | '\u{061C}'
+                    | '\u{180E}'
+                    | '\u{200B}'..='\u{200F}'
+                    | '\u{2028}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{FEFF}'
+                    | '\u{FFF9}'..='\u{FFFB}'
+                    | '\u{E0000}'..='\u{E007F}'
+            ))
 }
 
 /// Kills and reaps the child on drop, so no early return leaves a helper running. Once the child has been
@@ -1435,6 +1456,20 @@ mod tests {
             .to_vec();
         text.push(0xff);
         assert_eq!(guest(&text).excerpt(100), "a[31mb\tc\ndefghi\u{fffd}");
+    }
+
+    #[test]
+    fn supervise_excerpt_strips_invisible_format_characters() {
+        // Soft hyphen, ALM, Mongolian vowel separator, zero-width space and joiners, LRM and RLM, line and
+        // paragraph separators, word joiner, invisible times, bidi isolates, BOM, interlinear annotation, tags.
+        let text = "a\u{00ad}b\u{061c}c\u{180e}d\u{200b}\u{200c}\u{200d}e\u{200e}\u{200f}f\u{2028}\u{2029}g\
+                    \u{2060}\u{2062}h\u{2066}\u{2069}i\u{feff}j\u{fff9}\u{fffa}\u{fffb}k\u{e0001}\u{e007f}l";
+        assert_eq!(guest(text.as_bytes()).excerpt(100), "abcdefghijkl");
+        // Printable non-ASCII, combining marks, and emoji stay.
+        assert_eq!(
+            guest("é\u{301}ß→😀".as_bytes()).excerpt(100),
+            "é\u{301}ß→😀"
+        );
     }
 
     #[test]
