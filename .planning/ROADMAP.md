@@ -107,7 +107,37 @@ Plans:
   4. CLAUDE.md records every spike result and the v1 amendments (local-first build order, the `ModelProvider` decision, no tokio in v1, pico-dollar money, the `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate), and the workspace contains no `unsafe` exception; if the boot spike failed, work stopped and the user's decision was recorded before any alternative was tried (DOCS-05, SPIKE-08)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
+**Plans**: 11 plans
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Foundation and guest: musl target with the backstop proven, every wave-2 dependency edge, libkrunfw install, the static `/init` and its job and status-frame protocol (wave 1)
+- [ ] 02-02-PLAN.md — SPIKE-07: `claude -p` contract under subscription login, recorded verbatim with PII and cost estimates redacted (wave 1)
+
+**Wave 2** *(blocked on 02-01)*
+
+- [ ] 02-03-PLAN.md — `minos-vmm` launcher: validated launch config, preflight, root-disk and initramfs boot modes, watchdog exit codes, clippy bans, entitlements plist (wave 2)
+- [ ] 02-04-PLAN.md — Root image (SquashFS) and newc initramfs writers in Rust, clippy bans, Docker buildx image production twice (wave 2)
+- [ ] 02-05-PLAN.md — Host supervisor, launch-config serializer, job input disk, capped `GuestBytes` (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-06-PLAN.md — SPIKE-04 signing, SPIKE-01 root-disk boot with the exact `/proc/cmdline`, initramfs negative evidence, Dockerfile image boot; SPIKE-08 stop-and-ask checkpoint (wave 3, not autonomous)
+
+**Wave 4** *(blocked on 02-06)*
+
+- [ ] 02-07-PLAN.md — K7 exit map: how guest exits, watchdog trips, signals, and refusals surface to the parent (wave 4)
+- [ ] 02-08-PLAN.md — SPIKE-02 egress fails closed and SPIKE-03 capped vsock stream, with K4 throughput (wave 4)
+- [ ] 02-09-PLAN.md — SPIKE-05 Seatbelt deny-default profile answer and the dedicated-user recipe (wave 4)
+
+**Wave 5** *(blocked on Wave 4 and 02-02)*
+
+- [ ] 02-10-PLAN.md — Evidence consolidation, the boot-path and signing decision record with SPIKE-01, KRUN-08, KRUN-09 and roadmap wording superseded, D-09 corrections to both CLAUDE files (wave 5)
+
+**Wave 6** *(blocked on 02-10)*
+
+- [ ] 02-11-PLAN.md — Remaining DOCS-05 amendments to CLAUDE.md, final gate, spike re-run, `cargo clean` (wave 6)
+
 **Stop-and-ask point**: If SPIKE-01 fails (the safe libkrun wrapper cannot boot libkrunfw on this machine), stop and ask the user before doing anything else. The remaining options, such as an `unsafe` binding crate, a different VMM, or waiting for upstream, need the user's explicit approval. Never add `#![allow(unsafe_code)]` or any other `unsafe` exception quietly (SPIKE-08).
 **Research**: Needs research-phase. The spikes are the research; each SPIKE item is a deliverable with a recorded result.
 
@@ -229,7 +259,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
-| 2. Platform Spikes | 0/TBD | Not started | - |
+| 2. Platform Spikes | 0/11 | Planned | - |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |

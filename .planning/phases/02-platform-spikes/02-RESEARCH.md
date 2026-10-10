@@ -543,18 +543,18 @@ Not a rename or refactor phase. Host state that the phase does change, recorded 
 | A6 | The dedicated `_minos` dscl recipe is complete | Pattern 6 | Recipe only, not executed |
 | A7 | macOS 27 has no libkrunfw bottle, so Homebrew builds it from source with Xcode clang (present) | Environment | Install takes longer; the executor records what happened |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **BLOCKING: which boot path replaces "initramfs" (SPIKE-01 / SPIKE-08)?**
+1. **BLOCKING: which boot path replaces "initramfs" (SPIKE-01 / SPIKE-08)?** RESOLVED by 02-CONTEXT.md D-18 (2026-10-09): the user chose Option A, the root-disk boot (raw read-only SquashFS root on `vda`, `/init` written in by the trusted packer, `root=/dev/vda` placed last through `init_path`, the exact `/proc/cmdline` asserted). Options B and C are rejected. The newc writer keeps its golden test and is used once, by 02-06, for the literal initramfs attempt as negative evidence. SPIKE-08 still applies if the root-disk boot fails (02-06 Task 3).
    - What we know: stock libkrunfw 5.6.2 has `BLK_DEV_INITRD` unset (HIGH). msb_krun always appends `root=/dev/root init=…` and uses `rootfstype=virtiofs` by default.
    - Option A (recommended): raw read-only SquashFS root on `vda` via the `root=` tail (Pattern 1); `/init` injected by the trusted packer. No initramfs, no virtio-fs, no unsafe. Cost: relies on pinned cmdline formatting, guarded by a `/proc/cmdline` assertion. The newc writer (D-17) has no consumer; keep it with its golden test, or let the user drop it.
    - Option B: an in-process single-file virtio-fs root (`FsBuilder::custom` with a safe `DynFileSystem` serving only `/init` from an open `File`; `stat64` is constructible as a literal of public fields). Then `/init` mounts `vda`. Matches upstream's `krun_set_root_disk_remount`. Cost: puts the FUSE server in the guest-facing surface and breaks the literal "no virtiofs" wording. It would also give a guest exit-code channel through `ioctl`.
    - Option C: rebuild libkrunfw with `CONFIG_BLK_DEV_INITRD=y`. libkrunfw's macOS build uses `build_on_krunvm.sh` (krunvm plus libkrun) or a Linux build of `kernel.c`. Cost: new supply-chain step and host tooling, and it diverges from Homebrew.
    - Recommendation: the orchestrator asks the user before execution. Otherwise the plan runs Pattern 2 as negative evidence, then a `checkpoint:decision`. SPIKE-02/03/05/06 boot tasks wait on the answer; SPIKE-07 and image production continue (CONTEXT domain).
 
-2. **Console cap mechanism for KRUN-01 ("capped console pipe").** The spike uses the watchdog plus file approach (Pitfall 8). Whether a `ConsoleBuilder::custom` backend becomes `hvc0` is unverified and is a Phase 5 decision. Record what the spike observed.
+2. **Console cap mechanism for KRUN-01 ("capped console pipe").** RESOLVED (deferred to Phase 5): the spikes use the watchdog-plus-file cap and record its overshoot (02-07 K7-04); whether a custom console backend can serve as `hvc0` is a Phase 5 decision, listed in CLAUDE.md Open questions by 02-11 (E-8). The spike uses the watchdog plus file approach (Pitfall 8). Whether a `ConsoleBuilder::custom` backend becomes `hvc0` is unverified and is a Phase 5 decision. Record what the spike observed.
 
-3. **Is `rng(true)` wanted?** It is a virtio-rng device reading host entropy. Leaving it on avoids early-boot entropy stalls. Turning it off removes one device. Recommendation: keep the default (on) for the spike and record the device list (`/sys/bus/virtio/devices`) in the evidence. Note that msb_krun always attaches its `virtio-msb-vmgenid` generation device.
+3. **Is `rng(true)` wanted?** RESOLVED: keep the default (on) for the spikes; 02-06 records the guest's virtio device list from the S01-ROOTDISK frame (Task 2 step 6), and Phase 5 decides whether to turn it off. It is a virtio-rng device reading host entropy. Leaving it on avoids early-boot entropy stalls. Turning it off removes one device. Recommendation: keep the default (on) for the spike and record the device list (`/sys/bus/virtio/devices`) in the evidence. Note that msb_krun always attaches its `virtio-msb-vmgenid` generation device.
 
 ## Environment Availability
 
