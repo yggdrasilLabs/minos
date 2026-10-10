@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: platform-spikes
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-10-10T13:18:04.933Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-10-10T13:34:46.684Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 16
-  completed_plans: 8
+  completed_plans: 9
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 02 (platform-spikes) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 02 execution started
 
@@ -63,6 +63,7 @@ Progress: [██████████] 100%
 | Phase 02 P01 | 12min | 4 tasks | 21 files |
 | Phase 02 P02 | 7min | 2 tasks | 1 files |
 | Phase 02 P03 | 8min | 3 tasks | 8 files |
+| Phase 02 P04 | 12min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-03: all 13 E-5 msb_krun clippy bans fire with definition paths (msb_krun::api::builder/builders); no re-export form needed; FsBuilder::custom fires as a bare path
 - [Phase 02]: 02-03: minos-vmm pre-takeover exits 64/65/66/67/70 (67 = SHA-256 mismatch); watchdog 124/125/126 via Vm::exit_code + ExitHandle::trigger
 - [Phase 02]: 02-03: launch config parse calls VmmConfig::try_from directly so ConfigError stays typed; the serde try_from attribute routes other paths through the same rules
+- [Phase 02]: 02-04: root image packer caps file content including hardlink copies at max_tar_bytes, and checks max(header, PAX) size before reading
+- [Phase 02]: 02-04: D-16 result: two buildx tars of the alpine fixture differ only in RUN-step mtimes; the packed SquashFS images are byte-identical
 
 ### Pending Todos
 
@@ -119,6 +122,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T13:18:04.929Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-10-10T13:34:46.680Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
