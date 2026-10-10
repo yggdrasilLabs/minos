@@ -307,8 +307,9 @@ fn boot_under_seatbelt() -> TestResult {
     let params = job_params(&files, &vmm, &krunfw)?;
     let argv = seatbelt_argv(&profile()?, &params, &vmm, &[files.config().as_os_str()]);
     print_argv("boot_under_seatbelt", &argv);
-    let run =
-        supervise::run(Launch::new(argv, &files, listener).host_deadline(Duration::from_mins(2)))?;
+    let run = supervise::run(
+        Launch::for_config(argv, &files, listener, &config).host_deadline(Duration::from_mins(2)),
+    )?;
     print_run("boot_under_seatbelt", &run)?;
 
     assert_eq!(run.exit_code(), Some(0));

@@ -6,6 +6,7 @@
 //! minos-vmm; the shared texts are the only binding. Validation lives in minos-vmm: this type only shapes output.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -47,6 +48,12 @@ impl LaunchConfig {
             max_duration_ms,
             machine,
         }
+    }
+
+    /// The hard maximum lifetime minos-vmm's watchdog enforces, from `max_duration_ms`.
+    #[must_use]
+    pub const fn max_duration(&self) -> Duration {
+        Duration::from_millis(self.max_duration_ms)
     }
 
     /// Serializes the config as compact JSON, the exact bytes minos-vmm parses.

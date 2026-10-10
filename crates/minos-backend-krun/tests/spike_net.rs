@@ -153,7 +153,7 @@ fn launch(vmm: &Path, job_json: &str, limits: Limits) -> TestResult<VmRun> {
     supervise::write_config(&files, &config)?;
     let argv = [vmm, files.config()];
     let run = supervise::run(
-        Launch::new(argv, &files, listener)
+        Launch::for_config(argv, &files, listener, &config)
             .host_deadline(limits.host_deadline)
             .conn_caps(limits.conn_caps),
     )?;

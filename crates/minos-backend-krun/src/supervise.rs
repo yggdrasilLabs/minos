@@ -62,8 +62,12 @@ pub const MAX_SOCKET_PATH_BYTES: usize = 103;
 /// Canonical parent of every job directory (`/tmp` is a symlink to it on macOS).
 pub const JOB_ROOT: &str = "/private/tmp";
 
-/// Host deadline when [`Launch::host_deadline`] is not called.
+/// Host deadline when neither [`Launch::for_config`] nor [`Launch::host_deadline`] sets one.
 pub const DEFAULT_HOST_DEADLINE: Duration = Duration::from_mins(2);
+/// What [`Launch::for_config`] adds to the config's `max_duration_ms`: time for the helper to start, for its own
+/// watchdog to trip, and for the VMM to flush the console and print its `minos-vmm: watchdog deadline` marker
+/// before the host gives up. The helper's deadline must fire first, or that evidence of a timeout is lost.
+pub const HOST_DEADLINE_GRACE: Duration = Duration::from_secs(30);
 /// Per-connection byte cap when [`Launch::conn_caps`] is not called.
 pub const DEFAULT_CONN_CAP: u64 = 1_048_576;
 /// Most vsock connections collected when [`Launch::max_connections`] is not called.
@@ -159,6 +163,18 @@ pub enum SuperviseError {
     /// The host deadline is too far in the future for the monotonic clock.
     #[error("the host deadline overflows the clock")]
     DeadlineOverflow,
+    /// The host deadline is not longer than the config's `max_duration_ms`, so the supervisor would kill the
+    /// helper before its own watchdog could trip and leave its marker and console behind.
+    #[error(
+        "the host deadline {deadline:?} is not longer than the config's max_duration_ms {max_duration:?}; \
+         the helper's watchdog must fire first"
+    )]
+    DeadlineTooShort {
+        /// The deadline [`Launch::host_deadline`] set.
+        deadline: Duration,
+        /// The config's `max_duration_ms`.
+        max_duration: Duration,
+    },
     /// A file the helper writes is not a regular file with exactly one link, so it may point at something the
     /// helper could not read itself. It is not read.
     #[error("{} is not a plain regular file; the helper may have replaced it", .path.display())]
@@ -461,6 +477,8 @@ pub struct Launch<'a> {
     files: &'a JobFiles,
     listener: UnixListener,
     host_deadline: Duration,
+    /// The config's `max_duration_ms` when built with [`Launch::for_config`]; the host deadline must exceed it.
+    max_duration: Option<Duration>,
     conn_caps: Vec<u64>,
     max_connections: usize,
     console_cap: u64,
@@ -482,13 +500,37 @@ impl<'a> Launch<'a> {
             files,
             listener,
             host_deadline: DEFAULT_HOST_DEADLINE,
+            max_duration: None,
             conn_caps: vec![DEFAULT_CONN_CAP],
             max_connections: DEFAULT_MAX_CONNECTIONS,
             console_cap: DEFAULT_CONSOLE_CAP,
         }
     }
 
-    /// Kills the helper if it is still running this long after it was spawned.
+    /// Like [`Launch::new`], for the `config` written to `files`, with the host deadline derived from it:
+    /// `max_duration_ms` plus [`HOST_DEADLINE_GRACE`], so the helper's own watchdog fires first (exit 124 and its
+    /// marker) and the console is flushed before the host kills anything. [`run`] then refuses a
+    /// [`Launch::host_deadline`] that is not longer than `max_duration_ms`.
+    #[must_use]
+    pub fn for_config<I, S>(
+        argv: I,
+        files: &'a JobFiles,
+        listener: UnixListener,
+        config: &LaunchConfig,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        let max_duration = config.max_duration();
+        let mut launch = Self::new(argv, files, listener);
+        launch.max_duration = Some(max_duration);
+        launch.host_deadline = max_duration.saturating_add(HOST_DEADLINE_GRACE);
+        launch
+    }
+
+    /// Kills the helper if it is still running this long after it was spawned. After [`Launch::for_config`],
+    /// [`run`] refuses a value that is not longer than the config's `max_duration_ms`.
     #[must_use]
     pub const fn host_deadline(mut self, deadline: Duration) -> Self {
         self.host_deadline = deadline;
@@ -536,11 +578,20 @@ impl<'a> Launch<'a> {
 ///
 /// # Errors
 ///
-/// [`SuperviseError::EmptyArgv`], [`SuperviseError::Spawn`], [`SuperviseError::DeadlineOverflow`], or
-/// [`SuperviseError::Io`] for a host-side failure, and [`SuperviseError::NotPlainFile`] if the console log is
-/// not a plain regular file. The helper is killed and reaped on every error path.
+/// [`SuperviseError::EmptyArgv`], [`SuperviseError::DeadlineTooShort`], [`SuperviseError::Spawn`],
+/// [`SuperviseError::DeadlineOverflow`], or [`SuperviseError::Io`] for a host-side failure, and
+/// [`SuperviseError::NotPlainFile`] if the console log is not a plain regular file. The helper is killed and
+/// reaped on every error path.
 pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
     let (program, args) = launch.argv.split_first().ok_or(SuperviseError::EmptyArgv)?;
+    if let Some(max_duration) = launch.max_duration
+        && launch.host_deadline <= max_duration
+    {
+        return Err(SuperviseError::DeadlineTooShort {
+            deadline: launch.host_deadline,
+            max_duration,
+        });
+    }
     let files = launch.files;
     let socket = files.socket();
     launch
@@ -1106,6 +1157,75 @@ mod tests {
         let files = JobFiles::in_dir(dir.path())?;
         let listener = bind_output(&files)?;
         Ok((dir, files, listener))
+    }
+
+    /// A config for `files` whose only interesting field is `max_duration_ms`.
+    fn config_with_max_duration(files: &JobFiles, max_duration_ms: u64) -> LaunchConfig {
+        LaunchConfig::new(
+            Kernel::new(
+                "/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib",
+                "00".repeat(32),
+            ),
+            Boot::RootDisk,
+            Disks::new(files.root(), files.input(), files.scratch(), 67_108_864),
+            Vsock::new(1024, files.socket()),
+            Console::new(files.console(), 1_048_576),
+            max_duration_ms,
+            Machine::new(1, 256),
+        )
+    }
+
+    #[test]
+    fn supervise_for_config_derives_the_host_deadline_from_max_duration() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        let config = config_with_max_duration(&files, 60_000);
+        let launch = Launch::for_config(["/usr/bin/true"], &files, listener, &config);
+        assert_eq!(launch.max_duration, Some(Duration::from_mins(1)));
+        assert_eq!(
+            launch.host_deadline,
+            Duration::from_mins(1).saturating_add(super::HOST_DEADLINE_GRACE)
+        );
+        // A hand-built launch carries no max_duration, so nothing is checked against it.
+        let (_dir, files, listener) = prepared()?;
+        assert_eq!(
+            Launch::new(["/usr/bin/true"], &files, listener).max_duration,
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_refuses_a_host_deadline_within_max_duration() -> TestResult {
+        for deadline in [Duration::from_secs(1), Duration::from_mins(1)] {
+            let (_dir, files, listener) = prepared()?;
+            let config = config_with_max_duration(&files, 60_000);
+            let launch = Launch::for_config(["/usr/bin/true"], &files, listener, &config)
+                .host_deadline(deadline);
+            assert!(
+                matches!(
+                    run(launch),
+                    Err(SuperviseError::DeadlineTooShort { deadline: got, max_duration })
+                        if got == deadline && max_duration == Duration::from_mins(1)
+                ),
+                "deadline {deadline:?} must be refused"
+            );
+            // Refused before anything was created for the helper.
+            assert!(!files.vmm_stdout().exists());
+            assert!(!files.vmm_stderr().exists());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_accepts_a_host_deadline_past_max_duration() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        let config = config_with_max_duration(&files, 60_000);
+        let launch = Launch::for_config(["/usr/bin/true"], &files, listener, &config)
+            .host_deadline(Duration::from_millis(60_001));
+        let vm = run(launch)?;
+        assert_eq!(vm.exit_code(), Some(0));
+        assert!(!vm.killed_at_deadline());
+        Ok(())
     }
 
     fn write_then_close(socket: &Path, bytes: &[u8]) -> io::Result<()> {

@@ -142,6 +142,8 @@ struct Job {
     /// Keeps the directory until the test ends.
     _dir: TempDir,
     files: JobFiles,
+    /// The config written to `vmm.json`; `run_job` derives the launch from it.
+    config: LaunchConfig,
 }
 
 /// Prepares one job directory for `job_json` with the given kernel, launcher deadline, and console cap, and
@@ -174,7 +176,14 @@ fn prepare(
         MACHINE,
     );
     supervise::write_config(&files, &config)?;
-    Ok((Job { _dir: dir, files }, listener))
+    Ok((
+        Job {
+            _dir: dir,
+            files,
+            config,
+        },
+        listener,
+    ))
 }
 
 /// Runs a prepared job through `supervise::run`.
@@ -186,7 +195,7 @@ fn run_job(
 ) -> TestResult<VmRun> {
     let argv = [vmm, job.files.config()];
     let run = supervise::run(
-        Launch::new(argv, &job.files, listener)
+        Launch::for_config(argv, &job.files, listener, &job.config)
             .host_deadline(launch.host_deadline)
             .console_cap(launch.console_readback),
     )?;

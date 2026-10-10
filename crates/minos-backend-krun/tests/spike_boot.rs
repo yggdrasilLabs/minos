@@ -166,7 +166,9 @@ fn launch(
     );
     supervise::write_config(&files, &config)?;
     let argv = [vmm, files.config()];
-    let run = supervise::run(Launch::new(argv, &files, listener).host_deadline(host_deadline))?;
+    let run = supervise::run(
+        Launch::for_config(argv, &files, listener, &config).host_deadline(host_deadline),
+    )?;
     Ok(run)
 }
 
