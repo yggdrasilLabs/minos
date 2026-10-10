@@ -37,6 +37,8 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rustix::io::Errno;
+use rustix::process::{Pid, Signal, kill_process_group};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
@@ -581,7 +583,7 @@ pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
             break status;
         }
         if Instant::now() >= deadline {
-            child.0.kill().map_err(io_at("kill", program_path))?;
+            kill_group(&mut child.0).map_err(io_at("kill", program_path))?;
             let status = child.0.wait().map_err(io_at("wait for", program_path))?;
             killed_at_deadline = true;
             break status;
@@ -880,12 +882,31 @@ fn displayable(character: char) -> bool {
             ))
 }
 
-/// Kills and reaps the child on drop, so no early return leaves a helper running. Once the child has been
-/// reaped, std's `kill` returns `Ok` without signalling, so a reused pid is never hit.
+/// Sends `SIGKILL` to the helper's whole process group, then to the leader itself.
+///
+/// The group id equals the leader's pid because the helper was spawned with `process_group(0)`, and the call
+/// is made only while the leader is unreaped, so the pid still names the helper. Signalling the group rather
+/// than the leader is what stops a VM when the helper is wrapped in something that forks (a `_minos`-user
+/// launcher, `sudo`, a VMM worker process): killing `sandbox-exec` or `sudo` alone would leave the VM running
+/// with the job disks open. A group that is already empty (`ESRCH`) is not an error.
+fn kill_group(child: &mut Child) -> io::Result<()> {
+    match kill_process_group(Pid::from_child(child), Signal::KILL) {
+        Ok(()) | Err(Errno::SRCH) => {}
+        Err(errno) => return Err(errno.into()),
+    }
+    child.kill()
+}
+
+/// Kills the child's process group and reaps the child on drop, so no early return leaves a helper or its VM
+/// running. The group is signalled only while the leader is unreaped (its pid is then still the helper's);
+/// after a reap, std's `kill` returns `Ok` without signalling, so a reused pid is never hit.
 struct Reaper(Child);
 
 impl Drop for Reaper {
     fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) {
+            kill_group(&mut self.0).ok();
+        }
         self.0.kill().ok();
         self.0.wait().ok();
     }
@@ -1022,8 +1043,10 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::Path;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
+    use rustix::io::Errno;
+    use rustix::process::{Pid, test_kill_process_group};
     use tempfile::TempDir;
 
     use super::{
@@ -1220,6 +1243,34 @@ mod tests {
         assert_eq!(vm.signal(), Some(9));
         assert!(vm.elapsed() >= Duration::from_millis(200));
         assert!(vm.elapsed() < Duration::from_secs(2));
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_kills_the_whole_process_group_at_the_host_deadline() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        // A fixed test command, not manifest or model input: the shell backgrounds one sleep (a grandchild
+        // that survives the leader's death) and execs into another (the leader itself).
+        let vm = run(Launch::new(
+            ["/bin/sh", "-c", "/bin/sleep 30 & exec /bin/sleep 30"],
+            &files,
+            listener,
+        )
+        .host_deadline(Duration::from_millis(200)))?;
+        assert!(vm.killed_at_deadline());
+        assert_eq!(vm.signal(), Some(9));
+        let group = Pid::from_raw(i32::try_from(vm.pid())?).ok_or("pid 0")?;
+        // Signal 0 probes the group; ESRCH means no member is left. The orphaned sleep is reaped by launchd,
+        // so give it a moment.
+        let gone_by = Instant::now() + Duration::from_secs(5);
+        loop {
+            match test_kill_process_group(group) {
+                Err(Errno::SRCH) => break,
+                Ok(()) if Instant::now() < gone_by => thread::sleep(Duration::from_millis(20)),
+                Ok(()) => return Err("a member of the helper's process group survived".into()),
+                Err(errno) => return Err(format!("probing the process group: {errno}").into()),
+            }
+        }
         Ok(())
     }
 
