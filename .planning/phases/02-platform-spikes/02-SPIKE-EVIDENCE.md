@@ -8395,3 +8395,286 @@ The research files stay as written, because they are dated inputs (02-CONTEXT.md
 | `STACK.md` Question 1 launcher recipe, item 5 | "The parent reads one capped tar stream from it into `Untrusted<Bytes>`." | One connection carries at most 8192 bytes; output becomes a sequence of chunked connections | DIAG-01, S03-ANSWER | CLAUDE.md Local backends (output bullet) |
 | `STACK.md` Question 6 testing, VM integration row | "`#[ignore]`d tests, or a feature-gated test crate run by `cargo xtask vm-test`" | The VM spikes are ignored integration tests in `crates/minos-backend-krun/tests/spike_*.rs`, run with `cargo test --ignored`; no xtask | S01-ROOTDISK (command lines), D-11 | `.claude/CLAUDE.md` testing row; CLAUDE.md Commands |
 | `STACK.md` Sources, Claude Code docs bullet | "Local `claude --help` (2.1.295) ... flag interplay is unverified" | The spikes ran 2.1.296; `command -v claude` resolves to a cmux shim, and the canonical binary is under `~/.local/share/claude/versions/`; the flag interplay is verified | C-01, SPIKE-07 contract | `.claude/CLAUDE.md` Sources, decision 9, Question 9 |
+
+## DOCS-05 checklist
+
+Plan 02-11, 2026-10-10. Each 02-11-PLAN.md E-10 item, checked on CLAUDE.md after commit `235a1cf`. Output is shown after the arrow.
+
+- Local-first build order up front: `sed -n '/^## Build order/{n;n;p;}' CLAUDE.md` -> `` Milestone v1 is local-first, on macOS arm64 (02-CONTEXT.md D-07; `.planning/ROADMAP.md`): `` (E-7's first line)
+- `ModelProvider` decision, `claude` CLI provider as personal default: `grep -c 'ModelProvider' CLAUDE.md` -> `1`
+- No tokio in v1: `grep -c '^- \*\*No tokio in v1.\*\*' CLAUDE.md` -> `1`
+- Pico-dollar money: `grep -c 'pico-dollar' CLAUDE.md` -> `1`; `grep -c 'nano' CLAUDE.md` -> `0`
+- `libkrun/krun` tap: `grep -c 'libkrun/krun' CLAUDE.md` -> `2`
+- libkrun networking default and msb_krun counter-default: `grep -c 'inet_hijack' CLAUDE.md` -> `1` (merged into the existing no-network bullet; see 02-11-SUMMARY.md)
+- `minos-loop` crate and loop-never-links-sandbox: `grep -c 'minos-loop/' CLAUDE.md` -> `1`; ``grep -n '^- `loop`' CLAUDE.md`` -> `` 102:- `loop` depends on `core`, `store`, and `propose`. It never links `sandbox` or a backend, so it never sees raw sandbox output. The orchestrator, when it arrives, follows the same rule. ``
+- Every spike result in Verified facts with the date: `## Verified facts, local (as of 2026-10-10)` has 9 bullets: SPIKE-01 (three: kernel, boot, exit code), SPIKE-02, SPIKE-03 (the recorded limit), SPIKE-04, SPIKE-05, SPIKE-06, SPIKE-07; every bullet cites evidence IDs from this file
+- Codesign line and musl clippy line in Commands: `grep -c 'codesign --force --sign - --options runtime' CLAUDE.md` -> `1`; `grep -c 'Phase 2 onward (02-CONTEXT.md D-03)' CLAUDE.md` -> `2`
+- P0 open questions answered and removed; AWS questions deferred: `### Deferred to the AWS milestone` holds 6 bullets, the six BASE bullets verbatim; the BASE `## Open questions` held no local question, so none needed removing
+- AWS content labelled, nothing removed (D-08): `grep -c '^## Durable execution rules (AWS milestone)$' CLAUDE.md` -> `1`; `grep -c '^## Verified facts, AWS (as of 2026-10-08)$' CLAUDE.md` -> `1`; each non-empty line of the BASE (`dbd1a87`) `## Durable execution rules` (with its platform limits table), `## Build order`, `## Open questions`, and `## Verified facts (as of 2026-10-08)` sections checked with `grep -cF` against CLAUDE.md -> `D-08 lines checked: 43, missing: 0`
+- No slot marker left: `grep -nE '\{(H-|RI-|S0|K[0-9]|the |version|osrelease|from|each|anything|num_turns|SPIKE)' CLAUDE.md` -> (no output)
+- No ironclad claim added: `grep -ci ironclad CLAUDE.md` -> `1`, equal to BASE (the existing do-not-claim sentence)
+
+## Final gate (Phase 2)
+
+Plan 02-11, 2026-10-10, HEAD `235a1cf5d652ecd6fb4d5b4bfc546b3a75b5e8cc`, run from the repository root. Only each command's closing summary lines are shown, verbatim. Home path shown as `~`.
+
+Command: `cargo fmt --all --check`
+
+Exit code: 0
+
+```text
+(no output)
+```
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+```
+
+Command: `cargo test --workspace`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-540d1d7b0c0c63d3)
+test result: ok. 55 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.02s
+     Running tests/spike_boot.rs (target/debug/deps/spike_boot-a9f449792644c36b)
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/spike_exits.rs (target/debug/deps/spike_exits-887a382d85f74a31)
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/spike_net.rs (target/debug/deps/spike_net-9a0a538ebb732781)
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/spike_rootimg.rs (target/debug/deps/spike_rootimg-c993db859c447c7f)
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/spike_seatbelt.rs (target/debug/deps/spike_seatbelt-d68db829a28e468a)
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos-48c6bf59dbe260aa)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_core-c619c5be5a10c8c9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_guest-c85fab116ead6037)
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running unittests src/main.rs (target/debug/deps/minos_guest-c1681213587d5b69)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_loop-994e138925915d56)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_propose-1a9a8fd769d6a47b)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_runner-89243ff6043495d6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_sandbox-dcc21162d5b68e3e)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_store-4edbb133c2d25261)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_vmm-6911070ecfa4068f)
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_backend_krun
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_guest
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_loop
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_propose
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_runner
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_sandbox
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_store
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Command: `cargo deny check`
+
+Exit code: 0. The warn-level duplicate-version reports (`multiple-versions = "warn"`, Cargo.toml comment) are listed, then the closing line.
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+Command: `cargo doc --workspace --no-deps`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+   Generated ~/Repos/minos/target/doc/minos_backend_krun/index.html and 9 other files
+```
+
+Command: `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+```
+
+Command (C-01): `for f in crates/*/Cargo.toml; do grep -A1 -xF '[lints]' "$f" | grep -qxF 'workspace = true' && echo "ok $f" || echo "MISSING $f"; done`
+
+```text
+ok crates/minos-backend-krun/Cargo.toml
+ok crates/minos-cli/Cargo.toml
+ok crates/minos-core/Cargo.toml
+ok crates/minos-guest/Cargo.toml
+ok crates/minos-loop/Cargo.toml
+ok crates/minos-propose/Cargo.toml
+ok crates/minos-runner/Cargo.toml
+ok crates/minos-sandbox/Cargo.toml
+ok crates/minos-store/Cargo.toml
+ok crates/minos-vmm/Cargo.toml
+```
+
+Command (C-02): `grep -rnE '#!?\[allow\(' crates --include='*.rs'`
+
+Exit code: 1
+
+```text
+(no output)
+```
+
+Command (no unsafe): `grep -rnE 'unsafe[[:space:]]*(\{|fn |impl|extern|trait)|unsafe_code' crates --include='*.rs'`
+
+Exit code: 1
+
+```text
+(no output)
+```
+
+## Invariant check (Phase 2)
+
+BASE is `dbd1a87491d155fb6c4685ee4a30ce7a42d937c4` (the 02-01 fragment's `HEAD at start`). Each check's output follows its `### I<n>` marker, verbatim.
+
+Commands, in order:
+
+- I1: `git diff dbd1a87 -- Cargo.toml` (expected: the panic comment only, 02-01 P-PANIC)
+- I2: `git diff --quiet dbd1a87 -- deny.toml rustfmt.toml crates/minos-core/clippy.toml rules .planning/research; echo $?` (expected: `0`)
+- I3: `git diff dbd1a87 -- .cargo/config.toml` (expected: the added musl table only)
+- I3b: `awk '/^\[target\.aarch64-unknown-linux-musl\]/,0' .cargo/config.toml | grep -c rustflags` (expected: `0`)
+- I3c: `grep -n '^\[build\]' -A3 .cargo/config.toml` (the `[build]` line, unchanged)
+- I4: `grep -n 'unsafe_code\|unwrap_used\|expect_used\|indexing_slicing' Cargo.toml` (expected: all four at `forbid`)
+- I5: `grep -n 'msb_krun' Cargo.toml` (expected: `features = ["blk"]` only)
+
+```text
+### I1
+diff --git a/Cargo.toml b/Cargo.toml
+index f6a8f21..c0a4329 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -25,7 +25,9 @@ publish = false          # v1 publishes nothing; also makes clippy::cargo_common
+ [profile.release]
+ # Every binary parses hostile input (sandbox output, diffs, job specs). Integer overflow in a size cap,
+ # a length-prefixed hash, or pico-dollar accumulation must panic, not wrap, without relying on each call site.
+-# panic = "abort" for minos-guest (PID 1 has nothing to unwind into) belongs to the phase that gives it a body.
++# panic = "abort" cannot be set for minos-guest alone: Cargo rejects `panic` in a [profile.*.package.*]
++# override (02-SPIKE-EVIDENCE.md P-PANIC). Unwinding stays. If the guest's PID 1 panics, the kernel panics and
++# the VM powers off without sending a status frame, which the host classifies as Crashed.
+ overflow-checks = true
+ 
+ [workspace.lints.rust]
+### I2
+0
+### I3
+diff --git a/.cargo/config.toml b/.cargo/config.toml
+index 051a4d3..ac00e89 100644
+--- a/.cargo/config.toml
++++ b/.cargo/config.toml
+@@ -8,3 +8,9 @@
+ # does not apply to the installed package itself); run tool installs from elsewhere.
+ [build]
+ rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]
++
++# The static guest (/init) links with rust-lld, which ships with the pinned toolchain (02-CONTEXT.md D-03).
++# This table holds the linker key only. A flags key here would replace the [build] backstop above for this
++# target (01-GATE-EVIDENCE.md G-02-CLOSED).
++[target.aarch64-unknown-linux-musl]
++linker = "rust-lld"
+### I3b
+0
+### I3c
+9:[build]
+10-rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]
+11-
+12-# The static guest (/init) links with rust-lld, which ships with the pinned toolchain (02-CONTEXT.md D-03).
+### I4
+34:unsafe_code = "forbid"
+47:unwrap_used = "forbid"
+48:expect_used = "forbid"
+49:indexing_slicing = "forbid"
+55:# rules/lint-unsafe-doc.md (moot while unsafe_code is forbid, but kept as defense in depth)
+### I5
+64:# cargo: msb_krun, proptest, and backhand pull duplicate versions we cannot unify; cargo-deny multiple-versions = "warn" reports them
+97:msb_krun     = { version = "=0.1.41", default-features = false, features = ["blk"] }
+```
+
+Result: Cargo.toml differs from BASE only in the `[profile.release]` panic comment (P-PANIC); deny.toml, rustfmt.toml, the core clippy.toml, `rules/`, and `.planning/research/` are unchanged; `.cargo/config.toml` gained only the musl `linker` table and its `[build]` rustflags line is unchanged; the four workspace lints are `forbid`; `msb_krun` has `features = ["blk"]` only. With the empty no-unsafe grep above, no unsafe exception exists anywhere in the workspace (SPIKE-08).
+
+## Spike re-run (Phase 2)
+
+D-02: the spikes re-run from the final tree. Summary-only record: each run's `test result:` line (and failures, of which there were none). Setup, from the repository root, after the gate above (which relinks `minos-vmm`):
+
+- `cargo build -p minos-guest --release --target aarch64-unknown-linux-musl` exit 0; `cargo build -p minos-vmm` exit 0; `cp target/debug/minos-vmm $S/minos-vmm-unsigned` (`$S` is the session scratch directory).
+- SHA-256: guest `10e59803c53ce60bb53445f95b86e07652a5029c5601170823f1fe156e4b3a89` (equal to 02-01 G-GUEST); helper and its unsigned copy `63173a3cd5d9379e74c460ccac9a8b023e57bf7257c4ac3bf01fffb8547523b3`.
+- Signed with the 02-06 E-4 argv, `codesign --force --sign - --options runtime --entitlements crates/minos-vmm/minos-vmm.entitlements target/debug/minos-vmm` (exit 0, `replacing existing signature`). `codesign --display --entitlements - target/debug/minos-vmm` (exit 0) lists `com.apple.security.cs.disable-library-validation` and `com.apple.security.hypervisor`, both `true`. The entitlement count was re-checked before the later runs (2 keys each time); no spike run relinks the helper.
+- Environment (02-06 E-1): `MINOS_VMM=$(pwd)/target/debug/minos-vmm`, `MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest`, `MINOS_KRUNFW=$(realpath /opt/homebrew/lib/libkrunfw.5.dylib)` (SHA-256 `59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217`, H-01), plus `MINOS_VMM_UNSIGNED=$S/minos-vmm-unsigned` for `spike_boot`, `MINOS_DOCKER=$(command -v docker)` for `spike_rootimg` (server 29.6.1, already running), and `MINOS_SPIKE_HOST_IP=$(ipconfig getifaddr en0)` for `spike_net` (value not recorded, as in 02-08).
+
+Command: `cargo test -p minos-backend-krun --test spike_boot -- --ignored --nocapture --test-threads=1`
+
+Exit code: 0
+
+```text
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.61s
+```
+
+Command: `cargo test -p minos-backend-krun --test spike_rootimg -- --ignored --nocapture --test-threads=1`
+
+Exit code: 0 (the image again hashed `d1e93ef0334243de484b036aec053eed241b77abc8176bd2e3e672aa2eb0a4ae`, `images_match` true, `tars_match` false, as in RI-03 and RI-04)
+
+```text
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.01s
+```
+
+Command: `cargo test -p minos-backend-krun --test spike_exits -- --ignored --nocapture --test-threads=1`
+
+Exit code: 0. The run prints three `test result:` lines: the two `1 passed; ... 11 filtered out` lines come from the `orphan_launcher` child runs that `k7_07_parent_gone` and `k7_07b_parent_gone_after_boot` start; the last line is the file's own result.
+
+```text
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.33s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.82s
+```
+
+Command: `cargo test -p minos-backend-krun --test spike_seatbelt -- --ignored --nocapture --test-threads=1`
+
+Exit code: 0
+
+```text
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+```
+
+Command: `cargo test -p minos-backend-krun --test spike_net -- --ignored --test-threads=1 --skip vsock_`
+
+Exit code: 0
+
+```text
+test egress_fails_closed ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.73s
+```
+
+`vsock_stream_within_cap`, `vsock_stream_over_cap`, and `vsock_throughput_64mib` were intentionally not re-run: they encode the single-connection contract that the pinned `msb_krun_devices` 0.1.41 cannot meet, a recorded limit and not a regression (DIAG-01, S03-ANSWER).
+
+After every run: `/usr/bin/pgrep -x minos-vmm; echo "pgrep exit $?"` printed `pgrep exit 1` (no helper left running).
+
+Result: five files, five file-level `test result: ok.` lines. `spike_boot` 3 of 3, `spike_rootimg` 2 of 2, `spike_exits` 12 of 12, `spike_seatbelt` 3 of 3, and `spike_net` 1 of 1 run (`egress_fails_closed`; the three vsock-limit tests filtered out as above).
