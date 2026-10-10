@@ -68,7 +68,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Each supply-chain or layering violation makes `cargo deny check` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate; a normal `minos-core` to `minos-sandbox` edge fails earlier, as a Cargo dependency cycle (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 4/4 plans complete
+**Plans**: 4/5 plans complete
 Plans:
 **Wave 1**
 
@@ -85,6 +85,10 @@ Plans:
 **Wave 4** *(gap closure for UAT tests 1 to 3, blocked on Wave 3 completion)*
 
 - [x] 01-04-PLAN.md — Three clippy lints to forbid, `.cargo/config.toml` rustflags backstop, `cargo doc --workspace --no-deps` as the fifth gate command; closing proofs G-01 to G-03, five-command final gate, `cargo clean` (wave 4)
+
+**Wave 5** *(gap closure for UAT test 6, blocked on Wave 4 completion)*
+
+- [ ] 01-05-PLAN.md — F-01 decided (A): drop clap's `derive` feature so `minos-cli` uses the builder API, regenerate `Cargo.lock`, re-check the build-script allowlist, correct the clap lines in `.claude/CLAUDE.md` and `research/STACK.md`; F-01-CLOSED, P-01, B-02, five-command final gate, `cargo clean` (wave 5)
 
 **Research**: Standard patterns (cargo-deny and lint recipes are verified in research/STACK.md); skip research-phase
 
