@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: platform-spikes
 status: executing
-stopped_at: Completed 02-08-PLAN.md
-last_updated: "2026-10-10T15:49:22.609Z"
+stopped_at: Completed 02-10-PLAN.md
+last_updated: "2026-10-10T16:01:14.116Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 02 (platform-spikes) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 02 execution started
 
@@ -69,6 +69,7 @@ Progress: [██████████] 100%
 | Phase 02 P07 | 15min | 2 tasks | 4 files |
 | Phase 02 P08 | 70min | 2 tasks | 2 files |
 | Phase 02 P09 | 10 min | 2 tasks | 3 files |
+| Phase 02 P10 | 7min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,8 @@ Recent decisions affecting current work:
 - [Phase 02]: User decision 2026-10-10 (work within the limits): Phase 5 output is short vsock connections of at most one 4 KiB chunk, length-prefixed and sequence-numbered, reassembled under per-chunk and total caps; guest to host only; msb_krun fork rejected for now; upstream reporting left to the user
 - [Phase 02]: SPIKE-05: minos-vmm boots under a deny-default Seatbelt profile (crates/minos-vmm/minos-vmm.sb) with three allowances from logged denials; hv_vm_create needs no hypervisor rule; the only network allowance is the literal vsock route socket
 - [Phase 02]: Phase 5 may report Seatbelt as an active local confinement layer (KRUN-07) when launched via /usr/bin/sandbox-exec; the dedicated _minos user is recipe only (D-10), so runs record reduced local hardening for that layer
+- [Phase 02]: Phase 2 evidence is one file, 02-SPIKE-EVIDENCE.md, consolidated verbatim (region SHA-256 equals the fragment concatenation, 69494b03...bb41)
+- [Phase 02]: CLAUDE.md records the 8192-byte vsock limit of msb_krun_devices 0.1.41 and the user's chunked output protocol (S03-ANSWER); SPIKE-03 and ROADMAP Phase 2 criterion 2 await the user's wording decision
 
 ### Pending Todos
 
@@ -139,6 +142,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T15:49:17.930Z
-Stopped at: Completed 02-08-PLAN.md
+Last session: 2026-10-10T16:01:14.112Z
+Stopped at: Completed 02-10-PLAN.md
 Resume file: None
