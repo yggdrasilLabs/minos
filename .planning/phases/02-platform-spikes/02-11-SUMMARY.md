@@ -144,7 +144,10 @@ completed: 2026-10-10
 
 ## Issues Encountered
 
-None. The gate, the invariant checks, and all five spike files passed on the first run.
+- The gate, the invariant checks, and all five spike files passed on the first run.
+- After `cargo clean` (16:09 UTC), the user's editor rebuilt `target/` on its own at 16:10:29 UTC. The process was Zed's rust-analyzer flycheck, pid 43264, running since 09:52 local. It left `target/flycheck0/stderr` ending in `Checking minos-vmm ... Finished`. No command from this plan ran cargo.
+- I removed that rebuilt directory with `rm -rf target`. That is not a cargo command, and the directory is gitignored build output. `test ! -d target` printed 0 straight away and again 30 seconds later.
+- The evidence file's `## cargo clean` section is accurate for the moment it was recorded. While Zed is open on this repository, rust-analyzer may rebuild `target/` again.
 
 ## Open decisions for the user (carried from 02-10, unchanged)
 
@@ -165,4 +168,4 @@ None.
 
 - FOUND: CLAUDE.md, .planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md (last `## ` section is `## cargo clean`)
 - FOUND: 235a1cf, d734387, 8c42af3
-- `target/` absent; no cargo command ran after `cargo clean`
+- `target/` absent; no cargo command from this plan ran after `cargo clean`. The editor's rust-analyzer rebuilt `target/` once, and I removed it (see Issues Encountered)
