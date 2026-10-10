@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: platform-spikes
 status: executing
-stopped_at: Completed 02-07-PLAN.md
-last_updated: "2026-10-10T14:28:53.221Z"
+stopped_at: Completed 02-08-PLAN.md
+last_updated: "2026-10-10T15:39:19.123Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 16
-  completed_plans: 12
+  completed_plans: 13
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 02 (platform-spikes) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 02 execution started
 
@@ -67,6 +67,7 @@ Progress: [██████████] 100%
 | Phase 02 P05 | 10min | 2 tasks | 3 files |
 | Phase 02 P06 | 24min | 3 tasks | 6 files |
 | Phase 02 P07 | 15min | 2 tasks | 4 files |
+| Phase 02 P08 | 70min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-06: guest kernel is 6.12.109, not 6.12.91; SPIKE-08 not triggered; the D-18 root-disk boot works
 - [Phase 02]: K7: the helper exit status never carries the guest result; power-off, init return, and SIGTERM all exit 0; Phase 5 classifies from the vsock frame (overturns ARCHITECTURE.md Pattern 5)
 - [Phase 02]: DEFECT-01 fixed (orchestrator-approved): minos-vmm records its parent PID at main entry and a PID 1 parent counts as gone (exit 126)
+- [Phase 02]: SPIKE-02: no guest egress (IPv4 and 127.0.0.1 ENETUNREACH 101, IPv6 and ::1 EADDRNOTAVAIL 99, canaries 0, net_ifaces lo); TSI is compiled into the guest kernel, so isolation holds only while inet hijack stays off; egress_fails_closed becomes KRUN-03
+- [Phase 02]: SPIKE-03: vsock guest-to-host is reliable to 8192 bytes per connection; msb_krun_devices 0.1.41 has three proven defects above it (H1 shutdown race, H2 multi-descriptor drop over 32 KiB, H3 4 MiB credit threshold deadlock over 256 KiB) (DIAG-01); SPIKE-03 left Pending in REQUIREMENTS
+- [Phase 02]: User decision 2026-10-10 (work within the limits): Phase 5 output is short vsock connections of at most one 4 KiB chunk, length-prefixed and sequence-numbered, reassembled under per-chunk and total caps; guest to host only; msb_krun fork rejected for now; upstream reporting left to the user
 
 ### Pending Todos
 
@@ -132,6 +136,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T14:28:53.217Z
-Stopped at: Completed 02-07-PLAN.md
+Last session: 2026-10-10T15:39:19.119Z
+Stopped at: Completed 02-08-PLAN.md
 Resume file: None
