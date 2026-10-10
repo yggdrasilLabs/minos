@@ -8,3 +8,9 @@
 # does not apply to the installed package itself); run tool installs from elsewhere.
 [build]
 rustflags = ["-Funsafe_code", "-Fclippy::unwrap_used", "-Fclippy::expect_used", "-Fclippy::indexing_slicing"]
+
+# The static guest (/init) links with rust-lld, which ships with the pinned toolchain (02-CONTEXT.md D-03).
+# This table holds the linker key only. A flags key here would replace the [build] backstop above for this
+# target (01-GATE-EVIDENCE.md G-02-CLOSED).
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"

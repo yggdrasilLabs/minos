@@ -422,11 +422,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check
 cargo doc --workspace --no-deps          # the only command that enforces [workspace.lints.rustdoc]
-cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings   # Phase 5 onward
+cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings   # Phase 2 onward (02-CONTEXT.md D-03)
+cargo build -p minos-guest --release --target aarch64-unknown-linux-musl   # the static /init; a build step, not a gate command
 cargo lambda build --release --arm64     # Lambda functions; plain cargo build links the wrong glibc
 ```
 
-The sixth command is Phase 5 onward (D-09 adds `targets = ["aarch64-unknown-linux-musl"]` to `rust-toolchain.toml` in that phase, with the matching `cargo test` once a Linux runner exists). Until then the host gate builds `minos-guest` for `aarch64-apple-darwin`, where its Linux-only dependencies do not exist, so the forbid backstop and every clippy lint are blind to anything behind `#[cfg(target_os = "linux")]`. Keep the guest free of that gate on anything the host can compile (the tar and `minos-core` paths) so the host gate covers as much of it as possible.
+The sixth command runs from Phase 2 onward (02-CONTEXT.md D-03). The guest is always Linux, because libkrunfw ships a Linux kernel, so `minos-guest` needs a Linux target even though Minos runs on macOS. `/init` is written into whatever root image the user's Dockerfile produces, so it must be a fully static binary that loads no libc from that image: hence `aarch64-unknown-linux-musl`, listed in `rust-toolchain.toml` and linked with `rust-lld`. `.cargo/config.toml` gives that target a `linker` key and nothing else. A flags key there would silently replace the `[build]` forbid backstop for the guest (01-GATE-EVIDENCE.md G-02-CLOSED). The host gate still builds `minos-guest` for `aarch64-apple-darwin`, so keep everything the host can compile (the job and frame codecs, the tar and `minos-core` paths) out of `#[cfg(target_os = "linux")]`; Linux-only code lives in `crates/minos-guest/src/linux.rs`. `cargo test --workspace` cannot run that Linux code on macOS; it waits for a Linux runner, and the VM spikes exercise it meanwhile.
 
 Every phase verification also runs the C-02 check, `grep -rnE '#!?\[allow\(' crates --include='*.rs'`, which must print nothing. An inner `#![allow(..., reason = "...")]` on any lint that is not `forbid` passes `cargo clippy` (01-GATE-EVIDENCE.md R-03), so for those lints this grep, not the gate, is what enforces the no-`allow` rule.
 

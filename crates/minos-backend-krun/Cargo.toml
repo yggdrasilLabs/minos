@@ -17,3 +17,7 @@ thiserror.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 backhand.workspace = true
+tar.workspace = true
+sha2.workspace = true
+base16ct.workspace = true
+serde.workspace = true

@@ -2,6 +2,7 @@
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
-# targets: add "aarch64-unknown-linux-musl" in Phase 5 (D-09). The musl std is not installed today.
-# Until then no gate command compiles or lints minos-guest for the target it runs on; CLAUDE.md Commands
-# lists the Phase 5 clippy line for it.
+# The guest is always Linux (libkrunfw ships a Linux kernel), and /init is written into whatever root image a
+# user's Dockerfile produces, so it must be a fully static binary that needs no libc or loader from that image
+# (02-CONTEXT.md D-03, pulled forward from Phase 1 D-09). .cargo/config.toml links it with rust-lld.
+targets = ["aarch64-unknown-linux-musl"]
