@@ -11,17 +11,24 @@
 //! `/tmp`, `/mnt`), and `/init` is written last from the trusted guest bytes, replacing anything the
 //! tar put there.
 
-use std::io::Read;
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Cursor, Read};
+use std::rc::Rc;
 
+use backhand::compression::Compressor;
+use backhand::{BackhandError, FilesystemCompressor, FilesystemWriter, NodeHeader};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+use tar::EntryType;
 
 /// Caps applied to a rootfs tar before and while it is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PackLimits {
-    max_tar_bytes: u64,
-    max_entries: u32,
-    max_entry_bytes: u64,
-    max_path_bytes: usize,
+    tar_bytes: u64,
+    entries: u32,
+    entry_bytes: u64,
+    path_bytes: usize,
 }
 
 impl PackLimits {
@@ -36,10 +43,10 @@ impl PackLimits {
         max_path_bytes: usize,
     ) -> Self {
         Self {
-            max_tar_bytes,
-            max_entries,
-            max_entry_bytes,
-            max_path_bytes,
+            tar_bytes: max_tar_bytes,
+            entries: max_entries,
+            entry_bytes: max_entry_bytes,
+            path_bytes: max_path_bytes,
         }
     }
 }
@@ -251,10 +258,37 @@ pub fn pack_root_image(
     init: &[u8],
     limits: &PackLimits,
 ) -> Result<PackedImage, PackError> {
-    let _unused = (rootfs_tar, init, limits);
-    Err(PackError::Squashfs {
-        what: "not implemented",
-    })
+    let consumed = Rc::new(Cell::new(0_u64));
+    let reader = Counted {
+        inner: rootfs_tar.take(limits.tar_bytes.saturating_add(1)),
+        consumed: Rc::clone(&consumed),
+    };
+    let mut tree = Tree::default();
+    let parsed = read_tar(reader, limits, &mut tree);
+    // Checked whatever the parse returned: input cut at the cap can surface as a short read, or,
+    // at a block boundary, as a clean end of archive.
+    if consumed.get() > limits.tar_bytes {
+        return Err(PackError::TarTooLarge {
+            limit: limits.tar_bytes,
+        });
+    }
+    parsed?;
+    tree.add_mount_points()?;
+    tree.inject_init(init);
+    let (bytes, counts) = tree.write_image()?;
+    let report = PackReport {
+        image_sha256: sha256_hex(&bytes),
+        init_sha256: sha256_hex(init),
+        files: counts.files,
+        dirs: counts.dirs,
+        symlinks: counts.symlinks,
+        hardlinks_copied: tree.hardlinks_copied,
+        setid_files: counts.setid_files,
+        skipped_global_headers: tree.skipped_global_headers,
+        replaced_duplicates: tree.replaced_duplicates,
+        init_overridden: tree.init_overridden,
+    };
+    Ok(PackedImage { bytes, report })
 }
 
 /// Packs an empty rootfs: the mount points and `/init` only, with default limits.
@@ -263,7 +297,454 @@ pub fn pack_root_image(
 ///
 /// A [`PackError`] from the `SquashFS` writer.
 pub fn minimal_root_image(init: &[u8]) -> Result<PackedImage, PackError> {
-    pack_root_image(std::io::empty(), init, &PackLimits::default())
+    pack_root_image(io::empty(), init, &PackLimits::default())
+}
+
+/// The name `/init` has in the tree (paths are kept without a leading slash).
+const INIT_NAME: &str = "init";
+
+/// Mount points the guest needs on a read-only root, with the mode each gets when the tar lacks it.
+const MOUNT_POINTS: [(&str, u16); 5] = [
+    ("dev", 0o755),
+    ("mnt", 0o755),
+    ("proc", 0o755),
+    ("sys", 0o755),
+    ("tmp", 0o1777),
+];
+
+/// Mode of the root, of `/init`, and of any parent directory the tar left out.
+const DIR_MODE: u16 = 0o755;
+const INIT_MODE: u16 = 0o755;
+
+/// Setuid and setgid bits.
+const SETID_BITS: u16 = 0o6000;
+
+/// `SquashFS` limits a name to 256 bytes; 255 keeps clear of it.
+const MAX_NAME_BYTES: usize = 255;
+
+/// Hostile paths in error messages are cut to this many characters.
+const SHOWN_PATH_CHARS: usize = 256;
+
+/// The most file data allocated up front for one entry; the rest grows as it is read.
+const PREALLOC_BYTES: u64 = 1 << 20;
+
+/// Counts every byte read from the tar, so input beyond the cap is an error rather than a silent
+/// truncation.
+struct Counted<R> {
+    inner: R,
+    consumed: Rc<Cell<u64>>,
+}
+
+impl<R: Read> Read for Counted<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        let total = self
+            .consumed
+            .get()
+            .saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+        self.consumed.set(total);
+        Ok(read)
+    }
+}
+
+/// Permission bits and ownership of one node. Every mtime in the image is 0.
+#[derive(Debug, Clone, Copy)]
+struct Meta {
+    mode: u16,
+    uid: u32,
+    gid: u32,
+}
+
+impl Meta {
+    const ROOT_DIR: Self = Self {
+        mode: DIR_MODE,
+        uid: 0,
+        gid: 0,
+    };
+
+    fn node_header(self) -> NodeHeader {
+        NodeHeader::new(self.mode, self.uid, self.gid, 0)
+    }
+}
+
+/// One node of the image. File bytes are shared, so a hardlink copy costs no memory.
+#[derive(Debug, Clone)]
+enum Node {
+    File { data: Rc<[u8]>, meta: Meta },
+    Dir { meta: Meta },
+    Symlink { target: String, meta: Meta },
+}
+
+/// The validated tree, keyed by normalized path (no leading slash), so iteration order is stable.
+#[derive(Default)]
+struct Tree {
+    nodes: BTreeMap<String, Node>,
+    content_bytes: u64,
+    hardlinks_copied: u64,
+    skipped_global_headers: u64,
+    replaced_duplicates: u64,
+    init_overridden: bool,
+}
+
+/// Node counts taken while the image is written.
+#[derive(Default)]
+struct Counts {
+    files: u64,
+    dirs: u64,
+    symlinks: u64,
+    setid_files: u64,
+}
+
+/// Parses every tar entry into `tree`, applying each cap before the data it guards is read.
+fn read_tar(reader: impl Read, limits: &PackLimits, tree: &mut Tree) -> Result<(), PackError> {
+    let mut archive = tar::Archive::new(reader);
+    let mut seen: u32 = 0;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        seen = seen.saturating_add(1);
+        if seen > limits.entries {
+            return Err(PackError::TooManyEntries {
+                limit: limits.entries,
+            });
+        }
+        let kind = entry.header().entry_type();
+        if kind == EntryType::XGlobalHeader {
+            tree.skipped_global_headers += 1;
+            continue;
+        }
+        let path = normalize(&entry.path_bytes(), limits.path_bytes)?;
+        if path.is_empty() {
+            if kind == EntryType::Directory {
+                // The archive root ("./"): the image root is fixed at mode 0755, uid 0, gid 0.
+                continue;
+            }
+            return Err(PackError::BadPath {
+                path: String::new(),
+                reason: "is empty",
+            });
+        }
+        let node = match kind {
+            EntryType::Regular | EntryType::Continuous => {
+                let declared = entry.header().size()?.max(entry.size());
+                if declared > limits.entry_bytes {
+                    return Err(PackError::EntryTooLarge {
+                        path: shown(path.as_bytes()),
+                        size: declared,
+                        limit: limits.entry_bytes,
+                    });
+                }
+                let meta = meta_of(entry.header(), &path)?;
+                let size = entry.size();
+                let data = read_data(&mut entry, size)?;
+                tree.add_content(data.len(), limits)?;
+                Node::File { data, meta }
+            }
+            EntryType::Directory => Node::Dir {
+                meta: meta_of(entry.header(), &path)?,
+            },
+            EntryType::Symlink => Node::Symlink {
+                target: symlink_target(
+                    &path,
+                    entry.link_name_bytes().as_deref(),
+                    limits.path_bytes,
+                )?,
+                meta: meta_of(entry.header(), &path)?,
+            },
+            EntryType::Link => {
+                let node = tree.hardlink(&path, entry.link_name_bytes().as_deref(), limits)?;
+                tree.hardlinks_copied += 1;
+                node
+            }
+            other => {
+                return Err(PackError::UnsupportedEntry {
+                    path: shown(path.as_bytes()),
+                    kind: format!("{other:?}"),
+                });
+            }
+        };
+        if tree.nodes.insert(path, node).is_some() {
+            tree.replaced_duplicates += 1;
+        }
+    }
+    Ok(())
+}
+
+impl Tree {
+    /// Adds `len` bytes of file content, failing once the total passes `max_tar_bytes`.
+    fn add_content(&mut self, len: usize, limits: &PackLimits) -> Result<(), PackError> {
+        self.content_bytes = self
+            .content_bytes
+            .saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
+        if self.content_bytes > limits.tar_bytes {
+            return Err(PackError::ContentTooLarge {
+                limit: limits.tar_bytes,
+            });
+        }
+        Ok(())
+    }
+
+    /// A copy of the earlier regular file a hardlink names. Content counts against the cap again.
+    fn hardlink(
+        &mut self,
+        path: &str,
+        target: Option<&[u8]>,
+        limits: &PackLimits,
+    ) -> Result<Node, PackError> {
+        let missing = |target: &[u8]| PackError::HardlinkTargetMissing {
+            path: shown(path.as_bytes()),
+            target: shown(target),
+        };
+        let raw = target.ok_or_else(|| missing(b""))?;
+        let normalized = normalize(raw, limits.path_bytes).map_err(|_| PackError::BadPath {
+            path: shown(path.as_bytes()),
+            reason: "is a hardlink whose target is not a valid archive path",
+        })?;
+        let (data, meta) = match self.nodes.get(&normalized) {
+            Some(Node::File { data, meta }) => (Rc::clone(data), *meta),
+            _ => return Err(missing(raw)),
+        };
+        self.add_content(data.len(), limits)?;
+        Ok(Node::File { data, meta })
+    }
+
+    /// Makes sure each mount point exists as a directory.
+    fn add_mount_points(&mut self) -> Result<(), PackError> {
+        for (name, mode) in MOUNT_POINTS {
+            match self.nodes.get(name) {
+                Some(Node::Dir { .. }) => {}
+                Some(_) => return Err(PackError::MountPoint { path: name }),
+                None => {
+                    self.nodes.insert(
+                        name.to_owned(),
+                        Node::Dir {
+                            meta: Meta {
+                                mode,
+                                uid: 0,
+                                gid: 0,
+                            },
+                        },
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes anything the tar put at `init` (and under it), then writes the trusted bytes there.
+    fn inject_init(&mut self, init: &[u8]) {
+        let before = self.nodes.len();
+        self.nodes
+            .retain(|path, _| path != INIT_NAME && !path.starts_with("init/"));
+        self.init_overridden = self.nodes.len() != before;
+        self.nodes.insert(
+            INIT_NAME.to_owned(),
+            Node::File {
+                data: Rc::from(init),
+                meta: Meta {
+                    mode: INIT_MODE,
+                    uid: 0,
+                    gid: 0,
+                },
+            },
+        );
+    }
+
+    /// Writes the tree as a gzip `SquashFS` image with every mtime 0.
+    fn write_image(&self) -> Result<(Vec<u8>, Counts), PackError> {
+        let mut fs = FilesystemWriter::default();
+        // The default compressor is Xz, which this build does not compile in.
+        fs.set_compressor(
+            FilesystemCompressor::new(Compressor::Gzip, None).map_err(squashfs_error)?,
+        );
+        fs.set_root_mode(DIR_MODE);
+        let mut counts = Counts::default();
+        let mut implicit: BTreeSet<&str> = BTreeSet::new();
+        for (path, node) in &self.nodes {
+            for (end, _) in path.match_indices('/') {
+                let Some(parent) = path.get(..end) else {
+                    continue;
+                };
+                match self.nodes.get(parent) {
+                    // Pushed already: a parent sorts before every path under it.
+                    Some(Node::Dir { .. }) => {}
+                    Some(_) => {
+                        return Err(PackError::BadPath {
+                            path: shown(path.as_bytes()),
+                            reason: "has a parent that is not a directory",
+                        });
+                    }
+                    None => {
+                        if implicit.insert(parent) {
+                            fs.push_dir(parent, Meta::ROOT_DIR.node_header())
+                                .map_err(squashfs_error)?;
+                            counts.dirs += 1;
+                        }
+                    }
+                }
+            }
+            match node {
+                Node::File { data, meta } => {
+                    fs.push_file(Cursor::new(Rc::clone(data)), path, meta.node_header())
+                        .map_err(squashfs_error)?;
+                    counts.files += 1;
+                    if meta.mode & SETID_BITS != 0 {
+                        counts.setid_files += 1;
+                    }
+                }
+                Node::Dir { meta } => {
+                    fs.push_dir(path, meta.node_header())
+                        .map_err(squashfs_error)?;
+                    counts.dirs += 1;
+                }
+                Node::Symlink { target, meta } => {
+                    fs.push_symlink(target.as_str(), path, meta.node_header())
+                        .map_err(squashfs_error)?;
+                    counts.symlinks += 1;
+                }
+            }
+        }
+        let mut out = Cursor::new(Vec::new());
+        fs.write(&mut out).map_err(squashfs_error)?;
+        Ok((out.into_inner(), counts))
+    }
+}
+
+/// Normalizes an archive path to `a/b/c`: one leading `.` component and one trailing slash are
+/// dropped; anything else that is not a plain UTF-8 name is refused.
+fn normalize(raw: &[u8], max_path_bytes: usize) -> Result<String, PackError> {
+    let bad = |reason: &'static str| PackError::BadPath {
+        path: shown(raw),
+        reason,
+    };
+    if raw.len() > max_path_bytes {
+        return Err(bad("is longer than the path cap"));
+    }
+    if raw.contains(&0) {
+        return Err(bad("contains a NUL byte"));
+    }
+    let text = std::str::from_utf8(raw).map_err(|_| bad("is not UTF-8"))?;
+    if text.starts_with('/') {
+        return Err(bad("is absolute"));
+    }
+    let mut names: Vec<&str> = Vec::new();
+    let mut pieces = text.split('/').enumerate().peekable();
+    while let Some((index, piece)) = pieces.next() {
+        let last = pieces.peek().is_none();
+        match piece {
+            "." if index == 0 => {}
+            "" if last => {}
+            "" => return Err(bad("has an empty component")),
+            "." => return Err(bad("has a current-dir component after the start")),
+            ".." => return Err(bad("has a parent-dir component")),
+            name if name.len() > MAX_NAME_BYTES => {
+                return Err(bad("has a component longer than 255 bytes"));
+            }
+            name => names.push(name),
+        }
+    }
+    Ok(names.join("/"))
+}
+
+/// A symlink target: kept as written (it resolves inside the guest, never on the host), but it
+/// must be non-empty UTF-8 without NUL and within the path cap.
+fn symlink_target(
+    path: &str,
+    raw: Option<&[u8]>,
+    max_path_bytes: usize,
+) -> Result<String, PackError> {
+    let bad = |reason: &'static str| PackError::BadPath {
+        path: shown(path.as_bytes()),
+        reason,
+    };
+    let raw = raw.ok_or_else(|| bad("is a symlink with no target"))?;
+    if raw.is_empty() {
+        return Err(bad("is a symlink with an empty target"));
+    }
+    if raw.len() > max_path_bytes {
+        return Err(bad("is a symlink whose target is longer than the path cap"));
+    }
+    if raw.contains(&0) {
+        return Err(bad("is a symlink whose target contains a NUL byte"));
+    }
+    std::str::from_utf8(raw)
+        .map(str::to_owned)
+        .map_err(|_| bad("is a symlink whose target is not UTF-8"))
+}
+
+/// Permission bits, uid, and gid from a header. Type bits are dropped; setid bits are kept.
+fn meta_of(header: &tar::Header, path: &str) -> Result<Meta, PackError> {
+    let mode = header.mode()? & 0o7777;
+    let id = |which: &'static str, id: u64| {
+        u32::try_from(id).map_err(|_| PackError::OwnershipOutOfRange {
+            path: shown(path.as_bytes()),
+            which,
+            id,
+        })
+    };
+    Ok(Meta {
+        // The mask leaves 12 bits, so the conversion cannot fail.
+        mode: u16::try_from(mode).unwrap_or(0),
+        uid: id("uid", header.uid()?)?,
+        gid: id("gid", header.gid()?)?,
+    })
+}
+
+/// Reads exactly `size` bytes of entry data. A short read is an I/O error.
+fn read_data(entry: &mut impl Read, size: u64) -> Result<Rc<[u8]>, PackError> {
+    let capacity = usize::try_from(size.min(PREALLOC_BYTES)).unwrap_or(0);
+    let mut data = Vec::with_capacity(capacity);
+    entry.take(size).read_to_end(&mut data)?;
+    if u64::try_from(data.len()).ok() != Some(size) {
+        return Err(
+            io::Error::new(io::ErrorKind::UnexpectedEof, "tar entry data ended early").into(),
+        );
+    }
+    Ok(Rc::from(data))
+}
+
+/// A hostile path for an error message: lossy UTF-8, cut to [`SHOWN_PATH_CHARS`] characters.
+/// Messages print it with `{:?}`, which escapes control characters.
+fn shown(raw: &[u8]) -> String {
+    String::from_utf8_lossy(raw)
+        .chars()
+        .take(SHOWN_PATH_CHARS)
+        .collect()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+    base16ct::lower::encode_string(&digest)
+}
+
+/// Maps a writer error to [`PackError`]. Without backhand's `error-strings` feature its `Display`
+/// prints nothing, so the variant is named here.
+fn squashfs_error(error: BackhandError) -> PackError {
+    let what = match error {
+        BackhandError::StdIo(io) => return PackError::Io(io),
+        BackhandError::Deku(_) => "encoding failed",
+        BackhandError::StringUtf8(_) | BackhandError::StrUtf8(_) => "invalid UTF-8",
+        BackhandError::UnsupportedCompression(_) => "unsupported compression",
+        BackhandError::MissingCompressor => "missing compressor",
+        BackhandError::FileNotFound => "file not found",
+        BackhandError::Unreachable => "unreachable branch",
+        BackhandError::UnexpectedInode => "unexpected inode",
+        BackhandError::UnsupportedInode => "unsupported inode",
+        BackhandError::CorruptedOrInvalidSquashfs => "corrupted or invalid image",
+        BackhandError::InvalidCompressionOption => "invalid compression option",
+        BackhandError::InvalidFilePath => "invalid file path",
+        BackhandError::UndefineFileName => "undefined file name",
+        BackhandError::DuplicatedFileName => "duplicated file name",
+        BackhandError::TryReserveError(_) => "allocation failed",
+        BackhandError::InvalidIdTable => "invalid id table",
+        BackhandError::UnsupportedSquashfsVersion(..) => "unsupported version",
+        BackhandError::NumericConversion(_) => "numeric conversion failed",
+        BackhandError::SystemTime(_) => "system time",
+        BackhandError::MutexPoisoned => "mutex poisoned",
+        BackhandError::IdNotFoundInTable => "id not in table",
+        BackhandError::InternalState(_) => "internal state",
+        BackhandError::CompressionInit(_) => "compressor initialization failed",
+    };
+    PackError::Squashfs { what }
 }
 
 #[cfg(test)]
@@ -540,28 +1021,52 @@ mod tests {
     #[test]
     fn rootfs_parent_dir_component_is_rejected() -> TestResult {
         let tar = tar_of(&[file(b"etc/../../escape", b"x")], 0)?;
-        assert!(matches!(pack(&tar), Err(PackError::BadPath { .. })));
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::BadPath {
+                reason: "has a parent-dir component",
+                ..
+            })
+        ));
         Ok(())
     }
 
     #[test]
     fn rootfs_absolute_path_is_rejected() -> TestResult {
         let tar = tar_of(&[file(b"/etc/passwd", b"x")], 0)?;
-        assert!(matches!(pack(&tar), Err(PackError::BadPath { .. })));
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::BadPath {
+                reason: "is absolute",
+                ..
+            })
+        ));
         Ok(())
     }
 
     #[test]
     fn rootfs_nul_in_name_is_rejected() -> TestResult {
         let tar = gnu_long_name_tar(b"etc/a\0b\0")?;
-        assert!(matches!(pack(&tar), Err(PackError::BadPath { .. })));
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::BadPath {
+                reason: "contains a NUL byte",
+                ..
+            })
+        ));
         Ok(())
     }
 
     #[test]
     fn rootfs_non_utf8_name_is_rejected() -> TestResult {
         let tar = tar_of(&[file(b"etc/\xffname", b"x")], 0)?;
-        assert!(matches!(pack(&tar), Err(PackError::BadPath { .. })));
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::BadPath {
+                reason: "is not UTF-8",
+                ..
+            })
+        ));
         Ok(())
     }
 
@@ -677,7 +1182,7 @@ mod tests {
         let image = minimal_root_image(b"minos-golden-init")?;
         assert_eq!(
             image.report().image_sha256(),
-            "0000000000000000000000000000000000000000000000000000000000000000"
+            "8e4f12d45a06ef4bf20fe0f37e74ca06e2b7b108a8c4325ed2c7f6a6600e4e98"
         );
         Ok(())
     }

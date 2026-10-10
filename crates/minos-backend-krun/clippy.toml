@@ -1,0 +1,8 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Each entry is proven to fire once
+# (02-SPIKE-EVIDENCE.md D-PROBE-BK). A mistyped path only warns, so re-prove any entry you change.
+disallowed-methods = [
+  { path = "tar::Archive::unpack", reason = "never write archive-chosen paths to the host: parse entries in memory under caps" },
+  { path = "tar::Entry::unpack", reason = "never write archive-chosen paths to the host: parse entries in memory under caps" },
+  { path = "tar::Entry::unpack_in", reason = "never write archive-chosen paths to the host: parse entries in memory under caps" },
+  { path = "backhand::v4::filesystem::writer::FilesystemWriter::set_current_time", reason = "reads the clock; images are deterministic with mtime 0" },
+]
