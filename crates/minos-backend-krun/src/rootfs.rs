@@ -236,9 +236,18 @@ pub enum PackError {
         /// The mount point, without its leading slash.
         path: &'static str,
     },
-    /// Reading the tar or writing the image failed.
+    /// The tar is not well formed: a bad checksum, an unparsable numeric field, a block or entry that ended
+    /// early, or another defect the tar parser reported. The input's fault, never retried.
+    #[error("rootfs tar is malformed: {what:?}")]
+    MalformedTar {
+        /// The parser's description, lossy and cut to 256 characters; it can quote hostile bytes, so it is
+        /// shown escaped.
+        what: String,
+    },
+    /// Reading the tar from the host or writing the image failed at the operating-system level: the error
+    /// carries an errno. Infrastructure's fault; a retry can succeed.
     #[error("rootfs tar or image I/O")]
-    Io(#[from] std::io::Error),
+    Io(#[source] std::io::Error),
     /// The `SquashFS` writer refused the tree.
     #[error("SquashFS writer: {what}")]
     Squashfs {
@@ -399,8 +408,8 @@ struct Counts {
 fn read_tar(reader: impl Read, limits: &PackLimits, tree: &mut Tree) -> Result<(), PackError> {
     let mut archive = tar::Archive::new(reader);
     let mut seen: u32 = 0;
-    for entry in archive.entries()? {
-        let mut entry = entry?;
+    for entry in archive.entries().map_err(tar_io)? {
+        let mut entry = entry.map_err(tar_io)?;
         seen = seen.saturating_add(1);
         if seen > limits.entries {
             return Err(PackError::TooManyEntries {
@@ -425,7 +434,7 @@ fn read_tar(reader: impl Read, limits: &PackLimits, tree: &mut Tree) -> Result<(
         }
         let node = match kind {
             EntryType::Regular | EntryType::Continuous => {
-                let declared = entry.header().size()?.max(entry.size());
+                let declared = entry.header().size().map_err(tar_io)?.max(entry.size());
                 if declared > limits.entry_bytes {
                     return Err(PackError::EntryTooLarge {
                         path: shown(path.as_bytes()),
@@ -673,7 +682,7 @@ fn symlink_target(
 
 /// Permission bits, uid, and gid from a header. Type bits are dropped; setid bits are kept.
 fn meta_of(header: &tar::Header, path: &str) -> Result<Meta, PackError> {
-    let mode = header.mode()? & 0o7777;
+    let mode = header.mode().map_err(tar_io)? & 0o7777;
     let id = |which: &'static str, id: u64| {
         u32::try_from(id).map_err(|_| PackError::OwnershipOutOfRange {
             path: shown(path.as_bytes()),
@@ -684,22 +693,37 @@ fn meta_of(header: &tar::Header, path: &str) -> Result<Meta, PackError> {
     Ok(Meta {
         // The mask leaves 12 bits, so the conversion cannot fail.
         mode: u16::try_from(mode).unwrap_or(0),
-        uid: id("uid", header.uid()?)?,
-        gid: id("gid", header.gid()?)?,
+        uid: id("uid", header.uid().map_err(tar_io)?)?,
+        gid: id("gid", header.gid().map_err(tar_io)?)?,
     })
 }
 
-/// Reads exactly `size` bytes of entry data. A short read is an I/O error.
+/// Reads exactly `size` bytes of entry data. A short read means the tar is malformed.
 fn read_data(entry: &mut impl Read, size: u64) -> Result<Rc<[u8]>, PackError> {
     let capacity = usize::try_from(size.min(PREALLOC_BYTES)).unwrap_or(0);
     let mut data = Vec::with_capacity(capacity);
-    entry.take(size).read_to_end(&mut data)?;
+    entry.take(size).read_to_end(&mut data).map_err(tar_io)?;
     if u64::try_from(data.len()).ok() != Some(size) {
-        return Err(
-            io::Error::new(io::ErrorKind::UnexpectedEof, "tar entry data ended early").into(),
-        );
+        return Err(PackError::MalformedTar {
+            what: "entry data ended early".to_owned(),
+        });
     }
     Ok(Rc::from(data))
+}
+
+/// Sorts an error from the tar reader into the input's fault or the host's.
+///
+/// The tar crate reports a bad checksum, a numeric field that is not a number, a block that ended early, and
+/// its other parse failures as `io::Error`s it made itself (mostly `ErrorKind::Other`), which carry no errno.
+/// A read that failed at the operating system does carry one. That distinction, not the kind, separates
+/// [`PackError::MalformedTar`] from [`PackError::Io`].
+fn tar_io(error: io::Error) -> PackError {
+    if error.raw_os_error().is_some() {
+        return PackError::Io(error);
+    }
+    PackError::MalformedTar {
+        what: shown(error.to_string().as_bytes()),
+    }
 }
 
 /// A hostile path for an error message: lossy UTF-8, cut to [`SHOWN_PATH_CHARS`] characters.
@@ -1107,6 +1131,53 @@ mod tests {
             })
         ));
         Ok(())
+    }
+
+    #[test]
+    fn rootfs_truncated_tar_is_malformed_not_io() -> TestResult {
+        let tar = tar_of(&[file(b"a", &[1; 4096]), file(b"b", b"x")], 0)?;
+        // Cut inside the first entry's data: the entry ends early.
+        let mid_data = tar.get(..512 + 100).ok_or("short tar")?;
+        assert!(matches!(
+            pack(mid_data),
+            Err(PackError::MalformedTar { what }) if what == "entry data ended early"
+        ));
+        // Cut inside the second entry's header: the block ends early.
+        let mid_header = tar.get(..512 + 4096 + 100).ok_or("short tar")?;
+        assert!(matches!(
+            pack(mid_header),
+            Err(PackError::MalformedTar { what }) if what.contains("entire block")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rootfs_bad_checksum_is_malformed() -> TestResult {
+        let mut tar = tar_of(&[file(b"a", b"x")], 0)?;
+        // The name field is covered by the checksum; changing a byte of it breaks the sum.
+        if let Some(byte) = tar.first_mut() {
+            *byte = b'z';
+        }
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::MalformedTar { what }) if what.contains("checksum")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rootfs_host_read_failure_is_io() {
+        /// A reader whose first read fails the way a bad disk does, with an errno.
+        struct Failing;
+        impl Read for Failing {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from_raw_os_error(5))
+            }
+        }
+        assert!(matches!(
+            pack_root_image(Failing, INIT, &PackLimits::default()),
+            Err(PackError::Io(error)) if error.raw_os_error() == Some(5)
+        ));
     }
 
     #[test]
