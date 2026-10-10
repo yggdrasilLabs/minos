@@ -25,7 +25,8 @@ enum Trip {
     Deadline,
     /// The console file passed `console.cap_bytes`.
     ConsoleCap,
-    /// The parent process changed: the launcher was reparented, so whoever started it is gone.
+    /// The parent process is not the one recorded at `main` entry, or is PID 1: whoever started the launcher is
+    /// gone.
     ParentGone,
 }
 
@@ -72,7 +73,7 @@ impl Limits {
             Some(Trip::Deadline)
         } else if console_len(&self.console) > self.console_cap_bytes {
             Some(Trip::ConsoleCap)
-        } else if parent_id() != parent {
+        } else if parent_gone(parent, parent_id()) {
             Some(Trip::ParentGone)
         } else {
             None
@@ -80,12 +81,24 @@ impl Limits {
     }
 }
 
+/// The PID an orphaned process is reparented to on macOS (launchd).
+const LAUNCHD_PID: u32 = 1;
+
+/// Whether the parent that started the launcher is gone: the current parent differs from the one recorded as the
+/// first statement of `main`, or the current parent is launchd. launchd never legitimately starts `minos-vmm`, so a
+/// PID 1 parent also covers a parent that exited between `fork` and the launcher's first instruction (DEFECT-01).
+fn parent_gone(expected: u32, current: u32) -> bool {
+    current != expected || current == LAUNCHD_PID
+}
+
 /// Length of the console file; a file that does not exist yet counts as empty.
 fn console_len(path: &std::path::Path) -> u64 {
     fs::metadata(path).map_or(0, |metadata| metadata.len())
 }
 
-/// Starts the watchdog thread. The clock and the parent id are read now, just before `enter`.
+/// Starts the watchdog thread. The clock is read now, just before `enter`; `parent` is the parent PID `main`
+/// recorded before doing anything else, so a parent that exits while the config is read, the kernel is hashed, or
+/// the VM is built is still caught (DEFECT-01).
 ///
 /// The thread is detached: it ends when it trips, or with the process when the VM exits first.
 ///
@@ -96,9 +109,9 @@ pub fn spawn(
     exit_handle: msb_krun::ExitHandle,
     exit_code: Arc<AtomicI32>,
     limits: Limits,
+    parent: u32,
 ) -> io::Result<()> {
     let start = Instant::now();
-    let parent = parent_id();
     thread::Builder::new()
         .name("minos-vmm-watchdog".to_owned())
         .spawn(move || {
@@ -121,7 +134,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::{Limits, Trip};
+    use super::{LAUNCHD_PID, Limits, Trip, parent_gone};
 
     fn limits(deadline: Duration, console_cap_bytes: u64) -> Limits {
         Limits {
@@ -155,5 +168,17 @@ mod tests {
         let other_parent = parent_id().wrapping_add(1);
         let tripped = limits(Duration::from_hours(1), 1).tripped(Instant::now(), other_parent);
         assert_eq!(tripped, Some(Trip::ParentGone));
+    }
+
+    #[test]
+    fn parent_gone_when_the_recorded_parent_differs_from_the_current_one() {
+        assert!(parent_gone(4242, 4243));
+        assert!(!parent_gone(4242, 4242));
+    }
+
+    #[test]
+    fn parent_gone_when_the_current_parent_is_launchd() {
+        assert!(parent_gone(LAUNCHD_PID, LAUNCHD_PID));
+        assert!(parent_gone(4242, LAUNCHD_PID));
     }
 }

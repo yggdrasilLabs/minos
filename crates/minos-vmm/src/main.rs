@@ -101,7 +101,10 @@ impl LaunchError {
 }
 
 fn main() -> ExitCode {
-    match run() {
+    // First statement, before argument parsing, the config read, preflight, or the VM build: a parent that exits
+    // during any of those must still trip the watchdog (DEFECT-01).
+    let parent = std::os::unix::process::parent_id();
+    match run(parent) {
         Ok(never) => match never {},
         Err(LaunchError::Usage) => {
             say(format_args!("{USAGE}"));
@@ -114,8 +117,9 @@ fn main() -> ExitCode {
     }
 }
 
-/// Everything up to and including `enter`, which never returns on success.
-fn run() -> Result<Infallible, LaunchError> {
+/// Everything up to and including `enter`, which never returns on success. `parent` is the parent PID recorded at
+/// `main` entry.
+fn run(parent: u32) -> Result<Infallible, LaunchError> {
     let path = config_path()?;
     let config = read_config(path)?;
     preflight::check(&config).map_err(LaunchError::Preflight)?;
@@ -127,6 +131,7 @@ fn run() -> Result<Infallible, LaunchError> {
         exit_handle,
         exit_code,
         watchdog::Limits::from_config(&config),
+        parent,
     )
     .map_err(LaunchError::Watchdog)?;
     vm.enter().map_err(LaunchError::Enter)
