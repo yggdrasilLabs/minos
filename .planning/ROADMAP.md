@@ -107,7 +107,7 @@ Plans:
   4. CLAUDE.md records every spike result and the v1 amendments (local-first build order, the `ModelProvider` decision, no tokio in v1, pico-dollar money, the `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate), and the workspace contains no `unsafe` exception; if the boot spike failed, work stopped and the user's decision was recorded before any alternative was tried (DOCS-05, SPIKE-08)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 4/11 plans executed
+**Plans**: 5/11 plans executed
 Plans:
 **Wave 1**
 
@@ -118,7 +118,7 @@ Plans:
 
 - [x] 02-03-PLAN.md — `minos-vmm` launcher: validated launch config, preflight, root-disk and initramfs boot modes, watchdog exit codes, clippy bans, entitlements plist (wave 2)
 - [x] 02-04-PLAN.md — Root image (SquashFS) and newc initramfs writers in Rust, clippy bans, Docker buildx image production twice (wave 2)
-- [ ] 02-05-PLAN.md — Host supervisor, launch-config serializer, job input disk, capped `GuestBytes` (wave 2)
+- [x] 02-05-PLAN.md — Host supervisor, launch-config serializer, job input disk, capped `GuestBytes` (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -259,7 +259,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
-| 2. Platform Spikes | 4/11 | In Progress|  |
+| 2. Platform Spikes | 5/11 | In Progress|  |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |

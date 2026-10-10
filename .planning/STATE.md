@@ -6,14 +6,14 @@ current_phase: 02
 current_phase_name: platform-spikes
 status: executing
 stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-10-10T13:34:46.684Z"
+last_updated: "2026-10-10T13:47:35.371Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 16
-  completed_plans: 9
+  completed_plans: 10
   percent: 13
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 02 (platform-spikes) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Ready to execute
 Last activity: 2026-10-10 — Phase 02 execution started
 
@@ -64,6 +64,7 @@ Progress: [██████████] 100%
 | Phase 02 P02 | 7min | 2 tasks | 1 files |
 | Phase 02 P03 | 8min | 3 tasks | 8 files |
 | Phase 02 P04 | 12min | 3 tasks | 6 files |
+| Phase 02 P05 | 10min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-03: launch config parse calls VmmConfig::try_from directly so ConfigError stays typed; the serde try_from attribute routes other paths through the same rules
 - [Phase 02]: 02-04: root image packer caps file content including hardlink copies at max_tar_bytes, and checks max(header, PAX) size before reading
 - [Phase 02]: 02-04: D-16 result: two buildx tars of the alpine fixture differ only in RUN-step mtimes; the packed SquashFS images are byte-identical
+- [Phase 02]: 02-05: supervisor connection reads poll a non-blocking stream against one total deadline, not SO_RCVTIMEO — macOS returns EINVAL from setsockopt after the peer closes, and a per-read timeout is renewable by a trickling guest
+- [Phase 02]: 02-05: has_hypervisor_entitlement matches the exact codesign XML key followed by <true/>; an overflowed connection is never decoded as a status frame
 
 ### Pending Todos
 
@@ -122,6 +125,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T13:34:46.680Z
+Last session: 2026-10-10T13:47:23.216Z
 Stopped at: Completed 02-04-PLAN.md
 Resume file: None
