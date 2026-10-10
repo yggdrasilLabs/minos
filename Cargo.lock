@@ -739,8 +739,6 @@ version = "0.1.0"
 dependencies = [
  "backhand",
  "base16ct",
- "minos-core",
- "minos-sandbox",
  "rustix",
  "serde",
  "serde_json",
@@ -794,11 +792,9 @@ dependencies = [
 name = "minos-guest"
 version = "0.1.0"
 dependencies = [
- "minos-core",
  "rustix",
  "serde",
  "serde_json",
- "tar",
  "thiserror",
  "vsock",
 ]
