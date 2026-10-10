@@ -3,9 +3,16 @@
 //! The tar comes from a user's Dockerfile, so every name, type, size, and link in it is hostile
 //! (02-CONTEXT.md D-01, D-17). It is parsed in memory and never unpacked onto the host. Caps apply
 //! before anything is read: total tar bytes, entry count, per-entry size (taken from the header),
-//! and path length. Only regular files, directories, symlinks, and hardlinks are accepted; a
-//! hardlink becomes a copy of an earlier regular file. Every mtime in the image is 0, nodes are
-//! ordered by path, and the image is gzip-compressed, so the same tar always gives the same bytes.
+//! and path length. The tar crate buffers GNU long-name, long-link, and pax extended headers whole
+//! before the path cap can see them, so a [`HeaderGuard`] watches each 512-byte header as it streams
+//! past and refuses one of those that declares more than the cap, before the crate allocates it.
+//! Only regular files, directories, symlinks, and hardlinks are accepted; a hardlink becomes a copy
+//! of an earlier regular file. Every mtime in the image is 0, nodes are ordered by path, and the
+//! image is gzip-compressed, so the same tar always gives the same bytes.
+//!
+//! Peak memory is the file content kept in the tree, bounded by the tar cap (hardlink copies share
+//! bytes), plus the compressed image, plus the tar crate's buffer for the entry being read. Phase 5
+//! should stream file data to a temporary file instead.
 //!
 //! The image gets the mount points the guest needs on a read-only root (`/dev`, `/proc`, `/sys`,
 //! `/tmp`, `/mnt`), and `/init` is written last from the trusted guest bytes, replacing anything the
@@ -52,9 +59,11 @@ impl PackLimits {
 }
 
 impl Default for PackLimits {
-    /// 4 GiB of tar, 200,000 entries, 1 GiB per entry, 4,096 bytes per path.
+    /// 1 GiB of tar, 200,000 entries, 256 MiB per entry, 4,096 bytes per path. The tar cap bounds the
+    /// file content held in memory while the image is built, so it is sized for a v1 environment,
+    /// not for the largest image a host could hold.
     fn default() -> Self {
-        Self::new(4_294_967_296, 200_000, 1_073_741_824, 4096)
+        Self::new(1_073_741_824, 200_000, 268_435_456, 4096)
     }
 }
 
@@ -236,6 +245,18 @@ pub enum PackError {
         /// The mount point, without its leading slash.
         path: &'static str,
     },
+    /// A GNU long-name, GNU long-link, or pax extended header declares more bytes than its cap: the
+    /// path cap plus one (the trailing NUL) for the GNU forms, [`PAX_HEADER_BYTES`] for pax. Refused
+    /// from the header alone, before the tar crate buffers the record.
+    #[error("a {what} header declares {size} bytes, over its {limit}-byte cap")]
+    ExtensionHeaderTooLarge {
+        /// Which kind of header.
+        what: &'static str,
+        /// The size its header declares.
+        size: u64,
+        /// The cap applied.
+        limit: u64,
+    },
     /// The tar is not well formed: a bad checksum, an unparsable numeric field, a block or entry that ended
     /// early, or another defect the tar parser reported. The input's fault, never retried.
     #[error("rootfs tar is malformed: {what:?}")]
@@ -269,7 +290,7 @@ pub fn pack_root_image(
 ) -> Result<PackedImage, PackError> {
     let consumed = Rc::new(Cell::new(0_u64));
     let reader = Counted {
-        inner: rootfs_tar.take(limits.tar_bytes.saturating_add(1)),
+        inner: HeaderGuard::new(rootfs_tar.take(limits.tar_bytes.saturating_add(1)), limits),
         consumed: Rc::clone(&consumed),
     };
     let mut tree = Tree::default();
@@ -336,6 +357,156 @@ const SHOWN_PATH_CHARS: usize = 256;
 
 /// The most file data allocated up front for one entry; the rest grows as it is read.
 const PREALLOC_BYTES: u64 = 1 << 20;
+
+/// A tar block: every header is one, and entry data is padded to a whole number of them.
+const BLOCK_BYTES: usize = 512;
+
+/// Largest pax extended header (`x` or `g`) accepted. Its records are short `key=value` lines, and a
+/// path record can be at most the path cap, so this is generous.
+pub const PAX_HEADER_BYTES: u64 = 65_536;
+
+/// Watches the tar's blocks as they stream past the tar crate and refuses a GNU long-name (`L`),
+/// GNU long-link (`K`), or pax extended (`x`, `g`) header whose declared size exceeds its cap.
+///
+/// tar 0.4.46 reads those records whole with `read_all` before the caller sees the entry, so the
+/// path cap in [`normalize`] comes too late to bound that allocation. The guard tracks where each
+/// header falls the way the crate does: a non-zero 512-byte block is a header, its size field
+/// (octal, or base 256 when the first byte's top bit is set) says how many data bytes follow, padded
+/// to whole blocks, and an all-zero block ends the archive. The one thing it does not mirror is a
+/// pax `size` record overriding the header size, which only a file over 8 GiB needs, far beyond
+/// every cap, and GNU sparse entries, which [`read_tar`] refuses anyway; after either, the guard
+/// can only be stricter than the crate, never looser.
+struct HeaderGuard<R> {
+    inner: R,
+    /// Bytes of the current header block seen so far.
+    header: Vec<u8>,
+    /// Data bytes, padded to whole blocks, still to pass before the next header.
+    data_remaining: u64,
+    /// Set by the end-of-archive marker; nothing after it is inspected.
+    done: bool,
+    /// Cap for a GNU long name or link: the path cap plus the trailing NUL the crate strips.
+    long_name_cap: u64,
+}
+
+/// The payload of the `io::Error` a [`HeaderGuard`] raises, so [`tar_io`] can name the cause.
+#[derive(Debug)]
+struct ExtensionHeaderHit {
+    what: &'static str,
+    size: u64,
+    limit: u64,
+}
+
+impl std::fmt::Display for ExtensionHeaderHit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a {} header declares {} bytes, over its {}-byte cap",
+            self.what, self.size, self.limit
+        )
+    }
+}
+
+impl std::error::Error for ExtensionHeaderHit {}
+
+impl<R> HeaderGuard<R> {
+    fn new(inner: R, limits: &PackLimits) -> Self {
+        Self {
+            inner,
+            header: Vec::with_capacity(BLOCK_BYTES),
+            data_remaining: 0,
+            done: false,
+            long_name_cap: u64::try_from(limits.path_bytes)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1),
+        }
+    }
+
+    /// Accounts for `bytes` just handed to the tar crate.
+    fn scan(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        while !bytes.is_empty() && !self.done {
+            if self.data_remaining > 0 {
+                let skip = usize::try_from(self.data_remaining)
+                    .map_or(bytes.len(), |remaining| remaining.min(bytes.len()));
+                self.data_remaining = self
+                    .data_remaining
+                    .saturating_sub(u64::try_from(skip).unwrap_or(u64::MAX));
+                bytes = bytes.get(skip..).unwrap_or_default();
+                continue;
+            }
+            let need = BLOCK_BYTES.saturating_sub(self.header.len());
+            let (head, rest) = bytes
+                .split_at_checked(need.min(bytes.len()))
+                .unwrap_or((bytes, &[]));
+            self.header.extend_from_slice(head);
+            bytes = rest;
+            if self.header.len() >= BLOCK_BYTES {
+                self.finish_header()?;
+                self.header.clear();
+            }
+        }
+        Ok(())
+    }
+
+    /// Inspects a complete header block and sets up the data span that follows it.
+    fn finish_header(&mut self) -> io::Result<()> {
+        if self.header.iter().all(|byte| *byte == 0) {
+            self.done = true;
+            return Ok(());
+        }
+        let size = size_field(self.header.get(124..136).unwrap_or_default())?;
+        let cap = match self.header.get(156).copied().unwrap_or(0) {
+            b'L' => Some(("GNU long name", self.long_name_cap)),
+            b'K' => Some(("GNU long link", self.long_name_cap)),
+            b'x' | b'g' => Some(("pax extended", PAX_HEADER_BYTES)),
+            _ => None,
+        };
+        if let Some((what, limit)) = cap
+            && size > limit
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                ExtensionHeaderHit { what, size, limit },
+            ));
+        }
+        let padded = u64::try_from(BLOCK_BYTES).unwrap_or(u64::MAX);
+        self.data_remaining = size
+            .checked_add(padded.saturating_sub(1))
+            .map(|rounded| rounded & !padded.saturating_sub(1))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "size overflow"))?;
+        Ok(())
+    }
+}
+
+impl<R: Read> Read for HeaderGuard<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        if let Some(bytes) = buf.get(..read) {
+            self.scan(bytes)?;
+        }
+        Ok(read)
+    }
+}
+
+/// The size field as tar 0.4.46 reads it: base 256 over the last eight bytes when the first byte's top
+/// bit is set, otherwise octal text up to the first NUL, trimmed.
+fn size_field(field: &[u8]) -> io::Result<u64> {
+    match field.split_first() {
+        Some((first, _)) if first & 0x80 != 0 => Ok(field
+            .iter()
+            .rev()
+            .take(8)
+            .rev()
+            .fold(0_u64, |acc, byte| (acc << 8) | u64::from(*byte))),
+        _ => {
+            let digits = field.split(|byte| *byte == 0).next().unwrap_or_default();
+            let text = std::str::from_utf8(digits).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "size field is not UTF-8")
+            })?;
+            u64::from_str_radix(text.trim(), 8)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "size field is not octal"))
+        }
+    }
+}
 
 /// Counts every byte read from the tar, so input beyond the cap is an error rather than a silent
 /// truncation.
@@ -721,6 +892,20 @@ fn tar_io(error: io::Error) -> PackError {
     if error.raw_os_error().is_some() {
         return PackError::Io(error);
     }
+    // The guard's refusal travels inside the io::Error (possibly wrapped by the crate); find it.
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = error
+        .get_ref()
+        .map(|inner| inner as &(dyn std::error::Error + 'static));
+    while let Some(current) = cause {
+        if let Some(hit) = current.downcast_ref::<ExtensionHeaderHit>() {
+            return PackError::ExtensionHeaderTooLarge {
+                what: hit.what,
+                size: hit.size,
+                limit: hit.limit,
+            };
+        }
+        cause = current.source();
+    }
     PackError::MalformedTar {
         what: shown(error.to_string().as_bytes()),
     }
@@ -869,22 +1054,37 @@ mod tests {
 
     /// A tar whose only entry gets its name from a GNU long-name record, so the name can hold a NUL.
     fn gnu_long_name_tar(name: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        extension_tar(EntryType::GNULongName, name, None)
+    }
+
+    /// A tar whose first entry is an extension header of `kind` holding `record`, declaring
+    /// `declared` bytes if given (the data is still `record`), then one regular file "placeholder".
+    fn extension_tar(
+        kind: EntryType,
+        record: &[u8],
+        declared: Option<u64>,
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut builder = tar::Builder::new(Vec::new());
         let mut long = Header::new_gnu();
         for (dst, src) in long.as_old_mut().name.iter_mut().zip(b"././@LongLink") {
             *dst = *src;
         }
-        long.set_entry_type(EntryType::GNULongName);
+        long.set_entry_type(kind);
         long.set_mode(0o644);
-        long.set_size(u64::try_from(name.len())?);
+        long.set_size(match declared {
+            Some(size) => size,
+            None => u64::try_from(record.len())?,
+        });
         long.set_cksum();
-        builder.append(&long, name)?;
+        builder.append(&long, record)?;
         let mut header = Header::new_gnu();
         for (dst, src) in header.as_old_mut().name.iter_mut().zip(b"placeholder") {
             *dst = *src;
         }
         header.set_entry_type(EntryType::Regular);
         header.set_mode(0o644);
+        header.set_uid(0);
+        header.set_gid(0);
         header.set_size(1);
         header.set_cksum();
         builder.append(&header, &b"x"[..])?;
@@ -1078,6 +1278,84 @@ mod tests {
                 ..
             })
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn rootfs_oversized_long_name_is_refused_from_its_header() -> TestResult {
+        // The record declares a megabyte that is not there. Without the guard the crate would read
+        // to the end of input and fail with a truncation; the guard refuses at the header instead.
+        let tar = extension_tar(EntryType::GNULongName, b"", Some(1_048_576))?;
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::ExtensionHeaderTooLarge {
+                what: "GNU long name",
+                size: 1_048_576,
+                limit: 4097
+            })
+        ));
+        let tar = extension_tar(EntryType::GNULongLink, b"", Some(4098))?;
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::ExtensionHeaderTooLarge {
+                what: "GNU long link",
+                size: 4098,
+                limit: 4097
+            })
+        ));
+        let tar = extension_tar(EntryType::XHeader, b"", Some(65_537))?;
+        assert!(matches!(
+            pack(&tar),
+            Err(PackError::ExtensionHeaderTooLarge {
+                what: "pax extended",
+                size: 65_537,
+                limit: 65_536
+            })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rootfs_long_name_within_the_cap_is_accepted() -> TestResult {
+        // 16 components of 255 bytes and 15 slashes: 4095 bytes, within the 4096-byte path cap.
+        let name = vec!["a".repeat(255); 16].join("/");
+        let tar = gnu_long_name_tar(name.as_bytes())?;
+        let image = pack(&tar)?;
+        let fs = read_back(&image)?;
+        assert_eq!(file_bytes(&fs, &format!("/{name}"))?, b"x");
+        Ok(())
+    }
+
+    #[test]
+    fn rootfs_pax_path_within_the_cap_is_accepted() -> TestResult {
+        let tar = extension_tar(EntryType::XHeader, b"18 path=etc/named\n", None)?;
+        let image = pack(&tar)?;
+        let fs = read_back(&image)?;
+        assert_eq!(file_bytes(&fs, "/etc/named")?, b"x");
+        Ok(())
+    }
+
+    #[test]
+    fn rootfs_base256_size_is_read_like_the_crate() -> TestResult {
+        // A regular file with its size in base 256 (the crate's own writer emits it for sizes over
+        // the octal range; here it is forced for a small one). The guard must follow the data span.
+        let mut big = file(b"a", &[9; 600]);
+        big.declared_size = Some(600);
+        let mut tar = tar_of(&[big, file(b"b", b"y")], 0)?;
+        // 600 = 2 * 256 + 88, big-endian in the last eight bytes, top bit set on the first.
+        let field: [u8; 12] = [0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 88];
+        for (dst, src) in tar.iter_mut().skip(124).zip(field) {
+            *dst = src;
+        }
+        let header = tar.get_mut(..512).ok_or("short tar")?;
+        let mut rebuilt = Header::new_gnu();
+        rebuilt.as_mut_bytes().copy_from_slice(header);
+        rebuilt.set_cksum();
+        header.copy_from_slice(rebuilt.as_bytes());
+        let image = pack(&tar)?;
+        let fs = read_back(&image)?;
+        assert_eq!(file_bytes(&fs, "/a")?, vec![9; 600]);
+        assert_eq!(file_bytes(&fs, "/b")?, b"y");
         Ok(())
     }
 
