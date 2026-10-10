@@ -8678,3 +8678,23 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; fini
 After every run: `/usr/bin/pgrep -x minos-vmm; echo "pgrep exit $?"` printed `pgrep exit 1` (no helper left running).
 
 Result: five files, five file-level `test result: ok.` lines. `spike_boot` 3 of 3, `spike_rootimg` 2 of 2, `spike_exits` 12 of 12, `spike_seatbelt` 3 of 3, and `spike_net` 1 of 1 run (`egress_fails_closed`; the three vsock-limit tests filtered out as above).
+
+## cargo clean
+
+Plan 02-11, 2026-10-10. Run from the repository root after every verification above passed (GATE-06). No cargo command was run after it.
+
+Command: `cargo clean`
+
+Exit code: 0
+
+```text
+     Removed 19876 files, 2.6GiB total
+```
+
+Command: `test ! -d target; echo $?`
+
+```text
+0
+```
+
+`target/` is gone, including the signed `minos-vmm`, the musl guest, and the `spike_rootimg` tars under `target/tmp/`.
