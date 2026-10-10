@@ -73,6 +73,7 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 | CLI provider is the documented personal default | Terms allow an end user to run the unmodified binary under their own login; README directs anything beyond personal use to API key or Bedrock | — Pending |
 | Sweep and single_shot tiers only in v1 | Sweep is fully offline; single_shot is a single text-only call; planned and agentic need more infrastructure | — Pending |
 | Done means the full loop on a sample project | `check`, `run`, `report`, `adopt` end to end with every experiment in a VM | — Pending |
+| `minos-cli` uses the clap builder API; clap's `derive` feature is off | clap_derive emits `#[allow(clippy::restriction)]` on every generated impl, which is E0453 under the `forbid` lints; the lint levels are final, so the API surface moved instead (UAT test 6, decision A) | Decided in 01-05 (2026-10-10) |
 
 ## Evolution
 
@@ -92,4 +93,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-09 after Phase 1 (Workspace and Gates) completion*
+*Last updated: 2026-10-10 after Phase 1 gap closure (01-05, UAT test 6 resolved; phase re-verified 17/17)*
