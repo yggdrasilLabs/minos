@@ -7320,3 +7320,268 @@ Exit code: 0
 ```text
 advisories ok, bans ok, licenses ok, sources ok
 ```
+
+## Decision on F-01 (01-05)
+
+Date: 2026-10-09
+
+- `rustc --version`: rustc 1.97.1 (8bab26f4f 2026-07-14)
+- `cargo --version`: cargo 1.97.1 (c980f4866 2026-06-30)
+- `cargo clippy --version`: clippy 0.1.97 (8bab26f4f6 2026-07-14)
+- `cargo deny --version`: cargo-deny 0.20.2
+- HEAD at start of closure: `6402cccd6a116d1c6f89d1d8fb420ee276d86fe1`
+
+The user chose option A for finding F-01 in 01-UAT.md test 6: `minos-cli` uses the clap builder API, and clap's `derive` feature is dropped. No lint level changes, and F-01 to F-03 above stay as recorded. This section records the dependency change (F-01-CLOSED), the build-script allowlist re-check (P-01), a workspace build on the reduced graph (B-02), the invariant check, the five-command final gate, and `cargo clean`. No Rust source is written, and no file under `crates/` changes except `crates/minos-cli/Cargo.toml`.
+
+### F-01-CLOSED: clap derive feature dropped, clap_derive absent from both target graphs
+
+Requirement: GATE-01, GATE-02, UAT test 6 (decision A, amends D-12)
+
+Edit: Cargo.toml: replaced the five-line PENDING USER DECISION comment and the entry `clap         = { version = "=4.6.7", features = ["derive"] }` (lines 81 to 86) with a three-line decided note and the entry `clap         = { version = "=4.6.7" }`; crates/minos-cli/Cargo.toml: replaced the three-line PENDING USER DECISION comment above `clap.workspace = true` (lines 25 to 27) with the one-line note `# clap: the builder API is the decided surface (01-UAT.md test 6); a clap derive cannot pass the gate (F-01).`
+
+Before the edit:
+
+Command: `for c in clap_derive heck proc-macro2 quote syn@3.0.6 unicode-ident; do echo "== $c =="; cargo tree --locked --workspace --target aarch64-apple-darwin -e normal,build,dev --depth 1 -i "$c" 2>&1; done`
+
+```text
+== clap_derive ==
+clap_derive v4.6.7 (proc-macro)
+└── clap v4.6.7
+== heck ==
+heck v0.5.0
+└── clap_derive v4.6.7 (proc-macro)
+== proc-macro2 ==
+proc-macro2 v1.0.107
+├── async-trait v0.1.92 (proc-macro)
+├── clap_derive v4.6.7 (proc-macro)
+├── darling_core v0.21.3
+├── deku_derive v0.20.3 (proc-macro)
+├── quote v1.0.47
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+└── tracing-attributes v0.1.31 (proc-macro)
+== quote ==
+quote v1.0.47
+├── async-trait v0.1.92 (proc-macro)
+├── clap_derive v4.6.7 (proc-macro)
+├── darling_core v0.21.3
+├── darling_macro v0.21.3 (proc-macro)
+├── deku_derive v0.20.3 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+└── tracing-attributes v0.1.31 (proc-macro)
+== syn@3.0.6 ==
+syn v3.0.6
+├── async-trait v0.1.92 (proc-macro)
+├── clap_derive v4.6.7 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+└── thiserror-impl v2.0.21 (proc-macro)
+== unicode-ident ==
+unicode-ident v1.0.26
+├── proc-macro2 v1.0.107
+├── syn v2.0.119
+└── syn v3.0.6
+```
+
+Command: `for c in clap_derive heck proc-macro2 quote syn@3.0.6 unicode-ident; do echo "== $c =="; cargo tree --locked --workspace --target aarch64-unknown-linux-musl -e normal,build,dev --depth 1 -i "$c" 2>&1; done`
+
+```text
+== clap_derive ==
+clap_derive v4.6.7 (proc-macro)
+└── clap v4.6.7
+== heck ==
+heck v0.5.0
+└── clap_derive v4.6.7 (proc-macro)
+== proc-macro2 ==
+proc-macro2 v1.0.107
+├── async-trait v0.1.92 (proc-macro)
+├── clap_derive v4.6.7 (proc-macro)
+├── darling_core v0.21.3
+├── deku_derive v0.20.3 (proc-macro)
+├── quote v1.0.47
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+├── tracing-attributes v0.1.31 (proc-macro)
+└── zerocopy-derive v0.8.62 (proc-macro)
+== quote ==
+quote v1.0.47
+├── async-trait v0.1.92 (proc-macro)
+├── clap_derive v4.6.7 (proc-macro)
+├── darling_core v0.21.3
+├── darling_macro v0.21.3 (proc-macro)
+├── deku_derive v0.20.3 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+├── tracing-attributes v0.1.31 (proc-macro)
+└── zerocopy-derive v0.8.62 (proc-macro)
+== syn@3.0.6 ==
+syn v3.0.6
+├── async-trait v0.1.92 (proc-macro)
+├── clap_derive v4.6.7 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+└── thiserror-impl v2.0.21 (proc-macro)
+== unicode-ident ==
+unicode-ident v1.0.26
+├── proc-macro2 v1.0.107
+├── syn v2.0.119
+└── syn v3.0.6
+```
+
+Command: `cargo update --workspace --offline`
+
+Exit code: 0
+
+```text
+     Locking 0 packages to latest Rust 1.97.1 compatible versions
+    Removing clap_derive v4.6.7
+    Removing heck v0.5.0
+```
+
+Command: `git diff --numstat -- Cargo.lock`
+
+```text
+0	19	Cargo.lock
+```
+
+Command: `git diff -U0 -- Cargo.lock | grep '^-name'`
+
+```text
+-name = "clap_derive"
+-name = "heck"
+```
+
+After the edit:
+
+Command: `for c in clap_derive heck proc-macro2 quote syn@3.0.6 unicode-ident; do echo "== $c =="; cargo tree --locked --workspace --target aarch64-apple-darwin -e normal,build,dev --depth 1 -i "$c" 2>&1; done`
+
+```text
+== clap_derive ==
+error: package ID specification `clap_derive` did not match any packages
+== heck ==
+error: package ID specification `heck` did not match any packages
+
+help: a package with a similar name exists: `cc`
+== proc-macro2 ==
+proc-macro2 v1.0.107
+├── async-trait v0.1.92 (proc-macro)
+├── darling_core v0.21.3
+├── deku_derive v0.20.3 (proc-macro)
+├── quote v1.0.47
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+└── tracing-attributes v0.1.31 (proc-macro)
+== quote ==
+quote v1.0.47
+├── async-trait v0.1.92 (proc-macro)
+├── darling_core v0.21.3
+├── darling_macro v0.21.3 (proc-macro)
+├── deku_derive v0.20.3 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+└── tracing-attributes v0.1.31 (proc-macro)
+== syn@3.0.6 ==
+syn v3.0.6
+├── async-trait v0.1.92 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+└── thiserror-impl v2.0.21 (proc-macro)
+== unicode-ident ==
+unicode-ident v1.0.26
+├── proc-macro2 v1.0.107
+├── syn v2.0.119
+└── syn v3.0.6
+```
+
+Command: `for c in clap_derive heck proc-macro2 quote syn@3.0.6 unicode-ident; do echo "== $c =="; cargo tree --locked --workspace --target aarch64-unknown-linux-musl -e normal,build,dev --depth 1 -i "$c" 2>&1; done`
+
+```text
+== clap_derive ==
+error: package ID specification `clap_derive` did not match any packages
+== heck ==
+error: package ID specification `heck` did not match any packages
+
+help: a package with a similar name exists: `cc`
+== proc-macro2 ==
+proc-macro2 v1.0.107
+├── async-trait v0.1.92 (proc-macro)
+├── darling_core v0.21.3
+├── deku_derive v0.20.3 (proc-macro)
+├── quote v1.0.47
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+├── tracing-attributes v0.1.31 (proc-macro)
+└── zerocopy-derive v0.8.62 (proc-macro)
+== quote ==
+quote v1.0.47
+├── async-trait v0.1.92 (proc-macro)
+├── darling_core v0.21.3
+├── darling_macro v0.21.3 (proc-macro)
+├── deku_derive v0.20.3 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+├── syn v2.0.119
+├── syn v3.0.6
+├── thiserror-impl v2.0.21 (proc-macro)
+├── tracing-attributes v0.1.31 (proc-macro)
+└── zerocopy-derive v0.8.62 (proc-macro)
+== syn@3.0.6 ==
+syn v3.0.6
+├── async-trait v0.1.92 (proc-macro)
+├── serde_derive v1.0.229 (proc-macro)
+└── thiserror-impl v2.0.21 (proc-macro)
+== unicode-ident ==
+unicode-ident v1.0.26
+├── proc-macro2 v1.0.107
+├── syn v2.0.119
+└── syn v3.0.6
+```
+
+Command: `comm -23 /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-before-darwin.txt /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-after-darwin.txt`
+
+```text
+clap_derive v4.6.7
+heck v0.5.0
+```
+
+Command: `comm -13 /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-before-darwin.txt /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-after-darwin.txt`
+
+```text
+(no output)
+```
+
+Command: `comm -23 /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-before-musl.txt /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-after-musl.txt`
+
+```text
+clap_derive v4.6.7
+heck v0.5.0
+```
+
+Command: `comm -13 /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-before-musl.txt /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t1.Qxv7/graph-after-musl.txt`
+
+```text
+(no output)
+```
+
+Command: `cargo tree --locked --workspace --target aarch64-apple-darwin -e normal,build,dev --prefix none | grep -E '^(clap_derive|heck) v'`
+
+```text
+(no output)
+```
+
+Command: `cargo tree --locked --workspace --target aarch64-unknown-linux-musl -e normal,build,dev --prefix none | grep -E '^(clap_derive|heck) v'`
+
+```text
+(no output)
+```
