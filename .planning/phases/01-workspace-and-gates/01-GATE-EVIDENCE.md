@@ -7585,3 +7585,67 @@ Command: `cargo tree --locked --workspace --target aarch64-unknown-linux-musl -e
 ```text
 (no output)
 ```
+
+### P-01: build-script allowlist re-checked against both target graphs
+
+Requirement: GATE-03, UAT test 6
+
+Edit: none
+
+For `cargo deny check` only the closing summary line is shown, verbatim. The presence table counts each allowlist entry in the graph lists built with the graph-list command (normal, build, and dev edges) for aarch64-apple-darwin and aarch64-unknown-linux-musl.
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+Command: `for c in $(sed -n '/^allow-build-scripts/,/^]/p' deny.toml | grep -o 'crate = "[^"]*"' | cut -d'"' -f2); do printf '%s darwin=%s musl=%s\n' "$c" "$(grep -c "^$c v" /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t2.uTyP/graph-darwin.txt)" "$(grep -c "^$c v" /private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/46afdeb9-b252-457b-b06c-5537a56b53db/scratchpad/t2.uTyP/graph-musl.txt)"; done`
+
+```text
+anyhow darwin=1 musl=1
+crc32fast darwin=1 musl=1
+crossbeam-deque darwin=1 musl=1
+crossbeam-epoch darwin=1 musl=1
+crossbeam-utils darwin=1 musl=1
+getrandom darwin=2 musl=2
+kvm-ioctls darwin=0 musl=1
+libc darwin=1 musl=1
+memoffset darwin=1 musl=1
+msb-imago darwin=1 musl=1
+msb_krun_hvf darwin=1 musl=0
+nix darwin=1 musl=2
+num-traits darwin=1 musl=1
+proc-macro2 darwin=1 musl=1
+quote darwin=1 musl=1
+radium darwin=1 musl=1
+rustix darwin=1 musl=1
+rustversion darwin=1 musl=1
+serde darwin=1 musl=1
+serde_core darwin=1 musl=1
+serde_json darwin=1 musl=1
+target-tuple darwin=1 musl=1
+thiserror darwin=1 musl=1
+zerocopy darwin=1 musl=1
+zmij darwin=1 musl=1
+```
+
+Removed: none
+
+### B-02: workspace builds on the reduced dependency graph
+
+Requirement: GATE-01, GATE-02
+
+Edit: none (the Task 1 commit is the tree under test)
+
+Every line except cargo progress lines is shown.
+
+Command: `cargo build --workspace`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.98s
+```
