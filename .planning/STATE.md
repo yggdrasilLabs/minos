@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: platform-spikes
-status: executing
-stopped_at: Completed 02-10-PLAN.md
-last_updated: "2026-10-10T16:01:14.116Z"
+status: verifying
+stopped_at: Completed 02-11-PLAN.md
+last_updated: "2026-10-10T16:11:17.945Z"
 last_activity: 2026-10-10
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 16
-  completed_plans: 15
-  percent: 13
+  completed_plans: 16
+  percent: 25
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 Phase: 02 (platform-spikes) — EXECUTING
 Plan: 11 of 11
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-10 — Phase 02 execution started
 
 Progress: [██████████] 100%
@@ -70,6 +70,7 @@ Progress: [██████████] 100%
 | Phase 02 P08 | 70min | 2 tasks | 2 files |
 | Phase 02 P09 | 10 min | 2 tasks | 3 files |
 | Phase 02 P10 | 7min | 3 tasks | 5 files |
+| Phase 02 P11 | 9min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,7 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 5 may report Seatbelt as an active local confinement layer (KRUN-07) when launched via /usr/bin/sandbox-exec; the dedicated _minos user is recipe only (D-10), so runs record reduced local hardening for that layer
 - [Phase 02]: Phase 2 evidence is one file, 02-SPIKE-EVIDENCE.md, consolidated verbatim (region SHA-256 equals the fragment concatenation, 69494b03...bb41)
 - [Phase 02]: CLAUDE.md records the 8192-byte vsock limit of msb_krun_devices 0.1.41 and the user's chunked output protocol (S03-ANSWER); SPIKE-03 and ROADMAP Phase 2 criterion 2 await the user's wording decision
+- [Phase 02]: E-4's vsock bullet dropped and its TSI bullet merged into 02-10's no-network bullet; CLAUDE.md Verified facts, local records SPIKE-03 as the 8192-byte limit (S03-ANSWER)
 
 ### Pending Todos
 
@@ -142,6 +144,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-10T16:01:14.112Z
-Stopped at: Completed 02-10-PLAN.md
+Last session: 2026-10-10T16:11:17.941Z
+Stopped at: Completed 02-11-PLAN.md
 Resume file: None

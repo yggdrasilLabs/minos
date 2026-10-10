@@ -27,7 +27,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **SPIKE-05**: Whether a Seatbelt deny-default profile still permits VM creation is answered with evidence, and the fallback (dedicated unprivileged user) is recorded
 - [x] **SPIKE-06**: A root image can be produced from a user Dockerfile on macOS by a documented tool chain
 - [x] **SPIKE-07**: `claude -p` with all tools disabled, `--json-schema`, `--no-session-persistence`, an empty cwd, and an allowlisted environment returns `structured_output` under subscription login; usage field names and `--max-turns 1` behavior are recorded
-- [ ] **SPIKE-08**: If SPIKE-01 fails, the run stops and asks the user; no `unsafe` exception is added
+- [x] **SPIKE-08**: If SPIKE-01 fails, the run stops and asks the user; no `unsafe` exception is added
 
 ### Core Types (CORE)
 
@@ -143,7 +143,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **DOCS-02**: `minos check`, `minos run --generations N`, `minos report`, and `minos adopt` complete end to end on the sample project with every experiment in a VM
 - [ ] **DOCS-03**: `SECURITY.md` states the threat model, the trust base (libkrun plus macOS confinement layers), what preflight checks, and does not claim ironclad isolation
 - [ ] **DOCS-04**: The README states that the `claude` CLI provider only execs the user's own install under their own login, never handles credentials, and that shared or hosted use must go through an API key or Bedrock
-- [ ] **DOCS-05**: CLAUDE.md is amended for v1: local-first build order, `ModelProvider` decision, no tokio in v1, pico-dollar money, `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate, and each spike result
+- [x] **DOCS-05**: CLAUDE.md is amended for v1: local-first build order, `ModelProvider` decision, no tokio in v1, pico-dollar money, `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate, and each spike result
 
 ## v2 Requirements
 
@@ -206,7 +206,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPIKE-05 | Phase 2 | Complete |
 | SPIKE-06 | Phase 2 | Complete |
 | SPIKE-07 | Phase 2 | Complete |
-| SPIKE-08 | Phase 2 | Pending |
+| SPIKE-08 | Phase 2 | Complete |
 | CORE-01 | Phase 3 | Pending |
 | CORE-02 | Phase 3 | Pending |
 | CORE-03 | Phase 3 | Pending |
@@ -289,7 +289,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOCS-02 | Phase 8 | Pending |
 | DOCS-03 | Phase 8 | Pending |
 | DOCS-04 | Phase 8 | Pending |
-| DOCS-05 | Phase 2 | Pending |
+| DOCS-05 | Phase 2 | Complete |
 
 **Coverage:**
 

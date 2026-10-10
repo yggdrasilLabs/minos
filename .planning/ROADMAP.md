@@ -44,7 +44,7 @@ Facts that matter for scheduling:
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Workspace and Gates** - Five plain cargo commands enforce lints, supply-chain policy, and crate layering from the first commit (completed 2026-10-09)
-- [ ] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md
+- [x] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md (completed 2026-10-10)
 - [ ] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core`
 - [ ] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts
 - [ ] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor`
@@ -107,7 +107,7 @@ Plans:
   4. CLAUDE.md records every spike result and the v1 amendments (local-first build order, the `ModelProvider` decision, no tokio in v1, pico-dollar money, the `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate), and the workspace contains no `unsafe` exception; if the boot spike failed, work stopped and the user's decision was recorded before any alternative was tried (DOCS-05, SPIKE-08)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 10/11 plans executed
+**Plans**: 11/11 plans complete
 Plans:
 **Wave 1**
 
@@ -136,7 +136,7 @@ Plans:
 
 **Wave 6** *(blocked on 02-10)*
 
-- [ ] 02-11-PLAN.md — Remaining DOCS-05 amendments to CLAUDE.md, final gate, spike re-run, `cargo clean` (wave 6)
+- [x] 02-11-PLAN.md — Remaining DOCS-05 amendments to CLAUDE.md, final gate, spike re-run, `cargo clean` (wave 6)
 
 **Stop-and-ask point**: If SPIKE-01 fails (the safe libkrun wrapper cannot boot libkrunfw on this machine), stop and ask the user before doing anything else. The remaining options, such as an `unsafe` binding crate, a different VMM, or waiting for upstream, need the user's explicit approval. Never add `#![allow(unsafe_code)]` or any other `unsafe` exception quietly (SPIKE-08).
 **Research**: Needs research-phase. The spikes are the research; each SPIKE item is a deliverable with a recorded result.
@@ -259,7 +259,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
-| 2. Platform Spikes | 10/11 | In Progress|  |
+| 2. Platform Spikes | 11/11 | Complete   | 2026-10-10 |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |
