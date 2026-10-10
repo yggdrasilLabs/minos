@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 01
 current_phase_name: workspace-and-gates
-status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-10-10T00:09:59.335Z"
+status: verifying
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-10-10T00:16:26.745Z"
 last_activity: 2026-10-10
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Completed 01-05 (UAT test 6 closed, F-01 decision A)
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
-  percent: 0
+  completed_plans: 5
+  percent: 13
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 01 (workspace-and-gates) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 01
-Last activity: 2026-10-10 — Phase 01 execution started
+Phase: 01 (workspace-and-gates) — READY FOR VERIFICATION
+Plan: 5 of 5 (all plans complete)
+Status: Phase complete — ready for verification
+Last activity: 2026-10-10 — Completed 01-05 (UAT test 6 closed, F-01 decision A)
 
 Progress: [██████████] 100%
 
@@ -59,6 +59,7 @@ Progress: [██████████] 100%
 | Phase 01 P02 | 1min | 2 tasks | 1 files |
 | Phase 01 P03 | 4min | 3 tasks | 3 files |
 | Phase 01 P04 | 5min | 3 tasks | 9 files |
+| Phase 01 P05 | 6 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,7 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-04: unwrap_used, expect_used, indexing_slicing raised to forbid (UAT test 1); #[expect] can no longer silence them
 - [Phase 01]: 01-04: .cargo/config.toml [build] rustflags forbid backstop plus D-15 per-manifest lints check (UAT test 2)
 - [Phase 01]: 01-04: cargo doc --workspace --no-deps is the fifth gate command (UAT test 3)
+- [Phase 01]: UAT test 6 (A): minos-cli uses the clap builder API; clap derive feature off; re-enabling it is a user decision, never a lint change
 
 ### Pending Todos
 
@@ -105,6 +107,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-09T22:31:41.792Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-10-10T00:16:26.741Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None

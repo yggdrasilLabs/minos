@@ -68,7 +68,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Each supply-chain or layering violation makes `cargo deny check` fail: a git dependency without `rev`, an unknown registry or git source, a build script not on the allowlist, and a dependency from `minos-core` or `minos-loop` on `minos-sandbox` or any backend crate; a normal `minos-core` to `minos-sandbox` edge fails earlier, as a Cargo dependency cycle (GATE-03, GATE-04)
   4. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 4/5 plans complete
+**Plans**: 5/5 plans complete
 Plans:
 **Wave 1**
 
@@ -88,7 +88,7 @@ Plans:
 
 **Wave 5** *(gap closure for UAT test 6, blocked on Wave 4 completion)*
 
-- [ ] 01-05-PLAN.md — F-01 decided (A): drop clap's `derive` feature so `minos-cli` uses the builder API, regenerate `Cargo.lock`, re-check the build-script allowlist, correct the clap lines in `.claude/CLAUDE.md` and `research/STACK.md`; F-01-CLOSED, P-01, B-02, five-command final gate, `cargo clean` (wave 5)
+- [x] 01-05-PLAN.md — F-01 decided (A): drop clap's `derive` feature so `minos-cli` uses the builder API, regenerate `Cargo.lock`, re-check the build-script allowlist, correct the clap lines in `.claude/CLAUDE.md` and `research/STACK.md`; F-01-CLOSED, P-01, B-02, five-command final gate, `cargo clean` (wave 5)
 
 **Research**: Standard patterns (cargo-deny and lint recipes are verified in research/STACK.md); skip research-phase
 
@@ -228,7 +228,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace and Gates | 4/4 | Complete    | 2026-10-09 |
+| 1. Workspace and Gates | 5/5 | Complete   | 2026-10-09 |
 | 2. Platform Spikes | 0/TBD | Not started | - |
 | 3. Core Types and Pure Logic | 0/TBD | Not started | - |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
