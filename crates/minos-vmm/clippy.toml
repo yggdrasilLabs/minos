@@ -1,0 +1,20 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Each entry is proven to fire once (02-SPIKE-EVIDENCE.md D-PROBE). A mistyped path only warns,
+# so re-prove any entry you change. These keep the guest off the network and away from host files
+# (CLAUDE.md Local backends; 02-CONTEXT.md D-18).
+disallowed-methods = [
+  { path = "msb_krun::api::builder::VmBuilder::fs", reason = "no virtio-fs device: it shares host files (D-18)" },
+  { path = "msb_krun::api::builders::FsBuilder::root", reason = "virtio-fs root shares a host directory" },
+  { path = "msb_krun::api::builders::FsBuilder::path", reason = "virtio-fs shares a host directory" },
+  { path = "msb_krun::api::builders::FsBuilder::custom", reason = "no virtio-fs device of any kind (D-18)" },
+  { path = "msb_krun::api::builders::MachineBuilder::enable_inet_hijack", reason = "TSI gives the guest the host network" },
+  { path = "msb_krun::api::builders::VsockBuilder::inet_hijack", reason = "TSI gives the guest the host network" },
+  { path = "msb_krun::api::builders::VsockBuilder::tcp_listen_remap", reason = "maps host TCP ports into the guest" },
+  { path = "msb_krun::api::builders::DiskBuilder::format", reason = "raw only; a guest-rewritten image must never be re-read as qcow2" },
+  { path = "msb_krun::api::builders::DiskBuilder::layers", reason = "layered images are a non-raw format" },
+  { path = "msb_krun::api::builders::ExecBuilder::env", reason = "no host environment in the guest" },
+  { path = "msb_krun::api::builders::ExecBuilder::envs", reason = "no host environment in the guest" },
+  { path = "msb_krun::api::builders::ConsoleBuilder::port", reason = "hands host file descriptors to the guest console" },
+  { path = "msb_krun::api::builders::ConsoleBuilder::port_tty", reason = "hands the host TTY to the guest" },
+]
