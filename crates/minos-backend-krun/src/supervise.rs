@@ -750,7 +750,7 @@ impl GuestBytes {
     /// Up to `max_chars` characters safe to print to a terminal.
     ///
     /// An allowlist: printable characters, newline, and tab are kept. C0 controls (including ESC and carriage
-    /// return), DEL, C1 controls, and every invisible format character listed at [`displayable`] (the bidi
+    /// return), DEL, C1 controls, and every invisible format character listed at `displayable` (the bidi
     /// overrides and marks, zero-width characters, the line and paragraph separators, the byte order mark, the
     /// interlinear annotation controls, and the tag characters) are dropped, and invalid UTF-8 becomes U+FFFD.
     /// The count applies after filtering.

@@ -4,7 +4,7 @@
 //! (02-CONTEXT.md D-01, D-17). It is parsed in memory and never unpacked onto the host. Caps apply
 //! before anything is read: total tar bytes, entry count, per-entry size (taken from the header),
 //! and path length. The tar crate buffers GNU long-name, long-link, and pax extended headers whole
-//! before the path cap can see them, so a [`HeaderGuard`] watches each 512-byte header as it streams
+//! before the path cap can see them, so a `HeaderGuard` watches each 512-byte header as it streams
 //! past and refuses one of those that declares more than the cap, before the crate allocates it.
 //! Only regular files, directories, symlinks, and hardlinks are accepted; a hardlink becomes a copy
 //! of an earlier regular file. Every mtime in the image is 0, nodes are ordered by path, and the
