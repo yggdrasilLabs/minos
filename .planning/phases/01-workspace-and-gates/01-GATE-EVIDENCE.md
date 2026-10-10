@@ -7649,3 +7649,134 @@ Exit code: 0
 ```text
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.98s
 ```
+
+### Invariant check (01-05)
+
+Command: `git diff --name-only d2cf8cf -- crates`
+
+```text
+crates/minos-cli/Cargo.toml
+```
+
+Command: `git diff --quiet d2cf8cf -- rules .cargo rust-toolchain.toml rustfmt.toml crates/minos-core/clippy.toml CLAUDE.md; echo $?`
+
+```text
+0
+```
+
+Command: `git diff --numstat d2cf8cf -- Cargo.toml Cargo.lock crates/minos-cli/Cargo.toml deny.toml .claude/CLAUDE.md .planning/research/STACK.md`
+
+```text
+3	3	.claude/CLAUDE.md
+4	4	.planning/research/STACK.md
+0	19	Cargo.lock
+4	6	Cargo.toml
+1	3	crates/minos-cli/Cargo.toml
+```
+
+Command: `git diff -U0 d2cf8cf -- Cargo.toml | grep -E '^[-+][^-+]' | grep -vE '^[-+](#|clap )'`
+
+```text
+(no output)
+```
+
+`git diff d2cf8cf -- .claude/CLAUDE.md` changes exactly three lines, 39, 62, and 168 (the decision 5 row, the clap row of the Core Technologies table, and the clap bullet under Question 5), each replaced one for one.
+
+### Final gate (01-05)
+
+The five gate commands on the final tree (after the .claude/CLAUDE.md, .planning/research/STACK.md, .planning/STATE.md, and 01-CONTEXT.md edits), run from the repository root. Only each command's closing summary lines are shown, verbatim.
+
+Command: `cargo fmt --all --check`
+
+Exit code: 0
+
+```text
+(no output)
+```
+
+Command: `cargo clippy --workspace --all-targets -- -D warnings`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.51s
+```
+
+Command: `cargo test --workspace`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.65s
+     Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-52d5905ac48406d1)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos-f778c7706c4fca85)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_core-c619c5be5a10c8c9)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_guest-3a96ca21e5db09e7)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_loop-994e138925915d56)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_propose-1a9a8fd769d6a47b)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_runner-89243ff6043495d6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_sandbox-dcc21162d5b68e3e)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/minos_store-4edbb133c2d25261)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/minos_vmm-0703513a634d49f4)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_backend_krun
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_loop
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_propose
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_runner
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_sandbox
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests minos_store
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Command: `cargo deny check`
+
+Exit code: 0
+
+```text
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+Command: `cargo doc --workspace --no-deps`
+
+Exit code: 0
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.63s
+   Generated /Users/seanmcauliffe/Repos/minos/target/doc/minos_backend_krun/index.html and 9 other files
+```
+
+Requirement: GATE-05 (C-02)
+
+Command: `grep -rnE '#!?\[allow\(' crates --include='*.rs'`
+
+```text
+(no output)
+```
+
+### cargo clean (01-05)
+
+Run from the repository root after every verification above passed (GATE-06). No cargo command was run after it.
+
+Command: `cargo clean`
+
+Exit code: 0
+
+```text
+     Removed 4090 files, 1.1GiB total
+```

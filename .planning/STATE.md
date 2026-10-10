@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Platform Spikes
-status: verifying
+current_phase: 01
+current_phase_name: workspace-and-gates
+status: executing
 stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-10-09T22:43:28.532Z"
-last_activity: 2026-10-09
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
+last_updated: "2026-10-10T00:09:59.335Z"
+last_activity: 2026-10-10
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 8
-  completed_phases: 1
-  total_plans: 4
+  completed_phases: 0
+  total_plans: 5
   completed_plans: 4
-  percent: 13
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 2 — Platform Spikes
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-10-09 — Phase 01 complete, transitioned to Phase 2
+Phase: 01 (workspace-and-gates) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 01
+Last activity: 2026-10-10 — Phase 01 execution started
 
 Progress: [██████████] 100%
 
@@ -93,7 +93,7 @@ None yet.
 - [Phase 2/6] `claude -p` behavior under subscription login is unverified (tools off with `--json-schema`, `--max-turns 1`, usage field names)
 - [Phase 5] The container engine for `env build` on macOS depends on the SPIKE-06 answer
 - [Phase 8] The default baseline repeat count for the noise floor should come from measured variance across VM boots, not a guess
-- [Phase 8] F-01: #[derive(clap::Parser)] fails clippy under forbid (clap_derive emits allow(clippy::restriction)); the user decides between the clap builder API and revisiting forbid before any clap derive
+- [Phase 8] F-01 decided (01-UAT.md test 6, option A; plan 01-05): minos-cli uses the clap builder API, and clap's `derive` feature is off, because clap_derive's `#[allow(clippy::restriction)]` is E0453 under forbid. Any later wish for a clap derive goes back to the user; no lint level changes for it
 
 ## Deferred Items
 

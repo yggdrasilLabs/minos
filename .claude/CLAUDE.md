@@ -36,7 +36,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | 2. Diff parse and apply | **`diffy` 0.5.2.** `PatchSet::parse(.., ParseOptions::gitdiff())` detects renames, copies, mode changes, and binary patches so `Diff::parse` can reject them. Write a **strict exact-position applier in `minos-core`** over diffy's parsed hunks rather than using `diffy::apply`, which searches every offset. | HIGH |
 | 3. Tar, hashing, encoding | `tar` 0.4.46 (`default-features = false`) with hand-built headers. `sha2` 0.11.0. `base16ct` 1.0.0 for hex (`base64ct` 1.8.3 later for S3 checksums). | HIGH |
 | 4. Serde, TOML, JSON | `serde` 1.0.229, `toml` 1.1.8 (TOML 1.1), `serde_json` 1.0.151. The `try_from` plus `deny_unknown_fields` pattern was verified by compiling it. | HIGH |
-| 5. Errors and CLI | `thiserror` 2.0.21 in library crates, `anyhow` 1.0.104 only in `minos-cli`'s `main`, `clap` 4.6.7 with `derive`. | HIGH |
+| 5. Errors and CLI | `thiserror` 2.0.21 in library crates, `anyhow` 1.0.104 only in `minos-cli`'s `main`, `clap` 4.6.7 builder API only (no `derive` feature): clap_derive emits `#[allow(clippy::restriction)]`, which is E0453 under the `forbid` lints. | HIGH |
 | 6. Tests | `proptest` 1.11.0, `insta` 1.49.0 (with `cargo-insta` 1.49.0), `trybuild` 1.0.122. | HIGH |
 | 7. Supply chain | `cargo-deny` 0.20.2. Set `[sources] required-git-spec = "rev"`, `unknown-git = "deny"`, and a curated `[bans.build] allow-build-scripts` allowlist. | HIGH |
 | 8. Money | Hand-rolled integer fixed-point in core: rates in **pico-dollars** (`u128`), totals in micro-dollars. **CLAUDE.md's "nano-dollar precision" cannot represent published AWS rates** such as `$0.0000276944`/vCPU-s, which has 10 decimal places. | HIGH |
@@ -59,7 +59,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 | `serde` and `serde_json` | **1.0.229** and **1.0.151** | Wire formats, ledger lines, guest protocol, the claude envelope | The standard. JSON is what DynamoDB and S3 will store later, so file-backed rows carry the same `Record` bytes. |
 | `toml` | **1.1.8+spec-1.1.0** | `minos.toml`, `prices.toml`, `minos.lock` | toml 1.x implements TOML 1.1. `try_from` plus `deny_unknown_fields` works and reports a line and column for unknown keys. A `try_from` error has no location (`"empty\n"`), so wrap it with the field path. |
 | `thiserror` | **2.0.21** | Typed errors in every library crate | Matches the "errors separate blame" rule and `rules/err-thiserror-lib.md`. |
-| `clap` | **4.6.7**, `features = ["derive"]` | `minos` CLI | The standard. MSRV 1.85. |
+| `clap` | **4.6.7**, default features (no `derive`) | `minos` CLI, builder API only (`Command`, `Arg`) | The standard. MSRV 1.85. A derive cannot pass the gate: clap_derive puts `#[allow(clippy::restriction)]` on generated impls, which is E0453 under the `forbid` lints (01-GATE-EVIDENCE.md F-01). |
 
 ### Guest-side (`minos-guest`: static Linux arm64 binary, PID 1 in the VM)
 
@@ -165,7 +165,7 @@ Minos is a secure, general-purpose lab for autonomous experiment loops, written 
 ## Question 5: errors and CLI
 
 - Library crates: `thiserror` 2.0.21 enums that split `CandidateFault` (becomes an `Outcome`, never retried) from `InfraFault` (retried). `minos-cli` `main` returns `anyhow::Result<()>`. Nothing else uses `anyhow`.
-- `clap` 4.6.7 derive. Treat every user-facing string that came from a sandbox or a model with the core escape-stripping renderer (below).
+- `clap` 4.6.7 builder API only (`clap::Command`, `clap::Arg`), never a derive: clap_derive's `#[allow(clippy::restriction)]` is E0453 under the `forbid` lints. Treat every user-facing string that came from a sandbox or a model with the core escape-stripping renderer (below).
 
 ## Question 6: testing
 
