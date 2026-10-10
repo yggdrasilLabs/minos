@@ -222,3 +222,8 @@ None.
 - 02-05 can proceed: it touches only `input_disk.rs`, `launch_config.rs`, and `supervise.rs` in this crate.
 - 02-06 has the root image path (SquashFS on `/dev/vda` per D-18) and the initramfs for the negative-evidence run.
 - Gate: `cargo fmt --all --check`, workspace clippy, `cargo test --workspace`, `cargo deny check`, `cargo doc --workspace --no-deps`, and musl clippy all exit 0. C-01 prints ten `ok` lines. The C-02, unsafe, and `mksquashfs|"cpio"` greps print nothing. No Cargo.toml, Cargo.lock, or deny.toml changed (205 packages).
+
+## Self-Check: PASSED
+
+- All 7 created or modified files exist on disk.
+- Commits f960095, cd743ed, 4bb7649, 61d6a54, 48774bb, 3b607eb, 3f6cfe4, and 96438a6 are present in `git log`.
