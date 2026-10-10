@@ -1,5 +1,6 @@
-//! The PID 1 path: print the boot marker, mount `/proc` and `/sys`, read the job from `/dev/vdb`, run its
-//! steps in order, send one status frame to the host over vsock, then power off or return as the job says.
+//! The PID 1 path: print the boot marker, mount `/proc`, `/sys`, and a tmpfs on `/tmp`, read the job from
+//! `/dev/vdb`, run its steps in order, send one status frame to the host over vsock, then power off or return
+//! as the job says.
 //!
 //! This is the only Linux-only file in the guest; `main.rs` gates the module (02-CONTEXT.md D-03). Every step
 //! failure becomes a field in that step's result. Nothing here panics on bad input, and nothing returns early
@@ -47,12 +48,31 @@ const SMALL_FILE_CAP: u64 = 64 * 1024;
 const FLOOD_LINE: u64 = 80;
 /// Pause between polls of a running command's pipes and exit status.
 const RUN_POLL: Duration = Duration::from_millis(5);
+/// Flags on `/proc` and `/sys`: nothing on either is a device, setuid, or executable. `/sys` is also read-only,
+/// so a command cannot write `/sys/power/state` and turn its own failure into an unexplained power-off that the
+/// host would classify as `Crashed` rather than attribute to the command.
+const PSEUDO_FLAGS: MountFlags = MountFlags::NOSUID
+    .union(MountFlags::NODEV)
+    .union(MountFlags::NOEXEC);
+/// Flags on the `/tmp` tmpfs: no devices and no setuid. Execution stays allowed, because build-time checks
+/// compile and run small programs in a temporary directory.
+const TMP_FLAGS: MountFlags = MountFlags::NOSUID.union(MountFlags::NODEV);
+/// Size cap of the `/tmp` tmpfs, as a share of guest memory. The root is read-only `SquashFS`, so this and the
+/// scratch disk are the only writable paths; the cap keeps a command from filling guest memory through `/tmp`.
+const TMP_SIZE: &CStr = c"size=25%";
 
 /// Runs the guest as PID 1.
 pub fn run() -> ExitCode {
     console_line(BOOT_MARKER);
-    mount_pseudo("proc", "/proc", "proc");
-    mount_pseudo("sysfs", "/sys", "sysfs");
+    mount_at("proc", "/proc", "proc", PSEUDO_FLAGS, None);
+    mount_at(
+        "sysfs",
+        "/sys",
+        "sysfs",
+        PSEUDO_FLAGS.union(MountFlags::RDONLY),
+        None,
+    );
+    mount_at("tmpfs", "/tmp", "tmpfs", TMP_FLAGS, Some(TMP_SIZE));
 
     let job = match load_job() {
         Ok(job) => job,
@@ -102,8 +122,10 @@ fn console_line(text: &str) {
     drop(written);
 }
 
-fn mount_pseudo(source: &str, target: &str, fstype: &str) {
-    if let Err(error) = mount(source, target, fstype, MountFlags::empty(), None::<&CStr>) {
+/// Mounts `fstype` at `target`. A failure is printed on the console and the boot goes on: the packer creates
+/// every mount point, and a step that needs the mount reports its own error.
+fn mount_at(source: &str, target: &str, fstype: &str, flags: MountFlags, data: Option<&CStr>) {
+    if let Err(error) = mount(source, target, fstype, flags, data) {
         console_line(&format!("minos-guest: mount {target}: {error}"));
     }
 }
