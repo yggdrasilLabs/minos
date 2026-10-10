@@ -24,7 +24,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **SPIKE-02**: A guest `connect()` to host loopback and to a public IP both fail when the launcher disables implicit vsock and adds a plain vsock
 - [ ] **SPIKE-03**: A vsock port maps to a host Unix socket and a byte-capped stream from guest to host works end to end
 - [x] **SPIKE-04**: An ad-hoc codesigned helper with the `com.apple.security.hypervisor` entitlement starts a VM, and an unsigned one is refused
-- [ ] **SPIKE-05**: Whether a Seatbelt deny-default profile still permits VM creation is answered with evidence, and the fallback (dedicated unprivileged user) is recorded
+- [x] **SPIKE-05**: Whether a Seatbelt deny-default profile still permits VM creation is answered with evidence, and the fallback (dedicated unprivileged user) is recorded
 - [x] **SPIKE-06**: A root image can be produced from a user Dockerfile on macOS by a documented tool chain
 - [x] **SPIKE-07**: `claude -p` with all tools disabled, `--json-schema`, `--no-session-persistence`, an empty cwd, and an allowlisted environment returns `structured_output` under subscription login; usage field names and `--max-turns 1` behavior are recorded
 - [ ] **SPIKE-08**: If SPIKE-01 fails, the run stops and asks the user; no `unsafe` exception is added
@@ -203,7 +203,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPIKE-02 | Phase 2 | Complete |
 | SPIKE-03 | Phase 2 | Pending |
 | SPIKE-04 | Phase 2 | Complete |
-| SPIKE-05 | Phase 2 | Pending |
+| SPIKE-05 | Phase 2 | Complete |
 | SPIKE-06 | Phase 2 | Complete |
 | SPIKE-07 | Phase 2 | Complete |
 | SPIKE-08 | Phase 2 | Pending |
