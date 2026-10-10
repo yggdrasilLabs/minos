@@ -13,3 +13,14 @@
 (allow network-outbound (literal (param "SOCK")))
 (allow sysctl-read (sysctl-name "hw.pagesize") (sysctl-name "hw.ncpu") (sysctl-name "hw.memsize")
                    (sysctl-name-prefix "hw.optional.arm.") (sysctl-name-prefix "kern.proc.pid."))
+; S05-ITER-1: "deny(1) sysctl-read hw.pagesize_compat"; without it Rust std's startup got an invalid page size and
+; aborted with "failed to allocate a guard page: Invalid argument (os error 22)" before main.
+(allow sysctl-read (sysctl-name "hw.pagesize_compat"))
+; S05-ITER-2: "deny(1) file-read-metadata /opt", then preflight failed with "kernel.krunfw ...: Operation not
+; permitted". Preflight canonicalizes every config path, and realpath stats each ancestor directory. This allows
+; metadata only (stat, no contents, no listing) of the ancestors of the paths the config names.
+(allow file-read-metadata (path-ancestors (param "KRUNFW")) (path-ancestors (param "KRUNFW_LINK"))
+                          (path-ancestors (param "CONFIG")))
+; S05-ITER-3: "deny(1) file-read-metadata /private/tmp/<job>/o.sock"; preflight checks that the route path is a
+; socket (lstat). Metadata of that one path only; the connect itself is the network-outbound rule above.
+(allow file-read-metadata (literal (param "SOCK")))
