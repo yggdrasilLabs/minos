@@ -14,7 +14,7 @@ The repository is new. This file is the design of record until real docs exist. 
 
 - **The sketches here show intent, not compiled code.** Signatures will need adjusting. The invariants will not.
 - **Never weaken a security invariant to make something compile or pass.** If an invariant blocks you, stop and ask. Do not add an escape hatch, a `pub` field, a `Deref`, or a "temporary" bypass.
-- **Check external APIs against their docs before writing code against them.** Lambda MicroVMs (launched June 2026) and the Rust durable execution SDK (experimental preview) are newer than most training data. Do not guess method names. Links are in [Verified facts](#verified-facts-as-of-2026-10-08).
+- **Check external APIs against their docs before writing code against them.** Lambda MicroVMs (launched June 2026) and the Rust durable execution SDK (experimental preview) are newer than most training data. Do not guess method names. Links are in [Verified facts, AWS](#verified-facts-aws-as-of-2026-10-08).
 - **The [Open questions](#open-questions) are unverified.** Do not build on one as if it were settled. Resolve it with a small experiment first, then update this file.
 - **Follow the [Build order](#build-order).** Each step answers questions the next one depends on.
 - **Keep this file current.** When a decision changes, edit the relevant section in the same change.
@@ -32,7 +32,7 @@ Everything that leaves a sandbox is hostile input: logs, results, artifacts, fil
 
 ## Architecture
 
-There is no always-on service. The CLI talks to AWS with the user's own credentials.
+There is no always-on service. In milestone v1 the loop runs inside the `minos` CLI process on the user's machine, against a file-backed ledger and blob store, with libkrun sandboxes on macOS arm64. The AWS deployment described in the table below (durable Lambda orchestrator, Lambda MicroVMs, DynamoDB, S3, Bedrock) is a later milestone that reuses `minos-core` unchanged; when it exists, the CLI talks to AWS with the user's own credentials.
 
 | Piece | What it is | Holds |
 |---|---|---|
@@ -57,7 +57,7 @@ No role gets a network device. The trusted side moves all data: the runner pushe
 
 ### The model stays outside the sandbox
 
-The agent loop runs in trusted code, which calls Bedrock using the function's IAM role. There is no API key anywhere. Only tool calls enter the agent VM, where `minos-guest` executes them. Model output is deserialized into a closed enum, so an out-of-bounds call fails validation and is returned to the model as an error:
+The agent loop runs in trusted code, which calls Bedrock using the function's IAM role. Minos never reads, stores, or forwards a model credential. Models are reached through a `ModelProvider` abstraction in `minos-propose`. In v1 the personal default execs the user's own unmodified `claude` binary in print mode (02-SPIKE-EVIDENCE.md SPIKE-07 contract): the canonical binary under `~/.local/share/claude/versions/`, never whatever `claude` is first on `PATH` (it may be a wrapper that injects settings), run from a fresh empty directory outside any repository, with the environment cleared to `HOME`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `USER`, `LOGNAME`, `TMPDIR`, and `LANG`, the prompt on stdin, and `-p --model <model> --tools "" --output-format json --json-schema '<schema>' --no-session-persistence --strict-mcp-config --mcp-config '{"mcpServers":{}}' --safe-mode --permission-prompts none --max-turns 1` (the spike ran `--model haiku`). Its `structured_output` is model output and is parsed strictly; only token counts are recorded, never the CLI's dollar estimate. Anthropic's terms allow this only for a user running their own install under their own subscription. Shared or hosted use goes through an API-key or Bedrock provider, later implementations of the same abstraction; on AWS the agent loop calls Bedrock with the function's IAM role. Only tool calls enter the agent VM, where `minos-guest` executes them. Model output is deserialized into a closed enum, so an out-of-bounds call fails validation and is returned to the model as an error:
 
 ```rust
 #[derive(Serialize, Deserialize)]
@@ -128,6 +128,7 @@ The three clippy lints are `forbid`, not `deny`, so neither `#[allow(...)]` nor 
 - **Order must be stable.** Use `BTreeMap` and `BTreeSet`, or sort into a `Vec`, anywhere iteration order can affect output, hashing, or which durable operations get created.
 - **No C in our own crates.** No OpenSSL, no libgit2. The crypto provider under rustls is the one accepted exception.
 - **No git in the trusted path.** An experiment is a base tarball hash plus a unified diff, applied inside the guest with a pure-Rust patch crate.
+- **No tokio in v1.** No `minos-*` crate depends on tokio; v1 is synchronous (`std::process`, `std::thread::scope`, `std::os::unix::net`, `std::fs::File::lock`). The pinned VMM links tokio internally through `msb-imago`, and `deny.toml` fences tokio to that one edge, so a `minos-*` crate that adds it is refused. The AWS milestone revisits this.
 - **Commands are argv arrays.** Never build a shell string from manifest or model input.
 - **Supply chain.** Commit `Cargo.lock`. `cargo deny check` gates every build. Pin git dependencies by `rev`.
 
@@ -232,7 +233,9 @@ impl Untrusted<Bytes> {
 
 Launches are idempotent: derive the client token from `ExperimentId` plus role. Every launch sets a hard maximum duration, so nothing depends on cleanup running.
 
-## Durable execution rules
+## Durable execution rules (AWS milestone)
+
+These rules and the platform limits below apply to the later AWS milestone; v1 runs locally and has no durable functions (02-CONTEXT.md D-08).
 
 The orchestrator process is destroyed and replayed every time it waits. No in-memory state survives between operations.
 
@@ -347,6 +350,8 @@ The judge is a command plus private data that runs in its own sandbox and writes
 
 **Environment.** The user's Dockerfile feeds every backend. Dependencies are baked in during a build phase that has registry access and no secrets; the experiment phase is offline. Base images are pinned by digest and lockfiles are required. The trusted packer writes `minos-guest` into the root image as `/init` after every file from the user's image, so the Dockerfile cannot replace it, and the VM never runs a Docker entrypoint (02-CONTEXT.md D-18). `minos.lock` records one image digest per backend, since Lambda is arm64 and a GPU box is usually x86_64.
 
+**Root images.** The requirement is any OCI builder that can export a rootfs tar (02-CONTEXT.md D-14). The checked tool chain is the Docker CLI with BuildKit, `docker buildx build --platform linux/arm64 --output type=tar,dest=<file> <context>`, after which Minos's own pure-Rust packer (`minos-backend-krun`, gzip SquashFS) adds `/init` and writes the raw read-only root image (02-SPIKE-EVIDENCE.md RI-03, S06-BOOT). Docker Desktop is one way to get that builder, not a requirement; lima, podman, and Apple's container tool are untested alternatives. Base images are pinned by digest. Two builds of the same Dockerfile gave tars that differed, because the `RUN` step stamped the file it wrote and its directory with the wall-clock time, and root images that matched byte for byte, because the packer zeroes every mtime (RI-04); byte-identical tars and `minos.lock` are Phase 5 (D-16).
+
 An optional `[environment.prepare]` step runs once with allowlisted network access. Its output is frozen as a read-only blob identified by hash.
 
 Lambda snapshots capture memory as well as disk. `minos-guest` must not create anything per-run at startup; that belongs in the run hook.
@@ -365,10 +370,11 @@ Local is where a breakout costs the most, because it lands next to the user's ke
 - The VM boots straight from the raw read-only SquashFS root image on `/dev/vda` (02-CONTEXT.md D-18; 02-SPIKE-EVIDENCE.md S01-ROOTDISK). Stock libkrunfw has `CONFIG_BLK_DEV_INITRD` unset, so there is no initramfs. `/init` is the static musl `minos-guest`, written into the image last by the trusted packer, so a Dockerfile cannot supply its own. `minos-vmm` passes `rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0` through `KernelBuilder::cmdline` and `/init root=/dev/vda` through `KernelBuilder::init_path`, which lands after msb_krun's own `root=/dev/root`; Linux keeps the last `root=`. `dummy.numdummies=0` stops the kernel's built-in dummy driver from creating `dummy0`, by the user's decision (S01-NETIFACES). The boot test asserts the exact `/proc/cmdline` tokens (S01-CMDLINE), so an msb_krun bump cannot change this silently. No VM has a virtio-fs device.
 - The packer creates `/dev`, `/proc`, `/sys`, `/tmp`, and `/mnt` in every root image, because nothing can create a directory on a read-only SquashFS root.
 - The helper's exit code is not the guest's result. With no virtio-fs device the guest has no way to set it: guest power-off, a guest whose init returns, and a host SIGTERM all end `minos-vmm` with 0 (K7-01, K7-02, K7-05). A returning PID 1 does not panic: libkrunfw patches its exit into an orderly reboot (K7-02). A kernel panic also ends in 0, because of `panic=-1` (S01-INITRAMFS). The guest's status frame over vsock is the only result channel. The host classifies a run from what it observed itself, exit code and `minos-vmm` stderr marker together (02-SPIKE-EVIDENCE.md K7 table, Classification rule for Phase 5): exit 0 with exactly one valid status frame means the guest decided, and the frame says what happened; exit 0 with no valid frame means `Crashed`; 125 with `minos-vmm: watchdog console-cap` means `Crashed` (the guest flooded the console), never retried; the host deadline, or 124 with `minos-vmm: watchdog deadline`, means `TimedOut`; `minos-vmm`'s pre-takeover codes 64, 65, 66, 67, and 70, 126 with `minos-vmm: watchdog parent-gone`, a spawn failure, any signal the host did not send, and any other code mean an infrastructure failure. The markers are written by `minos-vmm`, never by the guest, which reaches only the console file. Under Seatbelt the helper also exits 0 when its socket connect is denied, so success is always judged by the frame (S05-CTRL-SOCK).
+- libkrunfw comes from the Homebrew tap `libkrun/krun` (`brew tap libkrun/krun`, `brew trust libkrun/krun`, `brew install libkrunfw`); Minos needs only libkrunfw from it, not libkrun, krunkit, or krunvm (02-SPIKE-EVIDENCE.md H-01). `minos-vmm` loads it by absolute path and checks its SHA-256 first (K5).
 - `minos-vmm` records its parent PID as the first statement of `main`, and its watchdog treats a changed parent, or a parent of PID 1 (launchd never legitimately starts it), as gone, so a helper orphaned at any point stops with 126 (02-07 DEFECT-01, K7-07, K7-07b).
 - The watchdog polls the console file every 50 ms, so a flooding guest overshoots the console cap: 30000 to 48954 bytes over a 262144-byte cap (K7-04). Size the console disk budget as the cap plus at least one poll of console throughput, or replace the file console with a capped writer.
 - `minos-vmm` installs no `log` backend yet, so msb_krun's warnings and errors are discarded, including the vsock drops below (DIAG-01). Phase 5 installs one.
-- No network device does not mean no network code in the guest kernel. The libkrunfw kernel has `CONFIG_TSI=y` and `CONFIG_DUMMY=y` (H-02, S01-NETIFACES). The guest has no egress only because the VMM never enables inet hijack: `msb_krun`'s default is off, its `net` feature is off, and `crates/minos-vmm/clippy.toml` bans the hijack methods. `egress_fails_closed` guards it: every guest TCP connect fails, IPv4 with `ENETUNREACH` (101) and IPv6 with `EADDRNOTAVAIL` (99), no host canary sees a connection, and the guest sees only `lo` and no virtio-net device (S02-EGRESS). The root-disk arguments pass `dummy.numdummies=0`, so the kernel creates no `dummy0`.
+- No network device does not mean no network code in the guest kernel. The libkrunfw kernel has `CONFIG_TSI=y` and `CONFIG_DUMMY=y` (H-02, S01-NETIFACES). Upstream libkrun's networking default is not air-gapped: it turns on TSI, which proxies guest INET sockets through the host, whenever no virtio-net device is configured. Minos drives libkrun through `msb_krun`, which reverses that default (`inet_hijack` off). The guest has no egress only because the VMM never enables inet hijack: `msb_krun`'s `net` feature stays off, and `crates/minos-vmm/clippy.toml` bans the hijack, port-remap, virtio-fs, non-raw-format, guest-environment, and host-console methods (D-PROBE). `egress_fails_closed` guards it: every guest TCP connect fails, IPv4 with `ENETUNREACH` (101) and IPv6 with `EADDRNOTAVAIL` (99), no host canary sees a connection, and the guest sees only `lo` and no virtio-net device (S02-EGRESS). The root-disk arguments pass `dummy.numdummies=0`, so the kernel creates no `dummy0`.
 - Output comes back as a tar stream over vsock, parsed in Rust with caps. Never mount a disk the guest wrote. On the pinned `msb_krun_devices` 0.1.41 one vsock connection carries at most 8192 bytes guest to host (8192 is the macOS `net.local.stream.sendspace` default); above that, data is silently lost or the guest stalls, for three defects in that crate and none in Minos: a shutdown race discards bytes queued above the 8 KiB send buffer, a one-descriptor packet parser drops payloads over 32 KiB, and a credit update sent only every 4 MiB deadlocks streams over 256 KiB (02-SPIKE-EVIDENCE.md S03-WITHIN, S03-OVER, K4-THROUGHPUT, DIAG-01). By the user's decision (S03-ANSWER, 2026-10-10: "work within the limits for now, if we need to reassess later fine"), guest output is a sequence of short vsock connections, each carrying one length-prefixed, sequence-numbered chunk of at most 4 KiB, guest to host only. The host reassembles chunks in order under a per-chunk cap and a total cap, and treats a gap, a duplicate, a length mismatch, or an over-cap chunk as a candidate fault, never an infrastructure retry. Forking the VMM crate was considered and rejected for now; reporting the defects upstream is the user's call; reassess only if chunking proves a bottleneck. One connection measured about 6 MiB/s in DIAG-01's instrumented runs; the chunked protocol's throughput is unmeasured until Phase 5.
 - GPU passthrough requires an IOMMU and a GPU the host does not use for display. Reset the device between runs.
 - Preflight fails closed and is enforced by the type system:
@@ -434,7 +440,7 @@ cargo build -p minos-guest --release --target aarch64-unknown-linux-musl   # the
 cargo build -p minos-vmm
 codesign --force --sign - --options runtime --entitlements crates/minos-vmm/minos-vmm.entitlements target/debug/minos-vmm   # after every build of minos-vmm
 codesign --display --entitlements - target/debug/minos-vmm   # must list com.apple.security.hypervisor
-cargo lambda build --release --arm64     # Lambda functions; plain cargo build links the wrong glibc
+cargo lambda build --release --arm64     # AWS milestone only; not used in v1
 ```
 
 Signing (02-CONTEXT.md D-11): every `cargo build` relinks `minos-vmm` and drops its entitlement, so the sequence is always build, then sign, then run. `cargo test --workspace` can relink it too, so re-sign before a VM run. There is no xtask, script, `build.rs`, or cargo alias; `minos host setup` may run the same argv from Rust later. The hardened runtime is on, and the entitlement set is `com.apple.security.hypervisor` plus `com.apple.security.cs.disable-library-validation`, because the hardened runtime's library validation refuses the Homebrew libkrunfw dylib ("mapping process and mapped file (non-platform) have different Team IDs"); `minos-vmm`'s preflight SHA-256 check of libkrunfw, before the `dlopen`, is the integrity check that remains (02-SPIKE-EVIDENCE.md K5). Only `minos-vmm` is signed; the `minos` CLI has no entitlement. A helper without the entitlement cannot create a VM: `hv_vm_create` fails and `minos-vmm` exits 70 before the VM starts (S04-UNSIGNED). The VM spikes are ignored integration tests: `cargo test -p minos-backend-krun --test <spike_boot|spike_exits|spike_net|spike_seatbelt|spike_rootimg> -- --ignored --nocapture --test-threads=1`, with `MINOS_VMM`, `MINOS_GUEST`, and `MINOS_KRUNFW` set as in 02-06-PLAN.md E-1 (`spike_net` also needs `MINOS_SPIKE_HOST_IP`).
@@ -449,6 +455,17 @@ The durable SDK requires Rust 1.94.1 or newer and edition 2024.
 
 ## Build order
 
+Milestone v1 is local-first, on macOS arm64 (02-CONTEXT.md D-07; `.planning/ROADMAP.md`):
+
+1. Workspace and gates: the plain cargo gate commands and Cargo-native policy.
+2. Platform spikes (libkrun boot, egress, vsock, signing, Seatbelt, root images, the `claude -p` contract), recorded in `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md`. In parallel: `minos-core` with its tests.
+3. `minos-store` (file and memory), `minos-sandbox`, and the deterministic source tarball.
+4. `minos-guest` and the krun backend (`minos-backend-krun`, `minos-vmm`), `minos env build`, and `minos host doctor`. In parallel: `minos-propose` with the seeded sweep and the `claude` CLI provider.
+5. `minos-runner` and `minos-loop`, the loop built against fakes first.
+6. The CLI and the sample `optimize` project end to end, including `report` and `adopt`.
+
+Later milestone (AWS). The original build order, kept for when that work starts (02-CONTEXT.md D-08):
+
 1. A durable function in Rust, pinned by `rev`, with one step and one callback. Count the real operations it records.
 2. A Lambda MicroVM launched with no egress connector and no execution role, running `minos-guest`, that takes a job and returns output. This settles the two most important open questions.
 3. `minos-core` with its tests.
@@ -461,6 +478,18 @@ The durable SDK requires Rust 1.94.1 or newer and edition 2024.
 
 Unverified. Each needs a test or a doc check before code depends on it.
 
+- How the console cap should work in Phase 5: the launcher's watchdog polls the console file and overshot a 262144-byte cap by 30000 to 48954 bytes (02-SPIKE-EVIDENCE.md K7-04, K7-11); a custom console backend could cap exactly, if it can serve as the kernel console.
+- Whether to keep the default virtio-rng device (`virtio0:0x0004`, attached by default; S01-FRAME).
+- libkrunfw is hashed and then loaded by path; Phase 5 decides whether to copy it into a private directory first to close that gap.
+- How the helper starts as the dedicated `_minos` user: a sudoers rule pinned to the helper path, or a LaunchDaemon (S05-RECIPE).
+- Whether `--permission-prompts none` and `--permission-mode dontAsk` behave differently when a permission request occurs; no call made one with tools off (SPIKE-07 contract, C-08).
+- Whether `claude` writes a session directory without `--no-session-persistence`; there was no control call (SPIKE-07 contract, C-14).
+- Whether the Seatbelt profile's starting allowances can be narrowed: rows 1 to 6 of the SPIKE-05 answer table were not minimized one by one, and only the socket rule was shown to be needed (SPIKE-05 answer).
+- The cost of the chunked vsock output protocol: one connection per 4 KiB chunk, so 64 MiB takes 16384 connections, and the supervisor has handled only two connections per run so far (S03-ANSWER).
+- Launch rate and memory per VM for concurrent candidates (K8; deferred with NEXT-04).
+
+### Deferred to the AWS milestone
+
 - Can a MicroVM be launched with no egress connector at all? The API lists egress connectors as a parameter and the docs show a launch without one, but this has not been tested. If not, candidates must run on the user's own hardware.
 - Can a MicroVM run with no execution role, or a role with zero permissions?
 - Exact builder method names in `aws-sdk-lambdamicrovms`.
@@ -468,7 +497,21 @@ Unverified. Each needs a test or a doc check before code depends on it.
 - Whether EC2 GPU instance types support nested virtualization. The design assumes they do not.
 - Whether MicroVM and Bedrock rates are available from the AWS price list API. Until checked, `prices.toml` is edited by hand.
 
-## Verified facts (as of 2026-10-08)
+## Verified facts, local (as of 2026-10-10)
+
+Each fact cites `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md`.
+
+- libkrunfw 5.6.2 from `libkrun/krun`; guest kernel 6.12.109; `CONFIG_BLK_DEV_INITRD` unset (H-01, H-02, S01-CMDLINE).
+- msb_krun 0.1.41 boots it on macOS 27 arm64 from crates under `forbid(unsafe_code)`, from a raw read-only SquashFS root with no initramfs and no virtio-fs (S01-ROOTDISK); the initramfs form fails (S01-INITRAMFS).
+- A helper without the hypervisor entitlement cannot create a VM: `hv_vm_create` fails and `minos-vmm` exits 70 before the VM starts. The ad-hoc signed helper with the hardened runtime and the entitlements `com.apple.security.hypervisor` and `com.apple.security.cs.disable-library-validation` boots (S04-UNSIGNED, S04-SIGN, K5).
+- Guest egress fails to loopback, the LAN, and public IPv4 and IPv6, and no host canary sees a connection (S02-EGRESS).
+- One vsock connection delivers any guest-to-host stream of 8192 bytes or less intact. Above that, the pinned `msb_krun_devices` 0.1.41 loses data or stalls the guest, for three defects in that crate, so the 1 MiB, 4 MiB, and 64 MiB single-connection tests fail; by the user's decision, output is carried as short chunked connections (S03-WITHIN, S03-OVER, K4-THROUGHPUT, DIAG-01, S03-ANSWER).
+- Seatbelt: a deny-default profile around `minos-vmm` still lets it create and run a VM, `hv_vm_create` needs no hypervisor-specific rule, and the same profile denies an outbound TCP connection and an unlisted file (SPIKE-05 answer, S05-BOOT, S05-DENY-NET, S05-DENY-FILE).
+- A digest-pinned Dockerfile becomes a bootable root image through Docker buildx and the Rust packer (RI-03, S06-BOOT).
+- The helper's exit code does not carry the guest's result (K7 table).
+- `claude` 2.1.296 under subscription login returns `structured_output` with all tools off, `--json-schema`, `--no-session-persistence`, an empty directory, and the six-variable environment; `num_turns` is 2 under `--max-turns 1` with a schema, because structured output goes through the `StructuredOutput` tool; `usage` carries `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, and `cache_read_input_tokens`, among other fields (SPIKE-07 contract).
+
+## Verified facts, AWS (as of 2026-10-08)
 
 - Durable execution SDK: [aws/aws-durable-execution-sdk-rust](https://github.com/aws/aws-durable-execution-sdk-rust). Experimental preview, installed as a git dependency. Operations: `step`, `wait`, `invoke`, `run_in_child_context`, `with_retry`, `wait_for_condition`, `create_callback`, `wait_for_callback`, `map`, `parallel`, and four combinators. The function's role needs `lambda:CheckpointDurableExecution` and `lambda:GetDurableExecutionState`.
 - MicroVM API: [RunMicrovm reference](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_RunMicrovm.html) and [running MicroVMs](https://docs.aws.amazon.com/lambda/latest/dg/microvms-launching.html). Images are built from a Dockerfile into a snapshot. Lifecycle hooks are HTTP paths under `/aws/lambda-microvms/runtime/v1/` (`ready`, `run`, `resume`, `suspend`, `terminate`).
