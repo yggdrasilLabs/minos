@@ -21,7 +21,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Why the watchdog stopped the VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Trip {
-    /// `max_duration_ms` elapsed.
+    /// `max_duration_ms` elapsed since `main` entry.
     Deadline,
     /// The console file passed `console.cap_bytes`.
     ConsoleCap,
@@ -96,9 +96,10 @@ fn console_len(path: &std::path::Path) -> u64 {
     fs::metadata(path).map_or(0, |metadata| metadata.len())
 }
 
-/// Starts the watchdog thread. The clock is read now, just before `enter`; `parent` is the parent PID `main`
-/// recorded before doing anything else, so a parent that exits while the config is read, the kernel is hashed, or
-/// the VM is built is still caught (DEFECT-01).
+/// Starts the watchdog thread. `parent` and `started` are the parent PID and the instant `main` recorded before
+/// doing anything else, so a parent that exits while the config is read, the kernel is hashed, or the VM is built
+/// is still caught (DEFECT-01), and the deadline counts that time too: `max_duration_ms` bounds the helper's whole
+/// lifetime, not only the VM's run time, so it stays one clock with the parent's host deadline (IN-04).
 ///
 /// The thread is detached: it ends when it trips, or with the process when the VM exits first.
 ///
@@ -110,14 +111,14 @@ pub fn spawn(
     exit_code: Arc<AtomicI32>,
     limits: Limits,
     parent: u32,
+    started: Instant,
 ) -> io::Result<()> {
-    let start = Instant::now();
     thread::Builder::new()
         .name("minos-vmm-watchdog".to_owned())
         .spawn(move || {
             let trip = loop {
                 thread::sleep(POLL_INTERVAL);
-                if let Some(trip) = limits.tripped(start, parent) {
+                if let Some(trip) = limits.tripped(started, parent) {
                     break trip;
                 }
             };
@@ -155,6 +156,21 @@ mod tests {
     fn watchdog_trips_on_deadline() {
         let tripped = limits(Duration::ZERO, 1).tripped(Instant::now(), parent_id());
         assert_eq!(tripped, Some(Trip::Deadline));
+    }
+
+    /// The deadline is measured from the instant `main` recorded, not from when the thread started, so time
+    /// already spent before `spawn` counts against it.
+    #[test]
+    fn watchdog_deadline_counts_from_the_recorded_start() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(2))
+            .ok_or("the monotonic clock has not run for two seconds")?;
+        let tripped = limits(Duration::from_secs(1), 1).tripped(started, parent_id());
+        assert_eq!(tripped, Some(Trip::Deadline));
+        let tripped = limits(Duration::from_hours(1), 1).tripped(started, parent_id());
+        assert_eq!(tripped, None);
+        Ok(())
     }
 
     #[test]

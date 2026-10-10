@@ -285,7 +285,7 @@ impl VmmConfig {
         self.console_cap_bytes
     }
 
-    /// Hard maximum run time, after which the watchdog stops the VM.
+    /// Hard maximum lifetime of the launcher, counted from `main` entry, after which the watchdog stops the VM.
     pub fn max_duration(&self) -> Duration {
         self.max_duration
     }

@@ -32,6 +32,7 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use crate::config::{ConfigError, MAX_CONFIG_BYTES, VmmConfig};
 use crate::preflight::PreflightError;
@@ -105,10 +106,12 @@ impl LaunchError {
 }
 
 fn main() -> ExitCode {
-    // First statement, before argument parsing, the config read, preflight, or the VM build: a parent that exits
-    // during any of those must still trip the watchdog (DEFECT-01).
+    // First statements, before argument parsing, the config read, preflight, or the VM build: a parent that exits
+    // during any of those must still trip the watchdog (DEFECT-01), and `max_duration_ms` counts from here, so it
+    // bounds the helper's whole lifetime rather than the VM's run time alone (IN-04).
     let parent = std::os::unix::process::parent_id();
-    match run(parent) {
+    let started = Instant::now();
+    match run(parent, started) {
         Ok(never) => match never {},
         Err(LaunchError::Usage) => {
             say(format_args!("{USAGE}"));
@@ -121,9 +124,9 @@ fn main() -> ExitCode {
     }
 }
 
-/// Everything up to and including `enter`, which never returns on success. `parent` is the parent PID recorded at
-/// `main` entry.
-fn run(parent: u32) -> Result<Infallible, LaunchError> {
+/// Everything up to and including `enter`, which never returns on success. `parent` and `started` are the parent
+/// PID and the instant recorded at `main` entry.
+fn run(parent: u32, started: Instant) -> Result<Infallible, LaunchError> {
     let path = config_path()?;
     let config = read_config(path)?;
     preflight::check(&config).map_err(LaunchError::Preflight)?;
@@ -136,6 +139,7 @@ fn run(parent: u32) -> Result<Infallible, LaunchError> {
         exit_code,
         watchdog::Limits::from_config(&config),
         parent,
+        started,
     )
     .map_err(LaunchError::Watchdog)?;
     vm.enter().map_err(LaunchError::Enter)
