@@ -14,6 +14,7 @@
 //! | 66 | preflight: a named file missing, not canonical, or the wrong type; scratch over its cap; console path exists; a forbidden environment variable |
 //! | 67 | libkrunfw or initramfs SHA-256 does not match the config |
 //! | 70 | `msb_krun` refused to build or start the VM before takeover |
+//! | 71 | the watchdog thread could not be started (a host thread or memory limit), so the VM was never entered |
 //! | 124, 125, 126 | watchdog: deadline, console cap, parent gone |
 //!
 //! A guest exit code is never visible here: with no virtio-fs device the guest has no way to set one, so the
@@ -45,6 +46,8 @@ const EXIT_PREFLIGHT: u8 = 66;
 const EXIT_HASH: u8 = 67;
 /// `msb_krun` refused to build or start the VM before takeover.
 const EXIT_VMM: u8 = 70;
+/// The watchdog thread could not be started, so the VM was never entered.
+const EXIT_WATCHDOG: u8 = 71;
 
 /// The usage line printed for exit code 64.
 const USAGE: &str = "minos-vmm: usage: minos-vmm <config.json>";
@@ -95,7 +98,8 @@ impl LaunchError {
             Self::Read { .. } | Self::Config { .. } => EXIT_CONFIG,
             Self::Preflight(PreflightError::Hash { .. }) => EXIT_HASH,
             Self::Preflight(_) => EXIT_PREFLIGHT,
-            Self::Build(_) | Self::Watchdog(_) | Self::Enter(_) => EXIT_VMM,
+            Self::Build(_) | Self::Enter(_) => EXIT_VMM,
+            Self::Watchdog(_) => EXIT_WATCHDOG,
         }
     }
 }
@@ -179,4 +183,58 @@ fn say(line: fmt::Arguments<'_>) {
     let mut stderr = io::stderr().lock();
     let written = writeln!(stderr, "{line}").and_then(|()| stderr.flush());
     drop(written);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::PathBuf;
+
+    use super::{EXIT_CONFIG, EXIT_HASH, EXIT_PREFLIGHT, EXIT_USAGE, EXIT_WATCHDOG, LaunchError};
+    use crate::config::ConfigError;
+    use crate::preflight::PreflightError;
+
+    /// Every pre-takeover failure the launcher can build without `msb_krun` maps to its documented code, and
+    /// the watchdog spawn failure has its own, distinct from the 70 reserved for `msb_krun`.
+    #[test]
+    fn launch_error_codes_match_the_table() {
+        assert_eq!(LaunchError::Usage.exit_code(), EXIT_USAGE);
+        assert_eq!(
+            LaunchError::Read {
+                path: PathBuf::from("/private/tmp/mns00000000/vmm.json"),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            }
+            .exit_code(),
+            EXIT_CONFIG
+        );
+        assert_eq!(
+            LaunchError::Config {
+                path: PathBuf::from("/private/tmp/mns00000000/vmm.json"),
+                source: ConfigError::TooLarge,
+            }
+            .exit_code(),
+            EXIT_CONFIG
+        );
+        assert_eq!(
+            LaunchError::Preflight(PreflightError::Hash {
+                field: "kernel.krunfw",
+                path: PathBuf::from("/opt/homebrew/lib/libkrunfw.5.dylib"),
+                expected: "00".repeat(32),
+                actual: "ff".repeat(32),
+            })
+            .exit_code(),
+            EXIT_HASH
+        );
+        assert_eq!(
+            LaunchError::Preflight(PreflightError::ConsoleExists {
+                path: PathBuf::from("/private/tmp/mns00000000/console.log"),
+            })
+            .exit_code(),
+            EXIT_PREFLIGHT
+        );
+        let watchdog = LaunchError::Watchdog(io::Error::from(io::ErrorKind::WouldBlock));
+        assert_eq!(watchdog.exit_code(), EXIT_WATCHDOG);
+        assert_eq!(EXIT_WATCHDOG, 71);
+        assert_ne!(EXIT_WATCHDOG, super::EXIT_VMM);
+    }
 }
