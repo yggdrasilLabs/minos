@@ -21,7 +21,7 @@ pub const CONFIG_VERSION: u32 = 1;
 pub const MAX_PATH_BYTES: usize = 1024;
 /// Longest vsock socket path, in bytes: the macOS `sun_path` holds 104 bytes including the NUL.
 pub const MAX_SOCKET_PATH_BYTES: usize = 103;
-/// Largest vsock port. `u32::MAX` is `VMADDR_PORT_ANY`, and msb_krun refuses both 0 and `u32::MAX`.
+/// Largest vsock port. `u32::MAX` is `VMADDR_PORT_ANY`, and `msb_krun` refuses both 0 and `u32::MAX`.
 pub const MAX_VSOCK_PORT: u32 = 4_294_967_294;
 /// Largest scratch disk cap, in bytes (16 GiB).
 pub const MAX_SCRATCH_CAP_BYTES: u64 = 17_179_869_184;
@@ -108,7 +108,9 @@ impl fmt::Display for PathReason {
             Self::Nul => f.write_str("contains a NUL byte"),
             Self::TooLong { max } => write!(f, "is longer than {max} bytes"),
             Self::NotAbsolute => f.write_str("is not an absolute path"),
-            Self::NotNormal => f.write_str("must be `/` followed by plain names (no empty, `.`, or `..` component)"),
+            Self::NotNormal => f.write_str(
+                "must be `/` followed by plain names (no empty, `.`, or `..` component)",
+            ),
         }
     }
 }
@@ -196,7 +198,7 @@ pub struct RawMachine {
 
 /// How the guest kernel finds `/init`.
 pub enum Boot {
-    /// The raw read-only SquashFS root on `/dev/vda` holds `/init` (D-18).
+    /// The raw read-only `SquashFS` root on `/dev/vda` holds `/init` (D-18).
     RootDisk,
     /// A newc initramfs is attached; recorded as negative evidence only (D-18).
     Initramfs {
@@ -318,9 +320,169 @@ pub fn parse(bytes: &[u8]) -> Result<VmmConfig, ConfigError> {
 impl TryFrom<RawVmmConfig> for VmmConfig {
     type Error = ConfigError;
 
+    /// Applies every E-2 rule. This is the only way to build a [`VmmConfig`], from serde or by hand.
     fn try_from(raw: RawVmmConfig) -> Result<Self, ConfigError> {
-        Err(ConfigError::Version(raw.v))
+        if raw.v != CONFIG_VERSION {
+            return Err(ConfigError::Version(raw.v));
+        }
+
+        let mut paths = PathSet::default();
+        paths.add("kernel.krunfw", &raw.kernel.krunfw, MAX_PATH_BYTES)?;
+        let krunfw_sha256 = sha256("kernel.sha256", &raw.kernel.sha256)?;
+        let boot = match raw.boot {
+            RawBoot::RootDisk => Boot::RootDisk,
+            RawBoot::Initramfs(initramfs) => {
+                paths.add("boot.initramfs.path", &initramfs.path, MAX_PATH_BYTES)?;
+                let sha256 = sha256("boot.initramfs.sha256", &initramfs.sha256)?;
+                Boot::Initramfs {
+                    path: initramfs.path,
+                    sha256,
+                }
+            }
+        };
+        paths.add("disks.root", &raw.disks.root, MAX_PATH_BYTES)?;
+        paths.add("disks.input", &raw.disks.input, MAX_PATH_BYTES)?;
+        paths.add(
+            "disks.scratch.path",
+            &raw.disks.scratch.path,
+            MAX_PATH_BYTES,
+        )?;
+        paths.add("vsock.socket", &raw.vsock.socket, MAX_SOCKET_PATH_BYTES)?;
+        paths.add("console.path", &raw.console.path, MAX_PATH_BYTES)?;
+
+        let scratch_cap_bytes = in_range(
+            "disks.scratch.cap_bytes",
+            raw.disks.scratch.cap_bytes,
+            1,
+            MAX_SCRATCH_CAP_BYTES,
+        )?;
+        let vsock_port = in_range(
+            "vsock.port",
+            u64::from(raw.vsock.port),
+            1,
+            u64::from(MAX_VSOCK_PORT),
+        )?;
+        let console_cap_bytes = in_range(
+            "console.cap_bytes",
+            raw.console.cap_bytes,
+            1,
+            MAX_CONSOLE_CAP_BYTES,
+        )?;
+        let max_duration_ms: u64 =
+            in_range("max_duration_ms", raw.max_duration_ms, 1, MAX_DURATION_MS)?;
+        let vcpus = in_range(
+            "machine.vcpus",
+            u64::from(raw.machine.vcpus),
+            1,
+            u64::from(MAX_VCPUS),
+        )?;
+        let memory_mib = in_range(
+            "machine.memory_mib",
+            u64::from(raw.machine.memory_mib),
+            u64::from(MIN_MEMORY_MIB),
+            u64::from(MAX_MEMORY_MIB),
+        )?;
+
+        Ok(Self {
+            krunfw: raw.kernel.krunfw,
+            krunfw_sha256,
+            boot,
+            root: raw.disks.root,
+            input: raw.disks.input,
+            scratch: raw.disks.scratch.path,
+            scratch_cap_bytes,
+            vsock_port,
+            socket: raw.vsock.socket,
+            console: raw.console.path,
+            console_cap_bytes,
+            max_duration: Duration::from_millis(max_duration_ms),
+            vcpus,
+            memory_mib,
+        })
     }
+}
+
+/// Every path field seen so far, keyed by path, so a second field naming the same path is refused.
+#[derive(Default)]
+struct PathSet {
+    seen: BTreeMap<PathBuf, &'static str>,
+}
+
+impl PathSet {
+    /// Checks one path field against the path rules and against every field added before it.
+    fn add(&mut self, field: &'static str, path: &Path, max: usize) -> Result<(), ConfigError> {
+        check_path(field, path, max)?;
+        match self.seen.insert(path.to_path_buf(), field) {
+            Some(first) => Err(ConfigError::DuplicatePath {
+                first,
+                second: field,
+            }),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Absolute, every component after the root a plain name, no NUL, at most `max` bytes.
+fn check_path(field: &'static str, path: &Path, max: usize) -> Result<(), ConfigError> {
+    let fail = |reason| ConfigError::Path { field, reason };
+    let bytes = path.as_os_str().as_bytes();
+    if bytes.contains(&0) {
+        return Err(fail(PathReason::Nul));
+    }
+    if bytes.len() > max {
+        return Err(fail(PathReason::TooLong { max }));
+    }
+    let mut components = path.components();
+    let Some(rest) = bytes.strip_prefix(b"/") else {
+        return Err(fail(PathReason::NotAbsolute));
+    };
+    if components.next() != Some(Component::RootDir) {
+        return Err(fail(PathReason::NotAbsolute));
+    }
+    // `Path::components` silently drops `.`, empty, and trailing segments, so the bytes are walked as well:
+    // the configured text must already be in the form the preflight compares against `canonicalize`.
+    let plain_segments = rest
+        .split(|byte| *byte == b'/')
+        .all(|segment| !segment.is_empty() && segment != b"." && segment != b"..");
+    let plain_components = components.all(|component| matches!(component, Component::Normal(_)));
+    if plain_segments && plain_components {
+        Ok(())
+    } else {
+        Err(fail(PathReason::NotNormal))
+    }
+}
+
+/// Decodes a digest written as exactly 64 lowercase hex characters.
+fn sha256(field: &'static str, text: &str) -> Result<[u8; 32], ConfigError> {
+    let lower_hex = text.len() == SHA256_HEX_LEN
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+    let mut digest = [0_u8; 32];
+    if lower_hex && base16ct::lower::decode(text, &mut digest).is_ok() {
+        Ok(digest)
+    } else {
+        Err(ConfigError::Sha256 { field })
+    }
+}
+
+/// Checks `min <= value <= max` and narrows the value to the field's stored type.
+fn in_range<T: TryFrom<u64>>(
+    field: &'static str,
+    value: u64,
+    min: u64,
+    max: u64,
+) -> Result<T, ConfigError> {
+    let out_of_range = ConfigError::OutOfRange {
+        field,
+        value,
+        min,
+        max,
+    };
+    if !(min..=max).contains(&value) {
+        return Err(out_of_range);
+    }
+    T::try_from(value).map_err(|_| out_of_range)
 }
 
 #[cfg(test)]
@@ -402,15 +564,30 @@ mod tests {
         );
         assert_eq!(config.krunfw_sha256().first(), Some(&0x01));
         assert_eq!(config.krunfw_sha256().last(), Some(&0xef));
-        assert_eq!(config.root(), Path::new("/private/tmp/mns00000000/root.img"));
-        assert_eq!(config.input(), Path::new("/private/tmp/mns00000000/input.img"));
-        assert_eq!(config.scratch(), Path::new("/private/tmp/mns00000000/scratch.img"));
+        assert_eq!(
+            config.root(),
+            Path::new("/private/tmp/mns00000000/root.img")
+        );
+        assert_eq!(
+            config.input(),
+            Path::new("/private/tmp/mns00000000/input.img")
+        );
+        assert_eq!(
+            config.scratch(),
+            Path::new("/private/tmp/mns00000000/scratch.img")
+        );
         assert_eq!(config.scratch_cap_bytes(), 67_108_864);
         assert_eq!(config.vsock_port(), 1024);
-        assert_eq!(config.socket(), Path::new("/private/tmp/mns00000000/o.sock"));
-        assert_eq!(config.console(), Path::new("/private/tmp/mns00000000/console.log"));
+        assert_eq!(
+            config.socket(),
+            Path::new("/private/tmp/mns00000000/o.sock")
+        );
+        assert_eq!(
+            config.console(),
+            Path::new("/private/tmp/mns00000000/console.log")
+        );
         assert_eq!(config.console_cap_bytes(), 1_048_576);
-        assert_eq!(config.max_duration(), Duration::from_secs(60));
+        assert_eq!(config.max_duration(), Duration::from_mins(1));
         assert_eq!(config.vcpus(), 1);
         assert_eq!(config.memory_mib(), 256);
         Ok(())
@@ -474,7 +651,12 @@ mod tests {
 
     #[test]
     fn config_rejects_relative_path() -> TestResult {
-        assert_path_rule(ROOT_PATH, r#""private/tmp/root.img""#, "disks.root", PathReason::NotAbsolute)
+        assert_path_rule(
+            ROOT_PATH,
+            r#""private/tmp/root.img""#,
+            "disks.root",
+            PathReason::NotAbsolute,
+        )
     }
 
     #[test]
@@ -499,8 +681,18 @@ mod tests {
 
     #[test]
     fn config_rejects_empty_component_and_trailing_slash() -> TestResult {
-        assert_path_rule(ROOT_PATH, r#""/private//tmp/root.img""#, "disks.root", PathReason::NotNormal)?;
-        assert_path_rule(ROOT_PATH, r#""/private/tmp/root.img/""#, "disks.root", PathReason::NotNormal)?;
+        assert_path_rule(
+            ROOT_PATH,
+            r#""/private//tmp/root.img""#,
+            "disks.root",
+            PathReason::NotNormal,
+        )?;
+        assert_path_rule(
+            ROOT_PATH,
+            r#""/private/tmp/root.img/""#,
+            "disks.root",
+            PathReason::NotNormal,
+        )?;
         assert_path_rule(ROOT_PATH, r#""/""#, "disks.root", PathReason::NotNormal)
     }
 
@@ -517,7 +709,12 @@ mod tests {
     #[test]
     fn config_rejects_1025_byte_path() -> TestResult {
         let long = format!(r#""/{}""#, "a".repeat(1024));
-        assert_path_rule(ROOT_PATH, &long, "disks.root", PathReason::TooLong { max: 1024 })
+        assert_path_rule(
+            ROOT_PATH,
+            &long,
+            "disks.root",
+            PathReason::TooLong { max: 1024 },
+        )
     }
 
     #[test]
@@ -530,7 +727,12 @@ mod tests {
     #[test]
     fn config_rejects_104_byte_socket_path() -> TestResult {
         let long = format!(r#""/{}""#, "s".repeat(103));
-        assert_path_rule(SOCKET_PATH, &long, "vsock.socket", PathReason::TooLong { max: 103 })
+        assert_path_rule(
+            SOCKET_PATH,
+            &long,
+            "vsock.socket",
+            PathReason::TooLong { max: 103 },
+        )
     }
 
     #[test]
@@ -550,7 +752,10 @@ mod tests {
         assert!(
             matches!(
                 error,
-                ConfigError::DuplicatePath { first: "disks.root", second: "disks.input" }
+                ConfigError::DuplicatePath {
+                    first: "disks.root",
+                    second: "disks.input"
+                }
             ),
             "got: {error}"
         );
@@ -559,12 +764,19 @@ mod tests {
 
     #[test]
     fn config_rejects_initramfs_path_equal_to_root() -> TestResult {
-        let text = edit(&initramfs_text()?, r#""/private/tmp/mns00000000/initramfs.cpio""#, ROOT_PATH)?;
+        let text = edit(
+            &initramfs_text()?,
+            r#""/private/tmp/mns00000000/initramfs.cpio""#,
+            ROOT_PATH,
+        )?;
         let error = rejected(&text)?;
         assert!(
             matches!(
                 error,
-                ConfigError::DuplicatePath { first: "boot.initramfs.path", second: "disks.root" }
+                ConfigError::DuplicatePath {
+                    first: "boot.initramfs.path",
+                    second: "disks.root"
+                }
             ),
             "got: {error}"
         );
@@ -575,7 +787,12 @@ mod tests {
     fn config_rejects_63_char_sha256() -> TestResult {
         let error = rejected(&edit(E1, r#"abcdef"}"#, r#"abcde"}"#)?)?;
         assert!(
-            matches!(error, ConfigError::Sha256 { field: "kernel.sha256" }),
+            matches!(
+                error,
+                ConfigError::Sha256 {
+                    field: "kernel.sha256"
+                }
+            ),
             "got: {error}"
         );
         Ok(())
@@ -589,7 +806,12 @@ mod tests {
             r#""sha256":"0123456789ABCDEF"#,
         )?)?;
         assert!(
-            matches!(error, ConfigError::Sha256 { field: "kernel.sha256" }),
+            matches!(
+                error,
+                ConfigError::Sha256 {
+                    field: "kernel.sha256"
+                }
+            ),
             "got: {error}"
         );
         Ok(())
@@ -600,7 +822,12 @@ mod tests {
         let text = edit(&initramfs_text()?, "fedcba", "FEDCBA")?;
         let error = rejected(&text)?;
         assert!(
-            matches!(error, ConfigError::Sha256 { field: "boot.initramfs.sha256" }),
+            matches!(
+                error,
+                ConfigError::Sha256 {
+                    field: "boot.initramfs.sha256"
+                }
+            ),
             "got: {error}"
         );
         Ok(())
@@ -618,7 +845,11 @@ mod tests {
 
     #[test]
     fn config_rejects_scratch_cap_0() -> TestResult {
-        assert_out_of_range(r#""cap_bytes":67108864"#, r#""cap_bytes":0"#, "disks.scratch.cap_bytes")
+        assert_out_of_range(
+            r#""cap_bytes":67108864"#,
+            r#""cap_bytes":0"#,
+            "disks.scratch.cap_bytes",
+        )
     }
 
     #[test]
@@ -632,17 +863,29 @@ mod tests {
 
     #[test]
     fn config_rejects_console_cap_0() -> TestResult {
-        assert_out_of_range(r#""cap_bytes":1048576"#, r#""cap_bytes":0"#, "console.cap_bytes")
+        assert_out_of_range(
+            r#""cap_bytes":1048576"#,
+            r#""cap_bytes":0"#,
+            "console.cap_bytes",
+        )
     }
 
     #[test]
     fn config_rejects_console_cap_over_64_mib() -> TestResult {
-        assert_out_of_range(r#""cap_bytes":1048576"#, r#""cap_bytes":67108865"#, "console.cap_bytes")
+        assert_out_of_range(
+            r#""cap_bytes":1048576"#,
+            r#""cap_bytes":67108865"#,
+            "console.cap_bytes",
+        )
     }
 
     #[test]
     fn config_rejects_max_duration_0() -> TestResult {
-        assert_out_of_range(r#""max_duration_ms":60000"#, r#""max_duration_ms":0"#, "max_duration_ms")
+        assert_out_of_range(
+            r#""max_duration_ms":60000"#,
+            r#""max_duration_ms":0"#,
+            "max_duration_ms",
+        )
     }
 
     #[test]
@@ -666,12 +909,20 @@ mod tests {
 
     #[test]
     fn config_rejects_memory_127_mib() -> TestResult {
-        assert_out_of_range(r#""memory_mib":256"#, r#""memory_mib":127"#, "machine.memory_mib")
+        assert_out_of_range(
+            r#""memory_mib":256"#,
+            r#""memory_mib":127"#,
+            "machine.memory_mib",
+        )
     }
 
     #[test]
     fn config_rejects_memory_16385_mib() -> TestResult {
-        assert_out_of_range(r#""memory_mib":256"#, r#""memory_mib":16385"#, "machine.memory_mib")
+        assert_out_of_range(
+            r#""memory_mib":256"#,
+            r#""memory_mib":16385"#,
+            "machine.memory_mib",
+        )
     }
 
     #[test]
