@@ -97,7 +97,10 @@ pub const VMM_STDERR_FILE: &str = "vmm.stderr";
 pub const INITRAMFS_FILE: &str = "initramfs.cpio";
 
 const CODESIGN: &str = "/usr/bin/codesign";
-const ENTITLED_XML: &[u8] = b"<key>com.apple.security.hypervisor</key><true/>";
+/// The entitlement key as `codesign --xml` prints it; [`entitled`] requires `<true/>` after it.
+const ENTITLED_KEY: &[u8] = b"<key>com.apple.security.hypervisor</key>";
+/// The plist boolean that must follow [`ENTITLED_KEY`].
+const ENTITLED_TRUE: &[u8] = b"<true/>";
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Least time a connection gets to deliver bytes already queued, even after the host deadline has passed.
 const MIN_READ_WINDOW: Duration = Duration::from_millis(50);
@@ -437,10 +440,19 @@ pub fn has_hypervisor_entitlement(vmm: &Path) -> Result<bool, SuperviseError> {
     Ok(entitled(&output))
 }
 
-/// Whether codesign's XML entitlements set the hypervisor key to true.
+/// Whether codesign's XML entitlements set the hypervisor key to true: the key element followed, after any
+/// ASCII whitespace, by `<true/>`. codesign prints the two byte-adjacent today; a plist writer that breaks the
+/// line or indents must not make a correctly signed helper read as unentitled.
 fn entitled(xml: &[u8]) -> bool {
-    xml.windows(ENTITLED_XML.len())
-        .any(|window| window == ENTITLED_XML)
+    xml.windows(ENTITLED_KEY.len())
+        .enumerate()
+        .filter(|(_, window)| *window == ENTITLED_KEY)
+        .any(|(at, _)| {
+            xml.get(at.saturating_add(ENTITLED_KEY.len())..)
+                .unwrap_or_default()
+                .trim_ascii_start()
+                .starts_with(ENTITLED_TRUE)
+        })
 }
 
 /// One helper launch: the argv, the job's files, the pre-bound listener, and the host-side limits.
@@ -1207,6 +1219,27 @@ mod tests {
         let key = "<key>com.apple.security.hypervisor</key>";
         assert!(entitled(format!("<dict>{key}<true/></dict>").as_bytes()));
         assert!(!entitled(format!("<dict>{key}<false/></dict>").as_bytes()));
+        // Whitespace between the key and its value is layout, not meaning (IN-03).
+        assert!(entitled(
+            format!("<dict>\n\t{key}\n\t<true/>\n</dict>").as_bytes()
+        ));
+        assert!(entitled(format!("<dict>{key} <true/></dict>").as_bytes()));
+        assert!(entitled(
+            format!("<dict>{key}\r\n    <true/></dict>").as_bytes()
+        ));
+        assert!(!entitled(
+            format!("<dict>{key}\n\t<false/>\n</dict>").as_bytes()
+        ));
+        assert!(!entitled(
+            format!("<dict>{key}\n<string>true</string></dict>").as_bytes()
+        ));
+        // A later key set to true does not entitle an earlier one that is not.
+        assert!(!entitled(
+            format!("<dict>{key}<false/><key>other</key><true/></dict>").as_bytes()
+        ));
+        // The key at the very end of the output, with nothing after it.
+        assert!(!entitled(key.as_bytes()));
+        assert!(!entitled(format!("{key}\n").as_bytes()));
         assert!(!entitled(
             b"<dict><key>com.apple.security.hypervisor.extra</key><true/></dict>"
         ));
