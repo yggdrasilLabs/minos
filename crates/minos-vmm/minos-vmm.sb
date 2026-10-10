@@ -1,0 +1,15 @@
+(version 1)
+(deny default)
+; Seatbelt profile for one minos-vmm helper (SPIKE-05). Every path arrives as a canonical -D parameter.
+; Allowances below the starting set are added only from logged denials, each with a comment.
+(allow process-exec (literal (param "VMM")))
+(allow file-read* (literal "/") (subpath "/usr/lib") (subpath "/System/Library")
+                  (subpath "/private/var/db/dyld") (literal "/dev/null") (literal "/dev/urandom"))
+(allow file-read* (literal (param "VMM")) (literal (param "CONFIG"))
+                  (literal (param "KRUNFW")) (literal (param "KRUNFW_LINK"))
+                  (literal (param "ROOT_IMG")) (literal (param "INPUT_IMG")))
+(allow file-read* file-write* (literal (param "SCRATCH_IMG")) (literal (param "CONSOLE_LOG")))
+; AF_UNIX connect to the vsock route socket is a network-outbound operation (02-RESEARCH.md Pitfall 4).
+(allow network-outbound (literal (param "SOCK")))
+(allow sysctl-read (sysctl-name "hw.pagesize") (sysctl-name "hw.ncpu") (sysctl-name "hw.memsize")
+                   (sysctl-name-prefix "hw.optional.arm.") (sysctl-name-prefix "kern.proc.pid."))
