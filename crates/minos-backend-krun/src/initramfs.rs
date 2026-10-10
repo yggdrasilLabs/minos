@@ -25,14 +25,89 @@ pub enum InitramfsError {
 ///
 /// [`InitramfsError::TooLarge`] when `init` is longer than 0xFFFFFFFF bytes.
 pub fn initramfs_image(init: &[u8]) -> Result<Vec<u8>, InitramfsError> {
-    let _unused = init;
-    Ok(Vec::new())
+    let mut out = Vec::with_capacity(init.len().saturating_add(1024));
+    push_record(
+        &mut out,
+        Record {
+            ino: 1,
+            mode: INIT_MODE,
+            filesize: file_size_field(init.len())?,
+            name: b"init\0",
+        },
+    );
+    out.extend_from_slice(init);
+    pad_to(&mut out, 4);
+    push_record(
+        &mut out,
+        Record {
+            ino: 0,
+            mode: 0,
+            filesize: 0,
+            name: b"TRAILER!!!\0",
+        },
+    );
+    pad_to(&mut out, ARCHIVE_ALIGN);
+    Ok(out)
+}
+
+/// The newc magic: ASCII cpio with no checksum.
+const MAGIC: &[u8; 6] = b"070701";
+
+/// A regular file (0o100000) with permissions 0o755.
+const INIT_MODE: u32 = 0o100_755;
+
+/// The archive is zero-padded to whole 512-byte blocks.
+const ARCHIVE_ALIGN: usize = 512;
+
+/// The fields that differ between the two records. Every other field is fixed: uid 0, gid 0,
+/// nlink 1, mtime 0, device numbers 0, check 0.
+#[derive(Clone, Copy)]
+struct Record<'a> {
+    ino: u32,
+    mode: u32,
+    filesize: u32,
+    /// The name with its terminating NUL.
+    name: &'a [u8],
+}
+
+/// Writes one 110-byte header and the name, padded so header plus name ends on a 4-byte boundary.
+fn push_record(out: &mut Vec<u8>, record: Record<'_>) {
+    // A name is one of two short literals, so its length always fits.
+    let namesize = u32::try_from(record.name.len()).unwrap_or(u32::MAX);
+    out.extend_from_slice(MAGIC);
+    for field in [
+        record.ino,
+        record.mode,
+        0, // uid
+        0, // gid
+        1, // nlink
+        0, // mtime
+        record.filesize,
+        0, // devmajor
+        0, // devminor
+        0, // rdevmajor
+        0, // rdevminor
+        namesize,
+        0, // check
+    ] {
+        out.extend_from_slice(format!("{field:08X}").as_bytes());
+    }
+    out.extend_from_slice(record.name);
+    pad_to(out, 4);
+}
+
+/// Zero-pads `out` to a multiple of `align`. Every record starts on a 4-byte boundary, so absolute
+/// alignment is the same as alignment within the record.
+fn pad_to(out: &mut Vec<u8>, align: usize) {
+    let rem = out.len() % align;
+    if rem != 0 {
+        out.resize(out.len() + (align - rem), 0);
+    }
 }
 
 /// The newc file size field for `len` bytes.
 fn file_size_field(len: usize) -> Result<u32, InitramfsError> {
-    let _unused = len;
-    Ok(0)
+    u32::try_from(len).map_err(|_| InitramfsError::TooLarge { size: len })
 }
 
 #[cfg(test)]
@@ -51,7 +126,9 @@ mod tests {
     }
 
     fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|window| window == needle)
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
     }
 
     #[test]
@@ -80,7 +157,7 @@ mod tests {
         let image = initramfs_image(b"hello")?;
         assert_eq!(
             sha256_hex(&image),
-            "0000000000000000000000000000000000000000000000000000000000000000"
+            "6b2629df82fc94f9798c3853a508935c6a448a7e48fabd58e4e730a99148ad1a"
         );
         Ok(())
     }
@@ -101,10 +178,7 @@ mod tests {
             file_size_field(too_big),
             Err(InitramfsError::TooLarge { size }) if size == too_big
         ));
-        assert_eq!(
-            file_size_field(usize::try_from(u32::MAX)?)?,
-            u32::MAX
-        );
+        assert_eq!(file_size_field(usize::try_from(u32::MAX)?)?, u32::MAX);
         Ok(())
     }
 
@@ -116,9 +190,11 @@ mod tests {
             std::env::var_os("MINOS_GUEST"),
             std::env::var_os("MINOS_SPIKE_OUT"),
         ) else {
-            return Err("set MINOS_GUEST to the release musl guest binary and MINOS_SPIKE_OUT to \
+            return Err(
+                "set MINOS_GUEST to the release musl guest binary and MINOS_SPIKE_OUT to \
                         the output file (under the session scratch directory)"
-                .into());
+                    .into(),
+            );
         };
         let image = initramfs_image(&std::fs::read(guest)?)?;
         std::fs::write(out, &image)?;
