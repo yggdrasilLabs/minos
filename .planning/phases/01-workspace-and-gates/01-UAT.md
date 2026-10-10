@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 01-workspace-and-gates
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md]
 started: 2026-10-09T23:11:56Z
-updated: 2026-10-09T23:48:08Z
+updated: 2026-10-10T00:21:28Z
 ---
 
 ## Current Test
@@ -114,7 +114,7 @@ blocked: 0
 ## Gaps
 
 - truth: "minos-cli can parse arguments under the clippy gate, and the stack of record (.claude/CLAUDE.md) names an API that passes it (F-01: clap derive fails under forbid)"
-  status: failed
+  status: resolved
   reason: "User reported: a (minos-cli uses the clap builder API; correct the stack doc)"
   severity: major
   test: 6
