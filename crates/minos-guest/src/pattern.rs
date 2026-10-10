@@ -10,13 +10,17 @@ pub const PATTERN_MODULUS: u64 = 251;
 /// Byte `index` of the pattern.
 #[must_use]
 pub fn pattern_byte(index: u64) -> u8 {
-    let _ = index;
-    0
+    // index % 251 is at most 250, so the conversion never fails; the fallback only avoids a panic path.
+    u8::try_from(index % PATTERN_MODULUS).unwrap_or(0)
 }
 
 /// Fills `buf` with the pattern bytes starting at pattern position `offset`.
+///
+/// Positions past `u64::MAX` do not exist, so bytes beyond that point are left unchanged rather than wrapping.
 pub fn fill_pattern(offset: u64, buf: &mut [u8]) {
-    let _ = (offset, buf);
+    for (byte, index) in buf.iter_mut().zip(offset..=u64::MAX) {
+        *byte = pattern_byte(index);
+    }
 }
 
 #[cfg(test)]
@@ -41,7 +45,10 @@ mod tests {
             let mut buf = vec![0xAA_u8; 1000];
             fill_pattern(offset, &mut buf);
             for (i, byte) in (0_u64..).zip(&buf) {
-                assert_eq!(*byte, pattern_byte(offset.checked_add(i).ok_or("overflow")?));
+                assert_eq!(
+                    *byte,
+                    pattern_byte(offset.checked_add(i).ok_or("overflow")?)
+                );
             }
         }
         Ok(())

@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 
-use crate::{BOOT_MARKER, MAX_FRAME_BYTES, PROTOCOL_VERSION};
+use crate::{BOOT_MARKER, HEADER_LEN, MAX_FRAME_BYTES, PROTOCOL_VERSION};
 
 /// Magic bytes at the start of the status-frame header.
 pub const FRAME_MAGIC: [u8; 8] = *b"MINOSST1";
@@ -219,8 +219,17 @@ pub struct ConsoleFloodResult {
 /// Returns [`FrameError::Json`] if serialization fails, and [`FrameError::TooLarge`] if the JSON is longer
 /// than [`MAX_FRAME_BYTES`].
 pub fn encode_frame(report: &Report) -> Result<Vec<u8>, FrameError> {
-    let _ = report;
-    Ok(Vec::new())
+    let json = serde_json::to_vec(report).map_err(FrameError::Json)?;
+    let length = u64::try_from(json.len()).map_err(|_| FrameError::TooLarge(u64::MAX))?;
+    if length > MAX_FRAME_BYTES {
+        return Err(FrameError::TooLarge(length));
+    }
+    let mut frame = Vec::with_capacity(HEADER_LEN.saturating_add(json.len()));
+    frame.extend_from_slice(&FRAME_MAGIC);
+    frame.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(&json);
+    Ok(frame)
 }
 
 #[cfg(test)]

@@ -107,8 +107,36 @@ impl InvalidField {
 /// Returns [`JobError`] for a bad magic, an unsupported version, a declared length over [`MAX_JOB_BYTES`],
 /// a payload shorter than declared, an I/O failure, malformed or unknown JSON, or a field out of range.
 pub fn read_job(reader: &mut impl Read) -> Result<Job, JobError> {
-    let _ = reader;
-    Err(JobError::Io(std::io::Error::other("read_job is not implemented yet")))
+    let mut magic = [0_u8; 8];
+    let mut version = [0_u8; 4];
+    let mut length = [0_u8; 8];
+    reader.read_exact(&mut magic).map_err(JobError::Io)?;
+    reader.read_exact(&mut version).map_err(JobError::Io)?;
+    reader.read_exact(&mut length).map_err(JobError::Io)?;
+    if magic != JOB_MAGIC {
+        return Err(JobError::BadMagic { found: magic });
+    }
+    let version = u32::from_be_bytes(version);
+    if version != PROTOCOL_VERSION {
+        return Err(JobError::UnsupportedVersion(version));
+    }
+    let declared = u64::from_be_bytes(length);
+    if declared > MAX_JOB_BYTES {
+        return Err(JobError::TooLarge(declared));
+    }
+    // declared <= MAX_JOB_BYTES (1 MiB), so the conversion cannot fail on any supported target.
+    let capacity = usize::try_from(declared).map_err(|_| JobError::TooLarge(declared))?;
+    let mut payload = Vec::with_capacity(capacity);
+    reader
+        .take(declared)
+        .read_to_end(&mut payload)
+        .map_err(JobError::Io)?;
+    let read = u64::try_from(payload.len()).map_err(|_| JobError::TooLarge(declared))?;
+    if read != declared {
+        return Err(JobError::Truncated { declared, read });
+    }
+    let raw: RawJob = serde_json::from_slice(&payload).map_err(JobError::Json)?;
+    Ok(Job::try_from(raw)?)
 }
 
 /// What the guest does after the last step.
@@ -288,7 +316,10 @@ impl TryFrom<RawConnect> for Connect {
 
     fn try_from(raw: RawConnect) -> Result<Self, Self::Error> {
         if !(1..=MAX_CONNECT_TARGETS).contains(&raw.targets.len()) {
-            return Err(InvalidField::new("steps.connect.targets", "1 to 16 entries"));
+            return Err(InvalidField::new(
+                "steps.connect.targets",
+                "1 to 16 entries",
+            ));
         }
         let targets = raw
             .targets
@@ -368,7 +399,10 @@ impl TryFrom<RawVsockStream> for VsockStream {
 
     fn try_from(raw: RawVsockStream) -> Result<Self, Self::Error> {
         if raw.bytes > MAX_VSOCK_STREAM_BYTES {
-            return Err(InvalidField::new("steps.vsock_stream.bytes", "0 to 1073741824"));
+            return Err(InvalidField::new(
+                "steps.vsock_stream.bytes",
+                "0 to 1073741824",
+            ));
         }
         Ok(Self { bytes: raw.bytes })
     }
@@ -400,7 +434,10 @@ impl TryFrom<RawScratchRoundtrip> for ScratchRoundtrip {
 
     fn try_from(raw: RawScratchRoundtrip) -> Result<Self, Self::Error> {
         if !(1..=MAX_SCRATCH_BYTES).contains(&raw.bytes) {
-            return Err(InvalidField::new("steps.scratch_roundtrip.bytes", "1 to 67108864"));
+            return Err(InvalidField::new(
+                "steps.scratch_roundtrip.bytes",
+                "1 to 67108864",
+            ));
         }
         Ok(Self { bytes: raw.bytes })
     }
@@ -473,7 +510,10 @@ impl TryFrom<RawRun> for Run {
             .next()
             .ok_or(InvalidField::new("steps.run.argv", "1 to 64 entries"))?;
         if !program.starts_with('/') {
-            return Err(InvalidField::new("steps.run.argv", "led by an absolute path"));
+            return Err(InvalidField::new(
+                "steps.run.argv",
+                "led by an absolute path",
+            ));
         }
         if !(1..=MAX_STDOUT_CAP).contains(&raw.stdout_cap) {
             return Err(InvalidField::new("steps.run.stdout_cap", "1 to 1048576"));
@@ -512,7 +552,10 @@ impl TryFrom<RawConsoleFlood> for ConsoleFlood {
 
     fn try_from(raw: RawConsoleFlood) -> Result<Self, Self::Error> {
         if !(1..=MAX_CONSOLE_FLOOD_BYTES).contains(&raw.bytes) {
-            return Err(InvalidField::new("steps.console_flood.bytes", "1 to 1073741824"));
+            return Err(InvalidField::new(
+                "steps.console_flood.bytes",
+                "1 to 1073741824",
+            ));
         }
         Ok(Self { bytes: raw.bytes })
     }
@@ -545,7 +588,7 @@ mod tests {
     /// The canonical job JSON from 02-01-PLAN.md Exact texts E-9.
     const CANONICAL: &str = r#"{"v":1,"vsock_port":1024,"steps":[{"report_boot":{}},{"scratch_roundtrip":{"bytes":65536}}],"finish":"poweroff"}"#;
 
-    fn header(magic: &[u8; 8], version: u32, len: u64) -> Vec<u8> {
+    fn header(magic: [u8; 8], version: u32, len: u64) -> Vec<u8> {
         let mut out = magic.to_vec();
         out.extend_from_slice(&version.to_be_bytes());
         out.extend_from_slice(&len.to_be_bytes());
@@ -553,7 +596,7 @@ mod tests {
     }
 
     fn framed(json: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let mut out = header(b"MINOSJB1", 1, u64::try_from(json.len())?);
+        let mut out = header(*b"MINOSJB1", 1, u64::try_from(json.len())?);
         out.extend_from_slice(json.as_bytes());
         // Disk padding after the payload must be ignored.
         out.extend_from_slice(&[0_u8; 64]);
@@ -591,17 +634,20 @@ mod tests {
     #[test]
     fn golden_header_for_two_byte_payload() -> TestResult {
         let golden = test_hex::decode("4d494e4f534a42310000000100000000000000027b7d")?;
-        let mut built = header(b"MINOSJB1", 1, 2);
+        let mut built = header(*b"MINOSJB1", 1, 2);
         built.extend_from_slice(b"{}");
         assert_eq!(built, golden);
         // The header is accepted; the empty object then fails as JSON (missing fields), not as a header.
-        assert!(matches!(read_job(&mut golden.as_slice()), Err(JobError::Json(_))));
+        assert!(matches!(
+            read_job(&mut golden.as_slice()),
+            Err(JobError::Json(_))
+        ));
         Ok(())
     }
 
     #[test]
     fn rejects_wrong_magic() {
-        let bytes = header(b"MINOSJB2", 1, 2);
+        let bytes = header(*b"MINOSJB2", 1, 2);
         assert!(matches!(
             read_job(&mut bytes.as_slice()),
             Err(JobError::BadMagic { found }) if &found == b"MINOSJB2"
@@ -610,7 +656,7 @@ mod tests {
 
     #[test]
     fn rejects_version_two_header() {
-        let bytes = header(b"MINOSJB1", 2, 2);
+        let bytes = header(*b"MINOSJB1", 2, 2);
         assert!(matches!(
             read_job(&mut bytes.as_slice()),
             Err(JobError::UnsupportedVersion(2))
@@ -620,7 +666,7 @@ mod tests {
     #[test]
     fn rejects_length_over_cap_before_reading() {
         // No payload follows: the cap must fire before any payload byte is read.
-        let bytes = header(b"MINOSJB1", 1, 1_048_577);
+        let bytes = header(*b"MINOSJB1", 1, 1_048_577);
         assert!(matches!(
             read_job(&mut bytes.as_slice()),
             Err(JobError::TooLarge(1_048_577))
@@ -629,7 +675,7 @@ mod tests {
 
     #[test]
     fn rejects_payload_shorter_than_declared() {
-        let mut bytes = header(b"MINOSJB1", 1, 100);
+        let mut bytes = header(*b"MINOSJB1", 1, 100);
         bytes.extend_from_slice(b"{\"v\":1}");
         assert!(matches!(
             read_job(&mut bytes.as_slice()),
@@ -642,7 +688,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_fields_at_every_level() -> TestResult {
-        let top = r#"{"v":1,"vsock_port":1024,"steps":[{"hang":{}}],"finish":"poweroff","extra":1}"#;
+        let top =
+            r#"{"v":1,"vsock_port":1024,"steps":[{"hang":{}}],"finish":"poweroff","extra":1}"#;
         assert!(matches!(parse(top)?, Err(JobError::Json(_))));
         let step = with_step(r#"{"scratch_roundtrip":{"bytes":1,"extra":1}}"#);
         assert!(matches!(parse(&step)?, Err(JobError::Json(_))));
