@@ -50,6 +50,10 @@ pub const FRAME_VERSION: u32 = 1;
 pub const FRAME_HEADER_BYTES: usize = 20;
 /// Largest status-frame payload the host accepts, whatever the caller asks for.
 pub const MAX_FRAME_BYTES: u64 = 1_048_576;
+/// Longest string value a decoded status frame may hold, in bytes, before sanitizing.
+pub const MAX_FRAME_STRING_BYTES: usize = 65_536;
+/// Longest object key a decoded status frame may hold, in bytes. Keys are field names, never free text.
+pub const MAX_FRAME_KEY_BYTES: usize = 64;
 
 /// Longest socket path the host binds: macOS `sun_path` is 104 bytes including the terminating NUL.
 pub const MAX_SOCKET_PATH_BYTES: usize = 103;
@@ -199,6 +203,12 @@ pub enum FrameError {
     /// The payload is JSON but not an object whose `v` is 1.
     #[error("status frame payload is not a JSON object with v = 1")]
     NotV1Object,
+    /// A string in the payload is longer than [`MAX_FRAME_STRING_BYTES`].
+    #[error("a status frame string exceeds {MAX_FRAME_STRING_BYTES} bytes")]
+    StringTooLong,
+    /// An object key in the payload is longer than [`MAX_FRAME_KEY_BYTES`] or is not entirely displayable.
+    #[error("a status frame object key is too long or not displayable")]
+    BadKey,
 }
 
 /// Makes a fresh job directory `/private/tmp/mnsXXXXXXXX` with mode 0700. Dropping the [`TempDir`] removes it.
@@ -762,13 +772,22 @@ impl GuestBytes {
     }
 
     /// Decodes a `MINOSST1` status frame whose payload is at most `max_bytes` (and never more than
-    /// [`MAX_FRAME_BYTES`]) into a JSON object whose `v` is 1.
+    /// [`MAX_FRAME_BYTES`]) into a sanitized JSON object whose `v` is 1.
+    ///
+    /// Every string value in the result has passed the [`GuestBytes::excerpt`] allowlist (controls and
+    /// invisible format characters removed) and was at most [`MAX_FRAME_STRING_BYTES`] long before that; every
+    /// object key is at most [`MAX_FRAME_KEY_BYTES`] bytes and already displayable. So the `Display` and `Debug`
+    /// of the returned value cannot carry a terminal escape or a bidi trick, and no field is unbounded.
+    ///
+    /// This JSON exit is for the Phase 2 spike evidence, which inspects fields by name. Phase 5 replaces it
+    /// with a closed, `deny_unknown_fields` report type shared with the guest through `minos-core`; nothing
+    /// outside the spike tests should grow a dependency on the loose shape.
     ///
     /// # Errors
     ///
     /// [`FrameError`] for a short header, a wrong magic or version, a declared length over the limit, an
-    /// overflowed connection, a payload that is not exactly the declared length, invalid JSON, or JSON that is
-    /// not an object with `v` = 1.
+    /// overflowed connection, a payload that is not exactly the declared length, invalid JSON, JSON that is
+    /// not an object with `v` = 1, a string over the cap, or a key that is over the cap or not displayable.
     pub fn status_frame(&self, max_bytes: u64) -> Result<serde_json::Value, FrameError> {
         let (magic, rest) = self
             .bytes
@@ -797,11 +816,42 @@ impl GuestBytes {
         }
         let value: serde_json::Value = serde_json::from_slice(payload).map_err(FrameError::Json)?;
         if value.is_object() && value.get("v").and_then(serde_json::Value::as_u64) == Some(1) {
-            Ok(value)
+            sanitize_json(value)
         } else {
             Err(FrameError::NotV1Object)
         }
     }
+}
+
+/// Rebuilds a decoded frame with every string passed through the display allowlist and every key checked.
+/// `serde_json` bounds the nesting depth at parse time (128), so the recursion is bounded too.
+fn sanitize_json(value: serde_json::Value) -> Result<serde_json::Value, FrameError> {
+    use serde_json::Value;
+    Ok(match value {
+        Value::String(text) => {
+            if text.len() > MAX_FRAME_STRING_BYTES {
+                return Err(FrameError::StringTooLong);
+            }
+            Value::String(text.chars().filter(|c| displayable(*c)).collect())
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(sanitize_json)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Object(fields) => {
+            let mut out = serde_json::Map::new();
+            for (key, field) in fields {
+                if key.len() > MAX_FRAME_KEY_BYTES || !key.chars().all(displayable) {
+                    return Err(FrameError::BadKey);
+                }
+                out.insert(key, sanitize_json(field)?);
+            }
+            Value::Object(out)
+        }
+        scalar @ (Value::Null | Value::Bool(_) | Value::Number(_)) => scalar,
+    })
 }
 
 /// The excerpt allowlist: newline, tab, and every character that is neither a control (`Cc`) nor an invisible
@@ -1447,6 +1497,62 @@ mod tests {
                 Err(FrameError::NotV1Object)
             ));
         }
+    }
+
+    fn framed(payload: &[u8]) -> Result<serde_json::Value, FrameError> {
+        let declared = u64::try_from(payload.len()).unwrap_or(u64::MAX);
+        guest(&frame(*b"MINOSST1", 1, declared, payload)).status_frame(MAX_FRAME_BYTES)
+    }
+
+    #[test]
+    fn supervise_status_frame_sanitizes_every_string() -> TestResult {
+        let payload = "{\"v\":1,\"steps\":[{\"run\":{\"stdout\":\"a\\u001b[31mb\\u202ec\\rd\\n\",\
+                       \"argv\":[\"/bin/\\u200bsh\",\"x\"],\"status\":0,\"error\":null}}]}";
+        let value = framed(payload.as_bytes())?;
+        let run = value
+            .get("steps")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("run"))
+            .ok_or("no run result")?;
+        assert_eq!(
+            run.get("stdout").and_then(serde_json::Value::as_str),
+            Some("a[31mbcd\n")
+        );
+        assert_eq!(
+            run.get("argv")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|argv| argv.first())
+                .and_then(serde_json::Value::as_str),
+            Some("/bin/sh")
+        );
+        assert_eq!(run.get("status"), Some(&serde_json::Value::from(0)));
+        assert!(!value.to_string().contains('\u{1b}'));
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_status_frame_rejects_over_cap_strings_and_bad_keys() {
+        let long = format!("{{\"v\":1,\"s\":\"{}\"}}", "x".repeat(65_537));
+        assert!(matches!(
+            framed(long.as_bytes()),
+            Err(FrameError::StringTooLong)
+        ));
+        let exact = format!("{{\"v\":1,\"s\":\"{}\"}}", "x".repeat(65_536));
+        assert!(framed(exact.as_bytes()).is_ok());
+        assert!(matches!(
+            framed(br#"{"v":1,"k\u001b":1}"#),
+            Err(FrameError::BadKey)
+        ));
+        let long_key = format!("{{\"v\":1,\"{}\":1}}", "k".repeat(65));
+        assert!(matches!(
+            framed(long_key.as_bytes()),
+            Err(FrameError::BadKey)
+        ));
+        assert!(matches!(
+            framed(b"{\"v\":1,\"nested\":[{\"k\\u202e\":1}]}"),
+            Err(FrameError::BadKey)
+        ));
     }
 
     #[test]
