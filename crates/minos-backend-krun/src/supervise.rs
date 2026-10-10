@@ -18,11 +18,18 @@
 //! truncated, and it is returned only as [`GuestBytes`], which has no `Debug`, `Display`, `Deref`, or `Clone`.
 //! The host never opens a disk image the guest could have written: the scratch image is created sparse with
 //! `set_len` and never read back.
+//!
+//! The helper's files are never re-opened by a path the helper could have replaced. The supervisor creates
+//! `vmm.stdout` and `vmm.stderr` itself and reads them back through its own handles. The console log is the one
+//! file the helper creates (minos-vmm's preflight requires it to be absent), so it is opened with `O_NOFOLLOW`
+//! and refused unless it is a regular file with exactly one link: a helper confined by Seatbelt may write that
+//! one path, and a symlink or hardlink planted there must not turn the unconfined supervisor into a reader of
+//! arbitrary host files.
 
 use std::ffi::OsString;
 use std::fs::{self, File, Permissions};
-use std::io::{self, ErrorKind, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
@@ -91,6 +98,13 @@ const MIN_READ_WINDOW: Duration = Duration::from_millis(50);
 const READ_CHUNK_BYTES: usize = 65_536;
 /// Pause between reads of a connection that has no bytes ready.
 const READ_POLL: Duration = Duration::from_millis(1);
+/// `O_NOFOLLOW` in the form `OpenOptionsExt::custom_flags` takes. The flag is a small positive number, so the
+/// reinterpretation is exact, and the assert keeps it so.
+const O_NOFOLLOW: i32 = {
+    let bits = rustix::fs::OFlags::NOFOLLOW.bits();
+    assert!(bits <= i32::MAX.unsigned_abs());
+    i32::from_ne_bytes(bits.to_ne_bytes())
+};
 
 /// Why the supervisor could not prepare or run a launch. A guest that misbehaves is not an error: its bytes come
 /// back capped in [`VmRun`], and a helper that outlives the deadline is killed and reported there.
@@ -136,6 +150,13 @@ pub enum SuperviseError {
     /// The host deadline is too far in the future for the monotonic clock.
     #[error("the host deadline overflows the clock")]
     DeadlineOverflow,
+    /// A file the helper writes is not a regular file with exactly one link, so it may point at something the
+    /// helper could not read itself. It is not read.
+    #[error("{} is not a plain regular file; the helper may have replaced it", .path.display())]
+    NotPlainFile {
+        /// The refused path.
+        path: PathBuf,
+    },
 }
 
 /// Why guest bytes are not a valid status frame. Messages never include guest text.
@@ -485,12 +506,15 @@ impl<'a> Launch<'a> {
 /// While the helper runs, the loop accepts a pending connection and reads it through its cap plus one byte (the
 /// read is bounded by the host deadline), else checks whether the helper exited, else checks the deadline, else
 /// sleeps 10 ms. At the deadline the helper is killed and reaped. After it exits, connections already pending are
-/// accepted once. The console, stdout, and stderr files are then read through their caps.
+/// accepted once. The console, stdout, and stderr files are then read through their caps: stdout and stderr
+/// through the handles this function created, the console through an `O_NOFOLLOW` open that refuses anything
+/// but a one-link regular file.
 ///
 /// # Errors
 ///
 /// [`SuperviseError::EmptyArgv`], [`SuperviseError::Spawn`], [`SuperviseError::DeadlineOverflow`], or
-/// [`SuperviseError::Io`] for a host-side failure. The helper is killed and reaped on every error path.
+/// [`SuperviseError::Io`] for a host-side failure, and [`SuperviseError::NotPlainFile`] if the console log is
+/// not a plain regular file. The helper is killed and reaped on every error path.
 pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
     let (program, args) = launch.argv.split_first().ok_or(SuperviseError::EmptyArgv)?;
     let files = launch.files;
@@ -503,6 +527,13 @@ pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
         File::create_new(files.vmm_stdout()).map_err(io_at("create", files.vmm_stdout()))?;
     let stderr =
         File::create_new(files.vmm_stderr()).map_err(io_at("create", files.vmm_stderr()))?;
+    // Read back through these, never by re-opening the path: the helper gets a descriptor, not a name.
+    let stdout_handle = stdout
+        .try_clone()
+        .map_err(io_at("duplicate the handle of", files.vmm_stdout()))?;
+    let stderr_handle = stderr
+        .try_clone()
+        .map_err(io_at("duplicate the handle of", files.vmm_stderr()))?;
     let program_path = Path::new(program);
     let start = Instant::now();
     let deadline = start
@@ -563,8 +594,8 @@ pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
         pid,
         connections,
         console: read_capped_file(files.console(), launch.console_cap)?,
-        vmm_stdout: read_capped_file(files.vmm_stdout(), VMM_STDIO_CAP)?,
-        vmm_stderr: read_capped_file(files.vmm_stderr(), VMM_STDIO_CAP)?,
+        vmm_stdout: read_capped_handle(stdout_handle, files.vmm_stdout(), VMM_STDIO_CAP)?,
+        vmm_stderr: read_capped_handle(stderr_handle, files.vmm_stderr(), VMM_STDIO_CAP)?,
     })
 }
 
@@ -846,15 +877,47 @@ fn read_connection(
     Ok(GuestBytes::capped(bytes, cap))
 }
 
-/// Reads a helper-written file through `cap + 1` bytes; a file the helper never created reads as empty.
+/// Reads a helper-created file through `cap + 1` bytes; a file the helper never created reads as empty.
+///
+/// The open does not follow a symlink, and the file is read only if the opened inode is a regular file with
+/// exactly one link, checked with `fstat` on the open descriptor so there is no window between the check and
+/// the read. A symlink or hardlink planted at `path` is refused as [`SuperviseError::NotPlainFile`].
 fn read_capped_file(path: &Path, cap: u64) -> Result<GuestBytes, SuperviseError> {
-    let file = match File::open(path) {
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)
+    {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => {
             return Ok(GuestBytes::capped(Vec::new(), cap));
         }
+        // `ELOOP`: `O_NOFOLLOW` met a symlink. `ErrorKind::FilesystemLoop` is not stable yet.
+        Err(error) if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) => {
+            return Err(SuperviseError::NotPlainFile {
+                path: path.to_path_buf(),
+            });
+        }
         Err(source) => return Err(io_at("open", path)(source)),
     };
+    let metadata = file.metadata().map_err(io_at("inspect", path))?;
+    if !metadata.file_type().is_file() || metadata.nlink() != 1 {
+        return Err(SuperviseError::NotPlainFile {
+            path: path.to_path_buf(),
+        });
+    }
+    read_capped(file, path, cap)
+}
+
+/// Reads a file the supervisor created itself back from the start, through `cap + 1` bytes. The handle shares
+/// its offset with the descriptor the helper wrote through, so it is rewound first.
+fn read_capped_handle(mut file: File, path: &Path, cap: u64) -> Result<GuestBytes, SuperviseError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(io_at("rewind", path))?;
+    read_capped(file, path, cap)
+}
+
+fn read_capped(file: File, path: &Path, cap: u64) -> Result<GuestBytes, SuperviseError> {
     let mut bytes = Vec::new();
     file.take(cap.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -881,6 +944,7 @@ fn io_at(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Supervi
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::ffi::OsStr;
     use std::fs;
     use std::io::{self, Write};
     use std::os::unix::fs::PermissionsExt;
@@ -1116,6 +1180,64 @@ mod tests {
         );
         assert_eq!(vm.exit_code(), Some(0));
         assert!(vm.vmm_stdout().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_reads_a_console_the_helper_wrote() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        let source = files.dir().join("source");
+        fs::write(&source, b"console text\n")?;
+        let vm = run(Launch::new(
+            [
+                OsStr::new("/bin/cp"),
+                source.as_os_str(),
+                files.console().as_os_str(),
+            ],
+            &files,
+            listener,
+        )
+        .host_deadline(GENEROUS))?;
+        assert_eq!(vm.exit_code(), Some(0));
+        assert_eq!(vm.console().len(), 13);
+        assert!(vm.console().contains(b"console text\n"));
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_refuses_a_console_symlink() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        let secret = files.dir().join("secret");
+        fs::write(&secret, b"host secret")?;
+        std::os::unix::fs::symlink(&secret, files.console())?;
+        assert!(matches!(
+            run(Launch::new(["/usr/bin/true"], &files, listener).host_deadline(GENEROUS)),
+            Err(SuperviseError::NotPlainFile { path }) if path == files.console()
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_refuses_a_console_hardlink() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        let secret = files.dir().join("secret");
+        fs::write(&secret, b"host secret")?;
+        fs::hard_link(&secret, files.console())?;
+        assert!(matches!(
+            run(Launch::new(["/usr/bin/true"], &files, listener).host_deadline(GENEROUS)),
+            Err(SuperviseError::NotPlainFile { path }) if path == files.console()
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_refuses_a_console_that_is_not_a_regular_file() -> TestResult {
+        let (_dir, files, listener) = prepared()?;
+        fs::create_dir(files.console())?;
+        assert!(matches!(
+            run(Launch::new(["/usr/bin/true"], &files, listener).host_deadline(GENEROUS)),
+            Err(SuperviseError::NotPlainFile { path }) if path == files.console()
+        ));
         Ok(())
     }
 
