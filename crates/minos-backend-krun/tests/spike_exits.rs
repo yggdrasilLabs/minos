@@ -96,6 +96,8 @@ const FLOOD_JOB: &str = r#"{"v":1,"vsock_port":1024,"steps":[{"report_boot":{}},
 const ORPHAN_CONFIG: &str = "MINOS_SPIKE_ORPHAN_CONFIG";
 /// The job directory `orphan_launcher` writes the helper's files into.
 const ORPHAN_DIR: &str = "MINOS_SPIKE_ORPHAN_DIR";
+/// Set (to anything) to make `orphan_launcher` return only after the guest's boot marker (K7-07b).
+const ORPHAN_WAIT_BOOT: &str = "MINOS_SPIKE_ORPHAN_WAIT_BOOT";
 /// File in the job directory holding the orphaned helper's PID.
 const PID_FILE: &str = "vmm.pid";
 
@@ -529,9 +531,17 @@ fn k7_02_init_returns() -> TestResult {
     );
     assert!(!run.killed_at_deadline());
     assert_eq!(frames(&run), 1, "the guest sent one frame before returning");
+    // E-2 expected `Attempted to kill init`. libkrunfw v5.6.2 patch 0001 ("krunfw: Don't panic when init dies")
+    // replaces that panic with `orderly_reboot()` unless VERBOSE_LIBKRUN is set, and patch 0002 makes the orderly
+    // reboot skip `run_cmd` and print the line below before `kernel_restart` (evidence/02-07.md K7-02).
     assert!(
-        run.console().contains(b"Attempted to kill init"),
-        "the console lacks the init-exit panic"
+        run.console()
+            .contains(b"reboot: Failed to start orderly reboot: forcing the issue"),
+        "the console lacks the orderly-reboot line"
+    );
+    assert!(
+        !run.console().contains(b"Attempted to kill init"),
+        "the kernel panicked on the init exit"
     );
     Ok(())
 }
@@ -645,13 +655,15 @@ fn k7_06_sigkill() -> TestResult {
     Ok(())
 }
 
-#[test]
-#[ignore = "needs a signed MINOS_VMM, MINOS_GUEST, MINOS_KRUNFW; see 02-06-PLAN.md E-1"]
-fn k7_07_parent_gone() -> TestResult {
+/// Orphans a helper through `orphan_launcher` and waits up to 15 s for it to go. With `wait_boot`, the
+/// intermediate returns only after the guest's boot marker, so the helper's watchdog is already running when the
+/// parent goes; without it, the intermediate returns as soon as the helper is spawned (E-1).
+fn orphan_scenario(label: &str, wait_boot: bool) -> TestResult {
     let vmm = signed_vmm()?;
     let (job, listener) = prepare(HANG_JOB, real_kernel()?, 60_000, CONSOLE_CAP_BYTES)?;
     let exe = std::env::current_exe()?;
-    let output = Command::new(&exe)
+    let mut intermediate = Command::new(&exe);
+    intermediate
         .args([
             "orphan_launcher",
             "--exact",
@@ -663,8 +675,11 @@ fn k7_07_parent_gone() -> TestResult {
         .env("MINOS_VMM", &vmm)
         .env(ORPHAN_CONFIG, job.files.config())
         .env(ORPHAN_DIR, job.files.dir())
-        .stdin(Stdio::null())
-        .output()?;
+        .stdin(Stdio::null());
+    if wait_boot {
+        intermediate.env(ORPHAN_WAIT_BOOT, "1");
+    }
+    let output = intermediate.output()?;
     let parent_exited = Instant::now();
     println!(
         "== intermediate (this test binary, orphan_launcher): status {}\n-- stdout:\n{}\n-- stderr:\n{}",
@@ -691,10 +706,13 @@ fn k7_07_parent_gone() -> TestResult {
         thread::sleep(POLL);
     };
     println!(
-        "== k7_07_parent_gone: helper pid {pid} gone after {gone_after:?} (limit {limit:?}), pending connections {}",
+        "== {label}: helper pid {pid} gone after {gone_after:?} (limit {limit:?}), pending connections {}",
         pending_connections(&listener)?
     );
-    print_files("k7_07_parent_gone", &job.files)?;
+    if gone_after.is_none() {
+        println!("ps at the limit: {}", ps_line(pid)?);
+    }
+    print_files(label, &job.files)?;
 
     assert!(
         gone_after.is_some(),
@@ -704,6 +722,20 @@ fn k7_07_parent_gone() -> TestResult {
     assert!(stderr_has(&job.files, "minos-vmm: watchdog parent-gone")?);
     assert!(stderr_has(&job.files, "minos-vmm: exit 126")?);
     Ok(())
+}
+
+#[test]
+#[ignore = "needs a signed MINOS_VMM, MINOS_GUEST, MINOS_KRUNFW; see 02-06-PLAN.md E-1"]
+fn k7_07_parent_gone() -> TestResult {
+    orphan_scenario("k7_07_parent_gone", false)
+}
+
+/// Diagnostic for K7-07 (evidence/02-07.md DEFECT-01): the same orphaning, but the parent goes only after the
+/// guest booted, so the watchdog has already recorded the real parent.
+#[test]
+#[ignore = "needs a signed MINOS_VMM, MINOS_GUEST, MINOS_KRUNFW; see 02-06-PLAN.md E-1"]
+fn k7_07b_parent_gone_after_boot() -> TestResult {
+    orphan_scenario("k7_07b_parent_gone_after_boot", true)
 }
 
 #[test]
@@ -812,8 +844,21 @@ fn orphan_launcher() -> TestResult {
         .spawn()?;
     let pid = child.id();
     File::create_new(dir.join(PID_FILE))?.write_all(pid.to_string().as_bytes())?;
+    if std::env::var_os(ORPHAN_WAIT_BOOT).is_some() {
+        let start = Instant::now();
+        let console = dir.join(supervise::CONSOLE_FILE);
+        while !read_capped(&console, CONSOLE_CAP_BYTES)?
+            .is_some_and(|bytes| contains(&bytes, BOOT_MARKER))
+        {
+            if start.elapsed() >= BOOT_WAIT {
+                return Err("no boot marker within 30 s".into());
+            }
+            thread::sleep(POLL);
+        }
+        println!("orphan_launcher: boot marker after {:?}", start.elapsed());
+    }
     println!(
-        "orphan_launcher: pid {} spawned minos-vmm pid {pid}; returning without waiting",
+        "orphan_launcher: pid {} spawned minos-vmm pid {pid}; returning without waiting for it to exit",
         std::process::id()
     );
     Ok(())
