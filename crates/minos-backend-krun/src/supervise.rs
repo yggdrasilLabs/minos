@@ -145,6 +145,14 @@ pub enum SuperviseError {
     /// The launch argv has no program.
     #[error("the launch argv is empty")]
     EmptyArgv,
+    /// The launch argv names its program by a relative path. `Command` resolves one through the supervisor's own
+    /// `PATH`, even with the child's environment cleared, so it would run whatever a writable directory earlier
+    /// in the user's `PATH` provides.
+    #[error("the launch program {} is not an absolute path", .program.display())]
+    RelativeProgram {
+        /// The refused program.
+        program: PathBuf,
+    },
     /// The helper could not be started.
     #[error("could not spawn {}", .program.display())]
     Spawn {
@@ -488,7 +496,8 @@ impl<'a> Launch<'a> {
     /// A launch of `argv` (program first) for the job in `files`, collecting output from `listener`.
     ///
     /// `argv` is the full command: `[vmm, config]` for a plain launch, or a `sandbox-exec` prefix (02-09). It is
-    /// passed to the program as separate arguments, never through a shell.
+    /// passed to the program as separate arguments, never through a shell, and [`run`] refuses a program that is
+    /// not an absolute path.
     #[must_use]
     pub fn new<I, S>(argv: I, files: &'a JobFiles, listener: UnixListener) -> Self
     where
@@ -578,12 +587,18 @@ impl<'a> Launch<'a> {
 ///
 /// # Errors
 ///
-/// [`SuperviseError::EmptyArgv`], [`SuperviseError::DeadlineTooShort`], [`SuperviseError::Spawn`],
-/// [`SuperviseError::DeadlineOverflow`], or [`SuperviseError::Io`] for a host-side failure, and
-/// [`SuperviseError::NotPlainFile`] if the console log is not a plain regular file. The helper is killed and
-/// reaped on every error path.
+/// [`SuperviseError::EmptyArgv`], [`SuperviseError::RelativeProgram`], [`SuperviseError::DeadlineTooShort`],
+/// [`SuperviseError::Spawn`], [`SuperviseError::DeadlineOverflow`], or [`SuperviseError::Io`] for a host-side
+/// failure, and [`SuperviseError::NotPlainFile`] if the console log is not a plain regular file. The helper is
+/// killed and reaped on every error path.
 pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
     let (program, args) = launch.argv.split_first().ok_or(SuperviseError::EmptyArgv)?;
+    let program_path = Path::new(program);
+    if !program_path.is_absolute() {
+        return Err(SuperviseError::RelativeProgram {
+            program: program_path.to_path_buf(),
+        });
+    }
     if let Some(max_duration) = launch.max_duration
         && launch.host_deadline <= max_duration
     {
@@ -609,7 +624,6 @@ pub fn run(launch: Launch<'_>) -> Result<VmRun, SuperviseError> {
     let stderr_handle = stderr
         .try_clone()
         .map_err(io_at("duplicate the handle of", files.vmm_stderr()))?;
-    let program_path = Path::new(program);
     let start = Instant::now();
     let deadline = start
         .checked_add(launch.host_deadline)
@@ -1524,6 +1538,24 @@ mod tests {
             run(Launch::new(empty, &files, listener)),
             Err(SuperviseError::EmptyArgv)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn supervise_run_refuses_a_relative_program() -> TestResult {
+        for program in ["true", "bin/true", "./true", "../usr/bin/true"] {
+            let (_dir, files, listener) = prepared()?;
+            assert!(
+                matches!(
+                    run(Launch::new([program, "--version"], &files, listener)),
+                    Err(SuperviseError::RelativeProgram { program: got }) if got == Path::new(program)
+                ),
+                "{program} must be refused"
+            );
+            // Refused before anything was created for the helper.
+            assert!(!files.vmm_stdout().exists());
+            assert!(!files.vmm_stderr().exists());
+        }
         Ok(())
     }
 
