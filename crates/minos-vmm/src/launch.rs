@@ -24,6 +24,13 @@ pub const ROOT_DISK_CMDLINE: &str = "rootfstype=squashfs ro ignore_loglevel dumm
 
 /// `init=` value in root-disk mode. `msb_krun` writes `root=/dev/root init=<this>`, so `root=/dev/vda` lands after
 /// its `root=/dev/root`, and Linux keeps the last `root=` (02-RESEARCH.md Pattern 1).
+///
+/// This rides on two facts about the pinned `msb_krun` 0.1.41 (`api/vm.rs`, `build_kernel_cmdline`): the init
+/// path is formatted unquoted as `init={init}`, and it comes after the user cmdline. A release that validated
+/// or encoded the path, or moved `init=` earlier, would boot every VM against `root=/dev/root` with
+/// `rootfstype=squashfs` and fail. The unit tests below mirror that assembly so the gate sees our side of it;
+/// the fact itself is proven only by the VM spike `spike_boot::boot_root_disk` (02-SPIKE-EVIDENCE.md
+/// S01-CMDLINE), which must be re-run by hand whenever the `msb_krun` pin moves.
 pub const ROOT_DISK_INIT: &str = "/init root=/dev/vda";
 
 /// Kernel arguments appended in initramfs mode, the negative-evidence run (D-18).
@@ -60,5 +67,60 @@ fn kernel_for(kernel: KernelBuilder, config: &VmmConfig) -> KernelBuilder {
     match config.boot() {
         Boot::RootDisk => kernel.cmdline(ROOT_DISK_CMDLINE).init_path(ROOT_DISK_INIT),
         Boot::Initramfs { path, .. } => kernel.cmdline(INITRAMFS_CMDLINE).initramfs_path(path),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ROOT_DISK_CMDLINE, ROOT_DISK_INIT};
+
+    /// `msb_krun_vmm` 0.1.41 `DEFAULT_KERNEL_CMDLINE` for a non-x86 host (`vmm_config/kernel_cmdline.rs`).
+    const MSB_KRUN_DEFAULT_CMDLINE: &str = "reboot=k panic=-1 panic_print=0 nomodule console=hvc0 rootfstype=virtiofs rw quiet no-kvmapf";
+
+    /// The prolog exactly as `msb_krun` 0.1.41 `Vm::build_kernel_cmdline` formats it with no debug override:
+    /// `"{default} {user_cmdline} root=/dev/root init={init}"`. Its `KRUN_*` environment and `-- args` epilog
+    /// follow the prolog and carry no `root=` or `init=`.
+    fn prolog() -> String {
+        format!(
+            "{MSB_KRUN_DEFAULT_CMDLINE} {ROOT_DISK_CMDLINE} root=/dev/root init={ROOT_DISK_INIT}"
+        )
+    }
+
+    #[test]
+    fn launch_root_disk_init_puts_root_vda_last() {
+        let prolog = prolog();
+        let tokens: Vec<&str> = prolog.split_whitespace().collect();
+        let last = |prefix: &str| {
+            tokens
+                .iter()
+                .rev()
+                .find(|token| token.starts_with(prefix))
+                .copied()
+        };
+        assert_eq!(last("root="), Some("root=/dev/vda"));
+        assert_eq!(last("rootfstype="), Some("rootfstype=squashfs"));
+        assert!(tokens.contains(&"init=/init"));
+        assert!(tokens.contains(&"ro"));
+        assert!(tokens.contains(&"dummy.numdummies=0"));
+        // `rw` from the default precedes our `ro`; Linux keeps the last of the pair.
+        let position = |token: &str| tokens.iter().position(|found| *found == token);
+        assert!(position("rw") < position("ro"));
+    }
+
+    #[test]
+    fn launch_root_disk_init_is_exactly_init_and_one_root() {
+        // One space splits the smuggled `root=` into its own kernel parameter; nothing else rides along.
+        assert_eq!(
+            ROOT_DISK_INIT.split_whitespace().collect::<Vec<_>>(),
+            ["/init", "root=/dev/vda"]
+        );
+        assert!(ROOT_DISK_INIT.starts_with("/init "));
+        // A `root=` in the cmdline would be overridden by msb_krun's `root=/dev/root`; only the init smuggle works.
+        assert!(
+            !ROOT_DISK_CMDLINE
+                .split_whitespace()
+                .any(|token| token.starts_with("root=") || token.starts_with("init=")),
+            "root= and init= belong in ROOT_DISK_INIT, where they land after msb_krun's own"
+        );
     }
 }
