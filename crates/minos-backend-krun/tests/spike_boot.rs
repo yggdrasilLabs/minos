@@ -59,7 +59,8 @@ const CANONICAL_JOB: &str = r#"{"v":1,"vsock_port":1024,"steps":[{"report_boot":
 /// The guest's `/proc/cmdline` in root-disk mode, split on ASCII whitespace, with the boot-time value
 /// normalized. Assembled by `msb_krun` 0.1.41 `build_kernel_cmdline` as the aarch64 `DEFAULT_KERNEL_CMDLINE`, then
 /// minos-vmm's `cmdline`, then `root=/dev/root init=` plus minos-vmm's `init_path`, then the `KRUN_*` variables,
-/// then ` -- ` and the (empty) arguments.
+/// then ` -- ` and the (empty) arguments. `dummy.numdummies=0` is minos-vmm's own token: it stops the built-in
+/// dummy driver from creating `dummy0` (evidence/02-06.md S01-NETIFACES, user decision).
 const EXPECTED_CMDLINE: &[&str] = &[
     "reboot=k",
     "panic=-1",
@@ -73,6 +74,7 @@ const EXPECTED_CMDLINE: &[&str] = &[
     "rootfstype=squashfs",
     "ro",
     "ignore_loglevel",
+    "dummy.numdummies=0",
     "root=/dev/root",
     "init=/init",
     "root=/dev/vda",
@@ -370,6 +372,10 @@ fn boot_root_disk() -> TestResult {
     assert!(
         !devices.iter().any(|device| device.ends_with(":0x001a")),
         "a virtio-fs device (id 0x001a) is present"
+    );
+    assert!(
+        !devices.iter().any(|device| device.ends_with(":0x0001")),
+        "a virtio-net device (id 0x0001) is present"
     );
 
     let env = boot
