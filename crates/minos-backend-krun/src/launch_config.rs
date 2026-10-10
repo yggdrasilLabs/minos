@@ -55,7 +55,7 @@ impl LaunchConfig {
     ///
     /// Returns the [`serde_json::Error`] if a path is not valid UTF-8.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        Ok(String::new())
+        serde_json::to_string(self)
     }
 }
 
@@ -236,7 +236,10 @@ mod tests {
     #[test]
     fn launch_config_initramfs_serializes_to_e1_with_e1b() -> TestResult {
         let expected = E1.replacen(r#""boot":"root_disk""#, &format!(r#""boot":{E1B}"#), 1);
-        assert_ne!(expected, E1, "the E-1 boot value must be present to substitute");
+        assert_ne!(
+            expected, E1,
+            "the E-1 boot value must be present to substitute"
+        );
         let boot = Boot::initramfs(
             "/private/tmp/mns00000000/initramfs.cpio",
             "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",

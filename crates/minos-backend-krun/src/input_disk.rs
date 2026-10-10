@@ -37,8 +37,25 @@ pub enum InputDiskError {
 ///
 /// [`InputDiskError::TooLarge`] when `job_json` is longer than [`MAX_JOB_BYTES`].
 pub fn input_disk_image(job_json: &[u8]) -> Result<Vec<u8>, InputDiskError> {
-    let _ = (job_json, HEADER_LEN);
-    Ok(Vec::new())
+    let too_large = || InputDiskError::TooLarge {
+        size: job_json.len(),
+    };
+    let length = u64::try_from(job_json.len()).map_err(|_| too_large())?;
+    if length > MAX_JOB_BYTES {
+        return Err(too_large());
+    }
+    // length <= MAX_JOB_BYTES (1 MiB), so neither the sum nor the rounding can overflow; checked anyway.
+    let total = HEADER_LEN
+        .checked_add(job_json.len())
+        .and_then(|used| used.checked_next_multiple_of(SECTOR_BYTES))
+        .ok_or_else(too_large)?;
+    let mut image = Vec::with_capacity(total);
+    image.extend_from_slice(&JOB_MAGIC);
+    image.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    image.extend_from_slice(&length.to_be_bytes());
+    image.extend_from_slice(job_json);
+    image.resize(total, 0);
+    Ok(image)
 }
 
 #[cfg(test)]
@@ -64,7 +81,10 @@ mod tests {
     }
 
     fn declared_length(image: &[u8]) -> Result<u64, Box<dyn Error>> {
-        let field: [u8; 8] = image.get(12..20).ok_or("image shorter than the header")?.try_into()?;
+        let field: [u8; 8] = image
+            .get(12..20)
+            .ok_or("image shorter than the header")?
+            .try_into()?;
         Ok(u64::from_be_bytes(field))
     }
 
@@ -73,7 +93,13 @@ mod tests {
         let image = input_disk_image(b"{}")?;
         assert_eq!(image.len(), SECTOR_BYTES);
         assert_eq!(image.get(..22), Some(hex(E2_HEX)?.as_slice()));
-        assert!(image.get(22..).ok_or("short image")?.iter().all(|byte| *byte == 0));
+        assert!(
+            image
+                .get(22..)
+                .ok_or("short image")?
+                .iter()
+                .all(|byte| *byte == 0)
+        );
         Ok(())
     }
 
