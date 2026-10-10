@@ -22,7 +22,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 - [x] **SPIKE-01**: The safe libkrun wrapper crate boots libkrunfw on this machine from a raw read-only SquashFS root disk whose `/init` is a static musl binary written in by the trusted packer, with no initramfs and no virtiofs, and the boot test asserts the exact `/proc/cmdline`. *Superseded wording (2026-10-09): "from an initramfs whose `/init` is a static musl binary, with a raw read-only root disk and no virtiofs". Stock libkrunfw 5.6.2 has `CONFIG_BLK_DEV_INITRD` unset, so the kernel cannot unpack an initramfs; the user chose the root-disk boot (02-CONTEXT.md D-18).*
 - [x] **SPIKE-02**: A guest `connect()` to host loopback and to a public IP both fail when the launcher disables implicit vsock and adds a plain vsock
-- [ ] **SPIKE-03**: A vsock port maps to a host Unix socket and a byte-capped stream from guest to host works end to end
+- [x] **SPIKE-03**: A vsock port maps to a host Unix socket and carries a byte-capped guest-to-host connection end to end. On the pinned `msb_krun_devices` 0.1.41 one connection is reliable up to 8192 bytes (02-SPIKE-EVIDENCE.md S03-WITHIN, DIAG-01), so guest output is a sequence of short connections, each one length-prefixed, sequence-numbered chunk of at most 4 KiB, reassembled by the host under per-chunk and total caps; Phase 5 builds and tests that protocol (reworded 2026-10-10 by the user's decision, S03-ANSWER: "work within the limits for now, if we need to reassess later fine")
 - [x] **SPIKE-04**: An ad-hoc codesigned helper with the `com.apple.security.hypervisor` entitlement starts a VM, and an unsigned one is refused
 - [x] **SPIKE-05**: Whether a Seatbelt deny-default profile still permits VM creation is answered with evidence, and the fallback (dedicated unprivileged user) is recorded
 - [x] **SPIKE-06**: A root image can be produced from a user Dockerfile on macOS by a documented tool chain
@@ -201,7 +201,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-06 | All phases (cross-cutting) | Pending |
 | SPIKE-01 | Phase 2 | Complete |
 | SPIKE-02 | Phase 2 | Complete |
-| SPIKE-03 | Phase 2 | Pending |
+| SPIKE-03 | Phase 2 | Complete |
 | SPIKE-04 | Phase 2 | Complete |
 | SPIKE-05 | Phase 2 | Complete |
 | SPIKE-06 | Phase 2 | Complete |

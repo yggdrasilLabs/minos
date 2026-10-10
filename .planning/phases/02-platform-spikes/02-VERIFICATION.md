@@ -1,14 +1,14 @@
 ---
 phase: 02-platform-spikes
 verified: 2026-10-10T00:00:00Z
-status: gaps_found
-score: 4/5 must-haves verified
+status: passed
+score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
-re_verification: false
+re_verification: true
 gaps:
   - truth: "With implicit vsock disabled and a plain vsock added, a guest connect() to host loopback and to a public IP both fail, and a vsock port mapped to a host Unix socket carries a byte-capped guest-to-host stream end to end (SPIKE-02, SPIKE-03)"
-    status: partial
+    status: resolved
     reason: "The egress half is met (S02-EGRESS). The stream half is met only up to 8192 bytes per connection. Above that, the pinned msb_krun_devices 0.1.41 loses or stalls guest-to-host data (S03-WITHIN, S03-OVER, K4-THROUGHPUT, DIAG-01). This is a recorded platform limit, not a Minos code defect. The user decided on 2026-10-10 to work within the limit with a chunked output protocol in Phase 5 and rejected a fork for now (S03-ANSWER). SPIKE-03 is correctly left [ ] Pending in REQUIREMENTS.md, and the ROADMAP criterion carries a status note but unchanged wording."
     artifacts:
       - path: ".planning/ROADMAP.md"
@@ -23,6 +23,10 @@ human_verification: []
 ---
 
 # Phase 2: Platform Spikes Verification Report
+
+## Gap resolution (2026-10-10)
+
+The single gap was a wording decision, not missing work. The user chose option 1: SPIKE-03 and ROADMAP Phase 2 criterion 2 are reworded around the chunked short-connection protocol (one connection reliable to 8192 bytes on the pinned VMM; guest output is chunks of at most 4 KiB per connection, built and tested in Phase 5). With that wording the recorded evidence (S02-EGRESS, S03-WITHIN, DIAG-01, S03-ANSWER) supports the criterion, SPIKE-03 is marked Complete in REQUIREMENTS.md, and the status above is changed from gaps_found to passed by the orchestrator. No cargo command ran after `cargo clean`.
 
 **Phase Goal:** Every unverified fact that the backend and proposer designs rest on has an evidence-backed answer recorded in CLAUDE.md, and CLAUDE.md describes the v1 local-first design.
 **Verified:** 2026-10-10
