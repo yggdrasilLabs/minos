@@ -37,6 +37,8 @@ pub const MAX_ARGV_ENTRIES: usize = 64;
 pub const MAX_ARG_BYTES: usize = 4096;
 /// Largest per-stream capture of a `run` step, in bytes.
 pub const MAX_STDOUT_CAP: u64 = 1_048_576;
+/// Longest timeout of a `run` step, in milliseconds: one hour, the launcher's own `max_duration_ms` ceiling.
+pub const MAX_RUN_TIMEOUT_MS: u64 = 3_600_000;
 /// Most bytes one `console_flood` step may write.
 pub const MAX_CONSOLE_FLOOD_BYTES: u64 = 1_073_741_824;
 
@@ -449,15 +451,18 @@ impl TryFrom<RawScratchRoundtrip> for ScratchRoundtrip {
 pub struct RawRun {
     argv: Vec<String>,
     stdout_cap: u64,
+    timeout_ms: u64,
 }
 
 /// The validated `run` step: an argv of 1 to 64 entries whose first entry is an absolute path, each entry at
-/// most 4096 bytes with no NUL, and a capture cap of 1 to 1048576 bytes per stream.
+/// most 4096 bytes with no NUL, a capture cap of 1 to 1048576 bytes per stream, and a timeout of 1 to
+/// 3600000 ms after which the command's whole process group is killed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
     program: String,
     args: Vec<String>,
     stdout_cap: u64,
+    timeout_ms: u64,
 }
 
 impl Run {
@@ -485,6 +490,12 @@ impl Run {
     #[must_use]
     pub const fn stdout_cap(&self) -> u64 {
         self.stdout_cap
+    }
+
+    /// How long the command may run before its process group is killed.
+    #[must_use]
+    pub const fn timeout(&self) -> Duration {
+        Duration::from_millis(self.timeout_ms)
     }
 }
 
@@ -518,10 +529,14 @@ impl TryFrom<RawRun> for Run {
         if !(1..=MAX_STDOUT_CAP).contains(&raw.stdout_cap) {
             return Err(InvalidField::new("steps.run.stdout_cap", "1 to 1048576"));
         }
+        if !(1..=MAX_RUN_TIMEOUT_MS).contains(&raw.timeout_ms) {
+            return Err(InvalidField::new("steps.run.timeout_ms", "1 to 3600000"));
+        }
         Ok(Self {
             program,
             args: argv.collect(),
             stdout_cap: raw.stdout_cap,
+            timeout_ms: raw.timeout_ms,
         })
     }
 }
@@ -742,23 +757,30 @@ mod tests {
 
     #[test]
     fn rejects_bad_run_argv() -> TestResult {
-        let empty = with_step(r#"{"run":{"argv":[],"stdout_cap":16}}"#);
+        let empty = with_step(r#"{"run":{"argv":[],"stdout_cap":16,"timeout_ms":1000}}"#);
         assert_eq!(invalid_field(&parse(&empty)?), Some("steps.run.argv"));
-        let relative = with_step(r#"{"run":{"argv":["bin/true"],"stdout_cap":16}}"#);
+        let relative =
+            with_step(r#"{"run":{"argv":["bin/true"],"stdout_cap":16,"timeout_ms":1000}}"#);
         assert_eq!(invalid_field(&parse(&relative)?), Some("steps.run.argv"));
-        let nul = with_step(r#"{"run":{"argv":["/bin/echo","a\u0000b"],"stdout_cap":16}}"#);
+        let nul = with_step(
+            r#"{"run":{"argv":["/bin/echo","a\u0000b"],"stdout_cap":16,"timeout_ms":1000}}"#,
+        );
         assert_eq!(invalid_field(&parse(&nul)?), Some("steps.run.argv"));
         let long_arg = "x".repeat(4097);
         let long = with_step(&format!(
-            r#"{{"run":{{"argv":["/bin/echo","{long_arg}"],"stdout_cap":16}}}}"#
+            r#"{{"run":{{"argv":["/bin/echo","{long_arg}"],"stdout_cap":16,"timeout_ms":1000}}}}"#
         ));
         assert_eq!(invalid_field(&parse(&long)?), Some("steps.run.argv"));
-        let ok = with_step(r#"{"run":{"argv":["/bin/echo","hi"],"stdout_cap":16}}"#);
+        let ok =
+            with_step(r#"{"run":{"argv":["/bin/echo","hi"],"stdout_cap":16,"timeout_ms":1000}}"#);
         let job = parse(&ok)??;
         assert!(matches!(
             job.steps(),
             [Step::Run(run)] if run.program() == "/bin/echo" && run.argv() == ["/bin/echo", "hi"]
+                && run.timeout() == std::time::Duration::from_secs(1)
         ));
+        let missing = with_step(r#"{"run":{"argv":["/bin/echo","hi"],"stdout_cap":16}}"#);
+        assert!(matches!(parse(&missing)?, Err(JobError::Json(_))));
         Ok(())
     }
 
@@ -803,12 +825,22 @@ mod tests {
                 "steps.scratch_roundtrip.bytes",
             ),
             (
-                with_step(r#"{"run":{"argv":["/bin/true"],"stdout_cap":0}}"#),
+                with_step(r#"{"run":{"argv":["/bin/true"],"stdout_cap":0,"timeout_ms":1000}}"#),
                 "steps.run.stdout_cap",
             ),
             (
-                with_step(r#"{"run":{"argv":["/bin/true"],"stdout_cap":1048577}}"#),
+                with_step(
+                    r#"{"run":{"argv":["/bin/true"],"stdout_cap":1048577,"timeout_ms":1000}}"#,
+                ),
                 "steps.run.stdout_cap",
+            ),
+            (
+                with_step(r#"{"run":{"argv":["/bin/true"],"stdout_cap":16,"timeout_ms":0}}"#),
+                "steps.run.timeout_ms",
+            ),
+            (
+                with_step(r#"{"run":{"argv":["/bin/true"],"stdout_cap":16,"timeout_ms":3600001}}"#),
+                "steps.run.timeout_ms",
             ),
             (
                 with_step(r#"{"console_flood":{"bytes":0}}"#),
@@ -823,7 +855,7 @@ mod tests {
             assert_eq!(invalid_field(&parse(json)?), Some(*field), "{json}");
         }
         let bounds = with_step(
-            r#"{"vsock_stream":{"bytes":0}},{"vsock_stream":{"bytes":1073741824}},{"vsock_connect":{"port":4294967294}},{"console_flood":{"bytes":1073741824}},{"scratch_roundtrip":{"bytes":67108864}},{"run":{"argv":["/bin/true"],"stdout_cap":1048576}},{"connect":{"targets":["127.0.0.1:1"],"timeout_ms":30000}}"#,
+            r#"{"vsock_stream":{"bytes":0}},{"vsock_stream":{"bytes":1073741824}},{"vsock_connect":{"port":4294967294}},{"console_flood":{"bytes":1073741824}},{"scratch_roundtrip":{"bytes":67108864}},{"run":{"argv":["/bin/true"],"stdout_cap":1048576,"timeout_ms":3600000}},{"connect":{"targets":["127.0.0.1:1"],"timeout_ms":30000}}"#,
         );
         assert!(parse(&bounds)?.is_ok());
         Ok(())

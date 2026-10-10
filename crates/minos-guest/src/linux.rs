@@ -4,15 +4,21 @@
 //! This is the only Linux-only file in the guest; `main.rs` gates the module (02-CONTEXT.md D-03). Every step
 //! failure becomes a field in that step's result. Nothing here panics on bad input, and nothing returns early
 //! from [`run`] except the job's own `return` finish.
+//!
+//! A `run` step owns a process group and a deadline. Its pipes are drained without blocking, so a daemon that
+//! inherits stdout cannot hold the step open after the command exits, and at the deadline the whole group is
+//! killed, so a command that sleeps forever costs the job one step's timeout rather than the host deadline and
+//! every earlier result. Orphans are reaped before every step as well as after a `run`.
 
 use std::ffi::CStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{Shutdown, TcpStream};
-use std::os::unix::process::ExitStatusExt;
+use std::os::fd::AsFd;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use minos_guest::job::{Connect, Finish, Job, JobError, Run, read_job};
 use minos_guest::job::{ConsoleFlood, ScratchRoundtrip, Step, VsockConnect, VsockStream};
@@ -22,8 +28,10 @@ use minos_guest::report::{
     ScratchResult, StepResult, VsockConnectResult, VsockStreamResult, encode_frame,
 };
 use minos_guest::{BOOT_MARKER, FRAME_SENT_MARKER, JOB_ERROR_MARKER, POWEROFF_MARKER};
+use rustix::fs::{OFlags, fcntl_setfl};
+use rustix::io::Errno;
 use rustix::mount::{MountFlags, mount};
-use rustix::process::{WaitOptions, wait};
+use rustix::process::{Pid, Signal, WaitOptions, kill_process_group, wait};
 use rustix::system::{RebootCommand, reboot};
 use vsock::{VMADDR_CID_HOST, VsockStream as Vsock};
 
@@ -37,6 +45,8 @@ const CHUNK: usize = 64 * 1024;
 const SMALL_FILE_CAP: u64 = 64 * 1024;
 /// Console lines from `console_flood` are 79 printable bytes and a newline.
 const FLOOD_LINE: u64 = 80;
+/// Pause between polls of a running command's pipes and exit status.
+const RUN_POLL: Duration = Duration::from_millis(5);
 
 /// Runs the guest as PID 1.
 pub fn run() -> ExitCode {
@@ -54,6 +64,7 @@ pub fn run() -> ExitCode {
 
     let mut report = Report::new();
     for step in job.steps() {
+        reap_orphans();
         let result = match step {
             Step::ReportBoot(_) => StepResult::ReportBoot(report_boot()),
             Step::Connect(step) => StepResult::Connect(connect(step)),
@@ -366,30 +377,80 @@ struct Captured {
     truncated: bool,
 }
 
-/// Reads at most `cap + 1` bytes to learn whether the stream was longer than `cap`, keeps `cap`, then drains
-/// and discards the rest so the child never blocks on a full pipe.
-fn capture(pipe: Option<impl Read>, cap: u64) -> Captured {
-    let Some(mut pipe) = pipe else {
-        return Captured {
-            text: String::new(),
+/// One child pipe drained without blocking: up to `cap` bytes are kept, the rest is read and discarded so the
+/// child never stalls on a full pipe, and a pipe closed by its last writer or a read error ends the capture.
+struct Capture<R> {
+    pipe: Option<R>,
+    bytes: Vec<u8>,
+    cap: usize,
+    truncated: bool,
+    error: Option<io::Error>,
+}
+
+impl<R: Read + AsFd> Capture<R> {
+    /// Takes the pipe and makes it non-blocking. If that fails, the pipe is dropped and the failure recorded,
+    /// so the child meets a closed stream rather than one nobody drains.
+    fn new(pipe: Option<R>, cap: u64) -> Self {
+        let mut capture = Self {
+            pipe: None,
+            bytes: Vec::new(),
+            cap: usize::try_from(cap).unwrap_or(usize::MAX),
             truncated: false,
+            error: None,
         };
-    };
-    let mut bytes = Vec::new();
-    let read = (&mut pipe)
-        .take(cap.saturating_add(1))
-        .read_to_end(&mut bytes);
-    let truncated = to_u64(bytes.len()) > cap;
-    bytes.truncate(usize::try_from(cap).unwrap_or(usize::MAX));
-    // Draining only keeps the child from blocking; its outcome changes nothing in the report.
-    drop(io::copy(&mut pipe, &mut io::sink()));
-    let mut text = String::from_utf8_lossy(&bytes).into_owned();
-    if let Err(error) = read {
-        text.push_str("\n<read error: ");
-        text.push_str(&error.to_string());
-        text.push('>');
+        if let Some(pipe) = pipe {
+            match fcntl_setfl(&pipe, OFlags::NONBLOCK) {
+                Ok(()) => capture.pipe = Some(pipe),
+                Err(errno) => capture.error = Some(errno.into()),
+            }
+        }
+        capture
     }
-    Captured { text, truncated }
+
+    /// Reads everything ready now, returning once the pipe would block, is closed, or fails.
+    fn pump(&mut self, buf: &mut [u8]) {
+        while let Some(pipe) = self.pipe.as_mut() {
+            match pipe.read(buf) {
+                Ok(0) => self.pipe = None,
+                Ok(read) => {
+                    let room = self.cap.saturating_sub(self.bytes.len());
+                    if read > room {
+                        self.truncated = true;
+                    }
+                    if let Some(kept) = buf.get(..read.min(room)) {
+                        self.bytes.extend_from_slice(kept);
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => {
+                    self.error = Some(error);
+                    self.pipe = None;
+                }
+            }
+        }
+    }
+
+    fn finish(self) -> Captured {
+        let mut text = String::from_utf8_lossy(&self.bytes).into_owned();
+        if let Some(error) = self.error {
+            text.push_str("\n<read error: ");
+            text.push_str(&error.to_string());
+            text.push('>');
+        }
+        Captured {
+            text,
+            truncated: self.truncated,
+        }
+    }
+}
+
+/// Kills every process in `group`. An empty group (`ESRCH`) is the normal case after a clean exit.
+fn kill_group(group: Pid) {
+    match kill_process_group(group, Signal::KILL) {
+        Ok(()) | Err(Errno::SRCH) => {}
+        Err(errno) => console_line(&format!("minos-guest: kill process group: {errno}")),
+    }
 }
 
 fn run_command(step: &Run) -> RunResult {
@@ -400,6 +461,8 @@ fn run_command(step: &Run) -> RunResult {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Its own group, so the deadline can kill everything the command started, not only the leader.
+        .process_group(0)
         .spawn();
     let mut child = match spawned {
         Ok(child) => child,
@@ -408,6 +471,7 @@ fn run_command(step: &Run) -> RunResult {
                 argv,
                 status: None,
                 signal: None,
+                timed_out: false,
                 stdout: String::new(),
                 stdout_truncated: false,
                 stderr: String::new(),
@@ -416,27 +480,50 @@ fn run_command(step: &Run) -> RunResult {
             };
         }
     };
+    let group = Pid::from_child(&child);
     let cap = step.stdout_cap();
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
-    let (stdout, stderr) = std::thread::scope(|scope| {
-        let out = scope.spawn(move || capture(stdout_pipe, cap));
-        let err = scope.spawn(move || capture(stderr_pipe, cap));
-        (out.join(), err.join())
-    });
-    let lost = || Captured {
-        text: "<capture thread failed>".to_owned(),
-        truncated: false,
+    let mut stdout = Capture::new(child.stdout.take(), cap);
+    let mut stderr = Capture::new(child.stderr.take(), cap);
+    let deadline = Instant::now().checked_add(step.timeout());
+    let mut buf = vec![0_u8; CHUNK];
+    let mut timed_out = false;
+    let waited = loop {
+        stdout.pump(&mut buf);
+        stderr.pump(&mut buf);
+        match child.try_wait() {
+            // The leader is gone: take what it left queued and stop. A daemon that kept a pipe open does not
+            // keep the step open.
+            Ok(Some(status)) => {
+                stdout.pump(&mut buf);
+                stderr.pump(&mut buf);
+                break Ok(status);
+            }
+            Ok(None) => {}
+            Err(error) => break Err(error),
+        }
+        if deadline.is_none_or(|deadline| Instant::now() >= deadline) {
+            timed_out = true;
+            // The leader is unreaped, so the group id is still its own.
+            kill_group(group);
+            let waited = child.wait();
+            stdout.pump(&mut buf);
+            stderr.pump(&mut buf);
+            break waited;
+        }
+        std::thread::sleep(RUN_POLL);
     };
-    let stdout = stdout.unwrap_or_else(|_| lost());
-    let stderr = stderr.unwrap_or_else(|_| lost());
-    let waited = child.wait();
+    // Whatever the command left behind in its group dies with the step. The guest forks nothing between the
+    // reap and this kill, so the group id has not been reused.
+    kill_group(group);
     reap_orphans();
+    let stdout = stdout.finish();
+    let stderr = stderr.finish();
     match waited {
         Ok(status) => RunResult {
             argv,
             status: status.code(),
             signal: status.signal(),
+            timed_out,
             stdout: stdout.text,
             stdout_truncated: stdout.truncated,
             stderr: stderr.text,
@@ -447,6 +534,7 @@ fn run_command(step: &Run) -> RunResult {
             argv,
             status: None,
             signal: None,
+            timed_out,
             stdout: stdout.text,
             stdout_truncated: stdout.truncated,
             stderr: stderr.text,
@@ -458,7 +546,8 @@ fn run_command(step: &Run) -> RunResult {
 
 /// PID 1 inherits every orphan. Reap whatever has exited, without blocking. `wait` (any child) rather than
 /// `waitpid(None, ..)`, which in rustix 1.x waits only for children in the caller's process group and would
-/// miss an orphan that changed its group.
+/// miss an orphan that changed its group. Called before every step and after a `run`, so a daemon one step
+/// left behind is reaped before the next step starts.
 fn reap_orphans() {
     while let Ok(Some(_)) = wait(WaitOptions::NOHANG) {}
 }

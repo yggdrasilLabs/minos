@@ -189,6 +189,8 @@ pub struct RunResult {
     pub status: Option<i32>,
     /// The terminating signal, when a signal ended the process.
     pub signal: Option<i32>,
+    /// Whether the step's timeout expired, so the command's process group was killed.
+    pub timed_out: bool,
     /// Captured stdout, lossy UTF-8, at most the job's cap.
     pub stdout: String,
     /// Whether stdout was longer than the cap.
@@ -286,6 +288,7 @@ mod tests {
             argv: vec!["/bin/true".to_owned()],
             status: Some(0),
             signal: None,
+            timed_out: false,
             stdout: String::new(),
             stdout_truncated: false,
             stderr: String::new(),
@@ -301,7 +304,8 @@ mod tests {
             r#""virtio_devices":["virtio0:0x0002","virtio1:0x0013"]}},"#,
             r#"{"connect":{"results":[{"target":"1.1.1.1:443","ok":false,"#,
             r#""error":"Network is unreachable (os error 101)","raw_os_error":101}]}},"#,
-            r#"{"run":{"argv":["/bin/true"],"status":0,"signal":null,"stdout":"","stdout_truncated":false,"#,
+            r#"{"run":{"argv":["/bin/true"],"status":0,"signal":null,"timed_out":false,"stdout":"","#,
+            r#""stdout_truncated":false,"#,
             r#""stderr":"","stderr_truncated":false,"error":null}}"#,
             r#"],"job_error":"late"}"#,
         );

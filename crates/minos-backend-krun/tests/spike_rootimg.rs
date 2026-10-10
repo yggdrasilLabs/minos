@@ -240,7 +240,7 @@ const MACHINE: Machine = Machine::new(1, 256);
 const EXCERPT_CHARS: usize = 1_048_576;
 
 /// `report_boot`, then `cat` the file the fixture's `RUN` step wrote, then power off.
-const DOCKERFILE_JOB: &str = r#"{"v":1,"vsock_port":1024,"steps":[{"report_boot":{}},{"run":{"argv":["/bin/cat","/etc/minos-spike"],"stdout_cap":4096}}],"finish":"poweroff"}"#;
+const DOCKERFILE_JOB: &str = r#"{"v":1,"vsock_port":1024,"steps":[{"report_boot":{}},{"run":{"argv":["/bin/cat","/etc/minos-spike"],"stdout_cap":4096,"timeout_ms":30000}}],"finish":"poweroff"}"#;
 
 /// An absolute path from a variable `boot_from_dockerfile` needs. Missing is an error with the boot setup text.
 fn boot_path(name: &str) -> TestResult<PathBuf> {
