@@ -16,16 +16,18 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 
 - [x] Platform spikes: the safe libkrun wrapper boots libkrunfw from a raw read-only SquashFS root disk through an ad-hoc signed `minos-vmm` with no unsafe code and no virtio-fs; the guest has no egress; a deny-default Seatbelt profile still permits VM creation; a Dockerfile becomes a reproducible root image; `claude -p` returns `structured_output` under subscription login; one vsock connection is reliable to 8192 bytes on the pinned VMM, so guest output is chunked — Validated in Phase 2: Platform Spikes (2026-10-10; see 02-SPIKE-EVIDENCE.md and 02-VERIFICATION.md)
 
+- [x] `minos-core` exists with validated types (IDs, `RelPath`, `Manifest`, `Diff`, `Metric`, `Outcome`), pure policy and routing, the ledger fold, and `build_report`, with property tests, golden hash vectors, and golden wire-format files — Validated in Phase 3: Core Types and Pure Logic (2026-10-14; see 03-VALIDATION.md, 03-EVIDENCE.md and 03-VERIFICATION.md)
+
+- [x] Greedy policy with `min_improvement`, tie-broken on `ExperimentId`, permutation-invariant — Validated in Phase 3: Core Types and Pure Logic (2026-10-14; see 03-VALIDATION.md, 03-EVIDENCE.md and 03-VERIFICATION.md)
+
 ### Active
 
-- [ ] `minos-core` exists with validated types (IDs, `RelPath`, `Manifest`, `Diff`, `Metric`, `Outcome`), pure policy and routing, the ledger fold, and `build_report`, with property tests, golden hash vectors, and golden wire-format files
 - [ ] `minos-sandbox` encodes roles as types: a `SandboxSpec<Candidate>` cannot receive judge data or a network device, and this is proven by compile-fail tests
 - [ ] A libkrun backend on macOS arm64 launches a VM from a sealed `LaunchPlan`, with no network device, input delivered as read-only disk images, and output returned as a capped tar stream over vsock wrapped in `Untrusted<T>`
 - [ ] `minos-guest` runs inside the VM: applies the base tarball plus diff with a pure-Rust patch crate, runs the manifest's argv commands under budget, and streams results out
 - [ ] A local loop driver in the CLI process runs generations against a file-backed ledger and blob store, using the same pure core functions the Lambda orchestrator will use later
 - [ ] A `ModelProvider` abstraction in `minos-propose` with one implementation that execs the user's own `claude` binary in print mode, text-only, and parses structured JSON output; Bedrock and API-key implementations are later variants of the same trait or enum
 - [ ] Sweep tier (seeded sampling over declared params, no model) and `single_shot` tier (one model call returning several diffs) both route through `ProposerSpec::eligible`
-- [ ] Greedy policy with `min_improvement`, tie-broken on `ExperimentId`, permutation-invariant
 - [ ] `minos init`, `env build`, `check`, `run`, `status`, `log`, `show`, `report`, `adopt`, `stop` work for the local backend
 - [ ] `minos check` judges the baseline several times and reports a noise floor
 - [ ] `minos report` is a pure function of ledger and blobs, hashed, and `minos adopt` refuses without the acknowledged hash and only writes a patch file
@@ -100,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-10 after Phase 2: Platform Spikes (11/11 plans; verified 5/5 after the user's option-1 rewording of SPIKE-03; code review open: 1 Critical, 7 Warnings in 02-REVIEW.md; `/gsd-secure-phase 2` pending)*
+*Last updated: 2026-10-14 after Phase 3: Core Types and Pure Logic (13/13 plans; verified 4/4 success criteria and 18/18 requirements; `cargo clean` run after verification; code review open: 1 Critical, 5 Warnings, 6 Info in 03-REVIEW.md; `/gsd-secure-phase 3` pending)*
