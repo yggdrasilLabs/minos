@@ -5,10 +5,13 @@
 //! line whose image is not pinned by digest. `minos env build` and `minos check` call it (Phases 5 and 8);
 //! `Manifest::try_from` stays pure and reads no Dockerfile.
 //!
-//! [`base_images`] follows Docker's own line rules where they decide what is an instruction: a line ending in
-//! `\` (after trailing spaces and tabs) continues onto the next, comment and blank lines inside a continuation are
-//! dropped, and keywords are ASCII case-insensitive. Where the rules would let a Dockerfile change how it is read,
-//! it fails closed instead: an `escape` parser directive other than `\` is refused, and a `syntax` directive (a
+//! [`base_images`] follows Docker's own line rules where they decide what is an instruction: a UTF-8 byte order
+//! mark is stripped from the first line, leading whitespace is trimmed by Unicode `White_Space` (so U+000B, U+000C,
+//! U+0085, and U+00A0 cannot hide a keyword), a line ending in `\` (after trailing spaces and tabs) continues onto
+//! the next, comment and blank lines inside a continuation are dropped, and keywords are ASCII case-insensitive.
+//! Where the rules would let a Dockerfile change how it is read, it fails closed instead: a line whose first word
+//! is not a Dockerfile instruction keyword is an error rather than a skip (so a heredoc body, which Docker reads as
+//! data, is refused in v1), an `escape` parser directive other than `\` is refused, and a `syntax` directive (a
 //! frontend image the builder pulls) must itself be digest-pinned. Every comment line is checked for both
 //! directives, not only the leading ones, which is stricter than Docker.
 
@@ -24,6 +27,29 @@ use crate::id::ImageDigest;
 const MAX_IMAGE_NAME_BYTES: usize = 255;
 /// The only digest algorithm an [`ImageRef`] accepts.
 const DIGEST_PREFIX: &str = "sha256:";
+/// Every Dockerfile instruction keyword Docker's parser knows. A line starting with any other word is refused.
+const INSTRUCTIONS: &[&str] = &[
+    "FROM",
+    "RUN",
+    "CMD",
+    "LABEL",
+    "MAINTAINER",
+    "EXPOSE",
+    "ENV",
+    "ADD",
+    "COPY",
+    "ENTRYPOINT",
+    "VOLUME",
+    "USER",
+    "WORKDIR",
+    "ARG",
+    "ONBUILD",
+    "STOPSIGNAL",
+    "HEALTHCHECK",
+    "SHELL",
+];
+/// The UTF-8 byte order mark Docker strips from the first line of a Dockerfile.
+const BOM: char = '\u{FEFF}';
 
 /// Why an image reference or a Dockerfile's base images were refused. Variants carry a line number at most,
 /// never the text, because the Dockerfile is project content.
@@ -76,6 +102,14 @@ pub enum ImageError {
     #[error("Dockerfile line {line}: only the default \\ escape character is supported")]
     EscapeDirective {
         /// 1-based line of the directive.
+        line: usize,
+    },
+    /// A line's first word is not a Dockerfile instruction keyword, so the file cannot be read with confidence.
+    #[error(
+        "Dockerfile line {line}: the line does not start with a Dockerfile instruction keyword (heredoc bodies are not supported)"
+    )]
+    UnknownInstruction {
+        /// 1-based line where the instruction starts.
         line: usize,
     },
 }
@@ -192,7 +226,7 @@ struct Instruction {
     text: String,
 }
 
-/// Whether a line, with leading spaces and tabs removed, is a comment or blank.
+/// Whether a line, with leading whitespace removed, is a comment or blank.
 fn is_comment_or_blank(trimmed: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with('#')
 }
@@ -236,7 +270,14 @@ fn instructions(dockerfile: &str) -> Result<Vec<Instruction>, ImageError> {
     let mut current: Option<Instruction> = None;
     for (index, raw) in dockerfile.lines().enumerate() {
         let line = index + 1;
-        let trimmed = raw.trim_start_matches([' ', '\t']);
+        // Docker strips a byte order mark from the first line and trims leading whitespace by `unicode.IsSpace`,
+        // so both are normalised here, or a `FROM` hidden behind either would never be checked.
+        let raw = if index == 0 {
+            raw.strip_prefix(BOM).unwrap_or(raw)
+        } else {
+            raw
+        };
+        let trimmed = raw.trim_start_matches(char::is_whitespace);
         if trimmed.starts_with('#') {
             check_directive(trimmed, line)?;
         }
@@ -273,16 +314,24 @@ fn instructions(dockerfile: &str) -> Result<Vec<Instruction>, ImageError> {
 /// Returns [`ImageError::Variable`] for an image containing `$`, [`ImageError::Unpinned`] for an image that is
 /// not a digest-pinned reference (a tag, no digest, or a malformed reference) or an unpinned `syntax` directive,
 /// [`ImageError::EmptyFrom`] for a `FROM` with no image, [`ImageError::MalformedFrom`] for a flag without `=` or
-/// unexpected trailing words, and [`ImageError::EscapeDirective`] for an `escape` directive other than `\`.
+/// unexpected trailing words, [`ImageError::EscapeDirective`] for an `escape` directive other than `\`, and
+/// [`ImageError::UnknownInstruction`] for a line whose first word is not a Dockerfile instruction keyword.
 pub fn base_images(dockerfile: &str) -> Result<Vec<ImageRef>, ImageError> {
     let mut refs = BTreeSet::new();
     let mut stages: BTreeSet<String> = BTreeSet::new();
     for Instruction { line, text } in instructions(dockerfile)? {
-        let mut words = text.split_ascii_whitespace();
-        if !words
+        let mut words = text.split_whitespace();
+        let keyword = words
             .next()
-            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("FROM"))
+            .ok_or(ImageError::UnknownInstruction { line })?;
+        if !INSTRUCTIONS
+            .iter()
+            .any(|known| keyword.eq_ignore_ascii_case(known))
         {
+            // An unknown keyword is an error, never a skip: skipping is how a hidden `FROM` escapes the check.
+            return Err(ImageError::UnknownInstruction { line });
+        }
+        if !keyword.eq_ignore_ascii_case("FROM") {
             continue;
         }
         let image = loop {

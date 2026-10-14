@@ -244,6 +244,63 @@ fn base_images_rejects_an_unpinned_syntax_frontend() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn base_images_sees_a_from_behind_a_byte_order_mark() -> TestResult {
+    // Docker strips a UTF-8 BOM from the first line, so this is an unpinned FROM to Docker; it must be to us.
+    let error = dockerfile_rejected("\u{feff}FROM alpine:3.20\nRUN true\n")?;
+    assert!(
+        matches!(error, ImageError::Unpinned { line: 1 }),
+        "got: {error}"
+    );
+    let pinned = format!("\u{feff}FROM alpine@sha256:{HEX}\n");
+    assert_eq!(base_images(&pinned)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn base_images_sees_a_from_behind_unicode_whitespace() -> TestResult {
+    // Docker trims leading whitespace with `unicode.IsSpace`: NBSP, NEL, vertical tab, and form feed included.
+    for prefix in [
+        "\u{00a0}",
+        "\u{0085}",
+        "\u{000b}",
+        "\u{000c}",
+        " \u{00a0}\t",
+    ] {
+        let error = dockerfile_rejected(&format!("RUN true\n{prefix}FROM alpine:3.20\n"))?;
+        assert!(
+            matches!(error, ImageError::Unpinned { line: 2 }),
+            "prefix {prefix:?}: got {error}"
+        );
+    }
+    let pinned = format!("\u{00a0}FROM alpine@sha256:{HEX}\n");
+    assert_eq!(base_images(&pinned)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn base_images_rejects_an_unknown_instruction() -> TestResult {
+    // An unknown first word is an error, never a skip, so a keyword the parser does not recognise cannot hide a
+    // FROM; this also refuses heredoc bodies, whose lines are data to Docker.
+    for text in [
+        "FORM alpine:3.20\n",
+        "RUN true\n\u{00a0}ENVX=1\n",
+        "RUN <<EOF\napt-get update\nEOF\n",
+    ] {
+        let error = dockerfile_rejected(text)?;
+        assert!(
+            matches!(error, ImageError::UnknownInstruction { .. }),
+            "text {text:?}: got {error}"
+        );
+    }
+    let error = dockerfile_rejected("RUN true\nFORM alpine:3.20\n")?;
+    assert!(
+        matches!(error, ImageError::UnknownInstruction { line: 2 }),
+        "got: {error}"
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Names
 // ---------------------------------------------------------------------------------------------------------------
