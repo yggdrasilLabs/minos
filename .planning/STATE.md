@@ -6,7 +6,7 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Phase 3 planned (13 plans, 7 waves); ready to execute
-last_updated: "2026-10-14T13:19:36.084Z"
+last_updated: "2026-10-14T13:19:48.774Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
@@ -72,6 +72,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 02 P09 | 10 min | 2 tasks | 3 files |
 | Phase 02 P10 | 7min | 3 tasks | 5 files |
 | Phase 02 P11 | 9min | 2 tasks | 2 files |
+| Phase 03 P01 | 6min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -121,6 +122,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 2 evidence is one file, 02-SPIKE-EVIDENCE.md, consolidated verbatim (region SHA-256 equals the fragment concatenation, 69494b03...bb41)
 - [Phase 02]: CLAUDE.md records the 8192-byte vsock limit of msb_krun_devices 0.1.41 and the user's chunked output protocol (S03-ANSWER); SPIKE-03 and ROADMAP Phase 2 criterion 2 await the user's wording decision
 - [Phase 02]: E-4's vsock bullet dropped and its TSI bullet merged into 02-10's no-network bullet; CLAUDE.md Verified facts, local records SPIKE-03 as the 8192-byte limit (S03-ANSWER)
+- [Phase 03]: 03-01: serde_json float_roundtrip on workspace-wide; .config/insta.yaml update: no, so the gate never writes snapshots
+- [Phase 03]: 03-01: IdHasher is public (Phase 4 LaunchKey); digest_id! is pub(crate) for JudgeVersion, EventKey, SpendId, ReviewId in later plans
+- [Phase 03]: 03-01: RelPath is an ASCII [A-Za-z0-9._+-] grammar with bytewise Ord; ascii_case_key exists only for the 03-05 case-fold collision check
 
 ### Pending Todos
 
