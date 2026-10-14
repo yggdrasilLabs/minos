@@ -14,7 +14,8 @@ use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-const VALID: &str = r#"{"v":1,"metrics":[{"name":"throughput_mb_s","value":12.5,"held_out":false}]}"#;
+const VALID: &str =
+    r#"{"v":1,"metrics":[{"name":"throughput_mb_s","value":12.5,"held_out":false}]}"#;
 
 fn name(text: &str) -> Result<MetricName, Box<dyn Error>> {
     Ok(MetricName::from_str(text)?)
@@ -95,7 +96,16 @@ fn metric_display_and_debug_print_the_value() -> TestResult {
 
 #[test]
 fn metric_json_rejects_non_finite_and_non_numbers() {
-    for json in ["NaN", "Infinity", "-Infinity", "1e400", "-1e400", "\"1.0\"", "null", "true"] {
+    for json in [
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        "1e400",
+        "-1e400",
+        "\"1.0\"",
+        "null",
+        "true",
+    ] {
         assert!(
             serde_json::from_str::<Metric>(json).is_err(),
             "{json} parsed as a metric"
@@ -255,14 +265,18 @@ fn scorecard_accepts_max_metrics_and_rejects_one_more() -> TestResult {
     assert_eq!(parsed(&full)?.len(), MAX_METRICS);
     let over = card_json(MAX_METRICS + 1);
     assert!(over.len() <= MAX_SCORECARD_BYTES);
-    assert_eq!(rejected(&over)?, ScorecardError::TooMany { max: MAX_METRICS });
+    assert_eq!(
+        rejected(&over)?,
+        ScorecardError::TooMany { max: MAX_METRICS }
+    );
     Ok(())
 }
 
 #[test]
 fn scorecard_rejects_a_bad_name() -> TestResult {
     for bad in ["Bad", "", "1a", "a-b", "a\u{1b}[31m"] {
-        let json = format!(r#"{{"v":1,"metrics":[{{"name":"{bad}","value":1.0,"held_out":false}}]}}"#);
+        let json =
+            format!(r#"{{"v":1,"metrics":[{{"name":"{bad}","value":1.0,"held_out":false}}]}}"#);
         assert!(matches!(
             rejected(&json)?,
             ScorecardError::Json {
@@ -277,7 +291,8 @@ fn scorecard_rejects_a_bad_name() -> TestResult {
 #[test]
 fn scorecard_rejects_non_finite_values() -> TestResult {
     for value in ["NaN", "1e400", "-1e400", "\"1\""] {
-        let json = format!(r#"{{"v":1,"metrics":[{{"name":"a","value":{value},"held_out":false}}]}}"#);
+        let json =
+            format!(r#"{{"v":1,"metrics":[{{"name":"a","value":{value},"held_out":false}}]}}"#);
         assert!(matches!(rejected(&json)?, ScorecardError::Json { .. }));
     }
     Ok(())
@@ -303,10 +318,7 @@ fn scorecard_at_the_byte_cap_is_parsed() -> TestResult {
     assert_eq!(json.len(), MAX_SCORECARD_BYTES);
     assert_eq!(parsed(&json)?.len(), 1);
     let over = format!("{json} ");
-    assert!(matches!(
-        rejected(&over)?,
-        ScorecardError::TooLarge { .. }
-    ));
+    assert!(matches!(rejected(&over)?, ScorecardError::TooLarge { .. }));
     Ok(())
 }
 
@@ -338,7 +350,8 @@ fn scorecard_rejects_syntax_errors_and_trailing_data() -> TestResult {
 
 #[test]
 fn scorecard_json_errors_carry_no_input_text() -> TestResult {
-    let json = r#"{"v":1,"metrics":[{"name":"a","value":1.0,"held_out":false,"evil_field_name":1}]}"#;
+    let json =
+        r#"{"v":1,"metrics":[{"name":"a","value":1.0,"held_out":false,"evil_field_name":1}]}"#;
     let error = rejected(json)?;
     assert!(matches!(error, ScorecardError::Json { line: 1, .. }));
     let shown = format!("{error} {error:?}");
@@ -371,7 +384,12 @@ fn scorecard_serde_goes_through_validation() -> TestResult {
     let card: Scorecard = serde_json::from_str(VALID)?;
     assert_eq!(card, parsed(VALID)?);
     assert!(serde_json::from_str::<Scorecard>(r#"{"v":1,"metrics":[]}"#).is_err());
-    assert!(serde_json::from_str::<Scorecard>(r#"{"v":2,"metrics":[{"name":"a","value":1.0,"held_out":false}]}"#).is_err());
+    assert!(
+        serde_json::from_str::<Scorecard>(
+            r#"{"v":2,"metrics":[{"name":"a","value":1.0,"held_out":false}]}"#
+        )
+        .is_err()
+    );
     Ok(())
 }
 
