@@ -6,7 +6,8 @@
 use std::error::Error;
 use std::str::FromStr;
 
-use minos_core::money::{Rate, RateError};
+use minos_core::id::ModelId;
+use minos_core::money::{ApproxCost, Cost, CostError, Prices, PricesError, Rate, RateError};
 use minos_core::usage::Usage;
 use proptest::prelude::*;
 
@@ -233,4 +234,280 @@ fn usage_rejects_an_unknown_field() {
 fn usage_rejects_a_missing_field() {
     let json = r#"{"input_tokens":1,"output_tokens":2}"#;
     assert!(serde_json::from_str::<Usage>(json).is_err());
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// prices.toml
+// ---------------------------------------------------------------------------------------------------------------
+
+const PRICES: &str = r#"v = 1
+
+[compute]
+vcpu_second = "0.0000276944"
+gib_second = "0.0000036667"
+
+[models."haiku"]
+input_token = "0.000003"
+output_token = "0.000015"
+cache_creation_input_token = "0.00000375"
+cache_read_input_token = "0.0000003"
+"#;
+
+fn prices(text: &str) -> Result<Prices, Box<dyn Error>> {
+    Ok(Prices::parse_toml(text)?)
+}
+
+fn prices_rejected(text: &str) -> Result<PricesError, Box<dyn Error>> {
+    match Prices::parse_toml(text) {
+        Ok(_) => Err("the price table was accepted".into()),
+        Err(error) => Ok(error),
+    }
+}
+
+fn model(text: &str) -> Result<ModelId, Box<dyn Error>> {
+    Ok(ModelId::from_str(text)?)
+}
+
+/// A price table with one compute rate pair and one model whose four token rates are all `token`.
+fn table(vcpu: &str, gib: &str, token: &str) -> Result<Prices, Box<dyn Error>> {
+    prices(&format!(
+        "v = 1\n[compute]\nvcpu_second = \"{vcpu}\"\ngib_second = \"{gib}\"\n\
+         [models.m]\ninput_token = \"{token}\"\noutput_token = \"{token}\"\n\
+         cache_creation_input_token = \"{token}\"\ncache_read_input_token = \"{token}\"\n"
+    ))
+}
+
+#[test]
+fn prices_parse_a_complete_table() -> TestResult {
+    let table = prices(PRICES)?;
+    assert_eq!(table.compute().vcpu_second().pico(), 27_694_400);
+    assert_eq!(table.compute().gib_second().pico(), 3_666_700);
+    let haiku = table.model(&model("haiku")?).ok_or("haiku is missing")?;
+    assert_eq!(haiku.input_token().pico(), 3_000_000);
+    assert_eq!(haiku.output_token().pico(), 15_000_000);
+    assert_eq!(haiku.cache_creation_input_token().pico(), 3_750_000);
+    assert_eq!(haiku.cache_read_input_token().pico(), 300_000);
+    assert_eq!(table.models().count(), 1);
+    assert!(table.model(&model("opus")?).is_none());
+    Ok(())
+}
+
+#[test]
+fn numeric_rate_is_a_located_type_error() -> TestResult {
+    let text = PRICES.replace(r#"vcpu_second = "0.0000276944""#, "vcpu_second = 0.0000276944");
+    let error = prices_rejected(&text)?;
+    assert!(matches!(error, PricesError::Toml(_)), "got: {error}");
+    let shown = match &error {
+        PricesError::Toml(source) => source.to_string(),
+        other => other.to_string(),
+    };
+    assert!(shown.contains("line 4"), "got: {shown}");
+    assert!(shown.contains("floating point"), "got: {shown}");
+    assert!(shown.contains("expected a string"), "got: {shown}");
+    Ok(())
+}
+
+#[test]
+fn prices_reject_an_unknown_key() -> TestResult {
+    let text = PRICES.replace("gib_second", "gib_second_x = \"1\"\ngib_second");
+    let error = prices_rejected(&text)?;
+    assert!(error.to_string().contains("unknown field"), "got: {error}");
+    Ok(())
+}
+
+#[test]
+fn prices_reject_another_version() -> TestResult {
+    let error = prices_rejected(&PRICES.replacen("v = 1", "v = 2", 1))?;
+    assert!(matches!(error, PricesError::Version { found: 2 }), "got: {error}");
+    Ok(())
+}
+
+#[test]
+fn prices_reject_a_duplicate_model_table() -> TestResult {
+    let text = format!("{PRICES}\n[models.\"haiku\"]\ninput_token = \"1\"\n");
+    assert!(matches!(prices_rejected(&text)?, PricesError::Toml(_)));
+    Ok(())
+}
+
+#[test]
+fn prices_reject_a_bad_rate_string() -> TestResult {
+    let text = PRICES.replace("0.0000276944", "1.0000000000001");
+    assert!(matches!(prices_rejected(&text)?, PricesError::Toml(_)));
+    Ok(())
+}
+
+#[test]
+fn prices_reject_a_bad_model_id() -> TestResult {
+    let text = PRICES.replace(r#"[models."haiku"]"#, r#"[models."-bad"]"#);
+    assert!(matches!(prices_rejected(&text)?, PricesError::Toml(_)));
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Cost
+// ---------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn aws_rate_products_are_exact() -> TestResult {
+    // vCPU: 27_694_400 pico/s * 3_600 s = 99_699_840_000 pico = 99_699.84 micro, rounds half up to 99_700.
+    let table = table("0.0000276944", "0", "0")?;
+    let vcpu = Cost::of(&table, None, &Usage::compute(3_600_000, 0))?;
+    assert_eq!(vcpu.micro_dollars(), 99_700);
+    assert_eq!(vcpu.approx().to_string(), "approx. cost: $0.10");
+
+    // Memory: one GiB-second (1_024 MiB * 1_000 ms = 1_024_000 MiB-ms) at 3_666_700 pico = 3.6667 micro, so 4.
+    let table = table("0", "0.0000036667", "0")?;
+    let one = Cost::of(&table, None, &Usage::compute(0, 1_024_000))?;
+    assert_eq!(one.micro_dollars(), 4);
+
+    // Lambda: 1 GiB for 3_600 s = 3_600 GiB-s * 16_666_700 pico = 60_000_120_000 pico = 60_000.12 micro, so 60_000.
+    let table = table("0", "0.0000166667", "0")?;
+    let hour = Cost::of(&table, None, &Usage::compute(0, 1_024 * 3_600_000))?;
+    assert_eq!(hour.micro_dollars(), 60_000);
+
+    // Tokens: 1_000_000 input tokens * 3_000_000 pico = 3 * 10^12 pico = 3_000_000 micro, exactly $3.
+    let table = table("0", "0", "0.000003")?;
+    let tokens = Cost::of(&table, Some(&model("m")?), &Usage::tokens(1_000_000, 0, 0, 0))?;
+    assert_eq!(tokens.micro_dollars(), 3_000_000);
+    assert_eq!(tokens.approx().to_string(), "approx. cost: $3.00");
+    Ok(())
+}
+
+#[test]
+fn every_token_kind_is_priced() -> TestResult {
+    // input 1 * 3 + output 2 * 15 + cache creation 4 * 3.75 + cache read 10 * 0.3 = 3 + 30 + 15 + 3 = 51 micro.
+    let table = prices(PRICES)?;
+    let cost = Cost::of(&table, Some(&model("haiku")?), &Usage::tokens(1, 2, 4, 10))?;
+    assert_eq!(cost.micro_dollars(), 51);
+    Ok(())
+}
+
+#[test]
+fn rounds_half_up() -> TestResult {
+    // A token rate of 500_000 pico is exactly half a micro-dollar per token: rounds up to 1.
+    let half = Cost::of(&table("0", "0", "0.0000005")?, Some(&model("m")?), &Usage::tokens(1, 0, 0, 0))?;
+    assert_eq!(half.micro_dollars(), 1);
+    // A GiB-second rate of 1 pico times 512_000_000_000 MiB-ms is 500_000 pico, again exactly half: 1.
+    let table = table("0", "0.000000000001", "0")?;
+    let also_half = Cost::of(&table, None, &Usage::compute(0, 512_000_000_000))?;
+    assert_eq!(also_half.micro_dollars(), 1);
+    // One scaled unit less than half (1/1_024_000 pico below 500_000 pico) rounds down to 0.
+    let below = Cost::of(&table, None, &Usage::compute(0, 511_999_999_999))?;
+    assert_eq!(below.micro_dollars(), 0);
+    Ok(())
+}
+
+#[test]
+fn zero_usage_costs_zero() -> TestResult {
+    let cost = Cost::of(&prices(PRICES)?, None, &Usage::default())?;
+    assert_eq!(cost, Cost::ZERO);
+    assert_eq!(cost.micro_dollars(), 0);
+    assert_eq!(cost.approx().to_string(), "approx. cost: $0.00");
+    Ok(())
+}
+
+#[test]
+fn tokens_without_a_model_are_refused() -> TestResult {
+    let result = Cost::of(&prices(PRICES)?, None, &Usage::tokens(0, 1, 0, 0));
+    assert!(matches!(result, Err(CostError::TokensWithoutModel)));
+    Ok(())
+}
+
+#[test]
+fn an_unpriced_model_is_refused() -> TestResult {
+    let opus = model("opus")?;
+    let result = Cost::of(&prices(PRICES)?, Some(&opus), &Usage::tokens(1, 0, 0, 0));
+    assert!(matches!(result, Err(CostError::UnpricedModel { model }) if model == opus));
+    Ok(())
+}
+
+#[test]
+fn extreme_inputs_overflow_without_panic() -> TestResult {
+    let table = table("999999.999999999999", "999999.999999999999", "999999.999999999999")?;
+    let tokens = Usage::tokens(u64::MAX, u64::MAX, u64::MAX, u64::MAX);
+    let result = Cost::of(&table, Some(&model("m")?), &tokens);
+    assert!(matches!(result, Err(CostError::Overflow)));
+    let compute = Usage::compute(u64::MAX, u64::MAX);
+    assert!(matches!(Cost::of(&table, None, &compute), Err(CostError::Overflow)));
+    Ok(())
+}
+
+#[test]
+fn cost_addition_overflow_is_an_error() -> TestResult {
+    let table = table("999999.999999999999", "0", "0")?;
+    let big = Cost::of(&table, None, &Usage::compute(u64::MAX, 0))?;
+    let mut total = Cost::ZERO;
+    let mut overflowed = false;
+    for _ in 0..1_000_000 {
+        match total.checked_add(big) {
+            Ok(next) => total = next,
+            Err(CostError::Overflow) => {
+                overflowed = true;
+                break;
+            }
+            Err(other) => return Err(other.into()),
+        }
+    }
+    assert!(overflowed);
+    Ok(())
+}
+
+#[test]
+fn approx_cost_rounds_cents_half_up() {
+    assert_eq!(ApproxCost::from_micro(31_400_000).to_string(), "approx. cost: $31.40");
+    assert_eq!(ApproxCost::from_micro(4_999).to_string(), "approx. cost: $0.00");
+    assert_eq!(ApproxCost::from_micro(5_000).to_string(), "approx. cost: $0.01");
+    assert_eq!(ApproxCost::from_micro(995_000).to_string(), "approx. cost: $1.00");
+    assert_eq!(ApproxCost::from_micro(5_000).micro(), 5_000);
+    let max = ApproxCost::from_micro(u128::MAX).to_string();
+    assert!(max.starts_with("approx. cost: $"), "got: {max}");
+}
+
+fn small_usage() -> impl Strategy<Value = Usage> {
+    (
+        0_u64..1 << 40,
+        0_u64..1 << 40,
+        0_u64..1 << 40,
+        0_u64..1 << 40,
+        0_u64..1 << 40,
+        0_u64..1 << 40,
+    )
+        .prop_map(|(input, output, creation, read, vcpu, mem)| {
+            let tokens = Usage::tokens(input, output, creation, read);
+            tokens.checked_add(&Usage::compute(vcpu, mem)).unwrap_or(tokens)
+        })
+}
+
+fn priced(usage: &Usage) -> Result<Cost, TestCaseError> {
+    let table = prices(PRICES).map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let haiku = model("haiku").map_err(|error| TestCaseError::fail(error.to_string()))?;
+    Cost::of(&table, Some(&haiku), usage).map_err(|error| TestCaseError::fail(error.to_string()))
+}
+
+proptest! {
+    #[test]
+    fn micro_dollars_monotone(a in small_usage(), b in small_usage()) {
+        let sum = a.checked_add(&b).ok_or_else(|| TestCaseError::fail("usage overflowed"))?;
+        prop_assert!(priced(&a)?.micro_dollars() <= priced(&sum)?.micro_dollars());
+        prop_assert!(priced(&a)? <= priced(&sum)?);
+    }
+
+    #[test]
+    fn cost_addition_commutes(a in small_usage(), b in small_usage(), c in small_usage()) {
+        let (a, b, c) = (priced(&a)?, priced(&b)?, priced(&c)?);
+        let fail = |error: CostError| TestCaseError::fail(error.to_string());
+        prop_assert_eq!(a.checked_add(b).map_err(fail)?, b.checked_add(a).map_err(fail)?);
+        let left = a.checked_add(b).and_then(|ab| ab.checked_add(c)).map_err(fail)?;
+        let right = b.checked_add(c).and_then(|bc| a.checked_add(bc)).map_err(fail)?;
+        prop_assert_eq!(left, right);
+    }
+
+    #[test]
+    fn approx_cost_format(micro in any::<u128>()) {
+        let shown = ApproxCost::from_micro(micro).to_string();
+        let amount = shown.strip_prefix("approx. cost: $").ok_or_else(|| TestCaseError::fail(shown.clone()))?;
+        let (dollars, cents) = amount.split_once('.').ok_or_else(|| TestCaseError::fail(shown.clone()))?;
+        prop_assert!(!dollars.is_empty() && dollars.bytes().all(|byte| byte.is_ascii_digit()), "{}", shown);
+        prop_assert!(cents.len() == 2 && cents.bytes().all(|byte| byte.is_ascii_digit()), "{}", shown);
+    }
 }
