@@ -178,7 +178,7 @@ fn job_result() -> Result<JobResult, Box<dyn Error>> {
         Usage::compute(4_000, 2_048_000),
         backend(),
         logs(),
-    ))
+    )?)
 }
 
 /// `text` with the first `from` replaced by `to`; an error if `from` is missing, so no test is vacuous.
@@ -424,6 +424,37 @@ fn results_round_trip() -> TestResult {
     let text = serde_json::to_string(&result)?;
     assert_eq!(serde_json::from_str::<JobResult>(&text)?, result);
     assert_eq!(JobResult::parse_json(text.as_bytes())?, result);
+    Ok(())
+}
+
+#[test]
+fn a_result_carries_no_tokens() -> TestResult {
+    // A job is a VM run with no model call, so tokens are refused at the boundary rather than failing later in
+    // `Cost::of` with `TokensWithoutModel`.
+    for usage in [
+        Usage::tokens(1, 0, 0, 0),
+        Usage::tokens(0, 1, 0, 0),
+        Usage::tokens(0, 0, 1, 0),
+        Usage::tokens(0, 0, 0, 1),
+    ] {
+        let error = JobResult::new(
+            &candidate_request()?,
+            Outcome::TimedOut { stage: Stage::Run },
+            usage,
+            backend(),
+            logs(),
+        );
+        assert!(matches!(error, Err(JobError::TokensInJob)));
+    }
+    let text = serde_json::to_string(&job_result()?)?;
+    let error = result_rejected(&edit(&text, "\"input_tokens\":0", "\"input_tokens\":1")?)?;
+    assert!(matches!(error, JobError::TokensInJob));
+    let error = result_rejected(&edit(
+        &text,
+        "\"cache_read_input_tokens\":0",
+        "\"cache_read_input_tokens\":7",
+    )?)?;
+    assert!(matches!(error, JobError::TokensInJob));
     Ok(())
 }
 

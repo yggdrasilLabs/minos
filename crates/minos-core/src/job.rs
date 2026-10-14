@@ -59,6 +59,18 @@ pub enum JobError {
     /// A candidate request was built from the baseline experiment.
     #[error("the baseline is not a candidate")]
     BaselineAsCandidate,
+    /// A result's usage carries tokens. A job is a VM run with no model call, so its usage is compute time only;
+    /// tokens here would be an impossible ledger record that `Cost::of` could not price.
+    #[error("a job result carries compute usage only, never tokens")]
+    TokensInJob,
+}
+
+/// Checks that a job's usage carries no tokens: a VM run makes no model call.
+const fn check_usage(usage: Usage) -> Result<Usage, JobError> {
+    match usage.total_tokens() {
+        Some(0) => Ok(usage),
+        Some(_) | None => Err(JobError::TokensInJob),
+    }
 }
 
 /// Checks that `trial` is a valid trial index.
@@ -369,16 +381,20 @@ pub struct JobResult {
 
 impl JobResult {
     /// The result of `request`: the experiment, judge, and trial are copied from it, so a result always names the
-    /// trial it answers.
-    #[must_use]
-    pub const fn new(
+    /// trial it answers. `usage` is the VMs' compute time.
+    ///
+    /// # Errors
+    ///
+    /// [`JobError::TokensInJob`] if `usage` carries any tokens: a job makes no model call.
+    pub fn new(
         request: &JobRequest,
         outcome: Outcome,
         usage: Usage,
         backend: BackendInfo,
         logs: BTreeMap<Stage, BlobId>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, JobError> {
+        let usage = check_usage(usage)?;
+        Ok(Self {
             exp: request.exp,
             judge: request.judge,
             trial: request.trial,
@@ -386,14 +402,15 @@ impl JobResult {
             usage,
             backend,
             logs,
-        }
+        })
     }
 
     /// Parses job result JSON through the same checks as the deserializer.
     ///
     /// # Errors
     ///
-    /// [`JobError::Json`] for bytes that are not the wire form, [`JobError::Version`], or [`JobError::Trial`].
+    /// [`JobError::Json`] for bytes that are not the wire form, [`JobError::Version`], [`JobError::Trial`], or
+    /// [`JobError::TokensInJob`].
     pub fn parse_json(bytes: &[u8]) -> Result<Self, JobError> {
         let raw: RawJobResult = serde_json::from_slice(bytes).map_err(JobError::Json)?;
         Self::try_from(raw)
@@ -468,7 +485,7 @@ impl TryFrom<RawJobResult> for JobResult {
             judge: raw.judge,
             trial: check_trial(raw.trial)?,
             outcome: raw.outcome,
-            usage: raw.usage,
+            usage: check_usage(raw.usage)?,
             backend: raw.backend,
             logs: raw.logs,
         })
