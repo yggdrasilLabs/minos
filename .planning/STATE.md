@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-10-14T14:49:43.968Z"
+last_updated: "2026-10-14T15:00:34.521Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 25
+  completed_plans: 26
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -81,6 +81,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P07 | 9 min | 2 tasks | 3 files |
 | Phase 03 P08 | 5 min | 2 tasks | 2 files |
 | Phase 03 P09 | 5 min | 2 tasks | 26 files |
+| Phase 03 P10 | 7 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -157,6 +158,10 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-09: A job trial index must be below MAX_TRIALS (0 to 31); JobRequest::candidate refuses a diff blob that is not BlobId::of the canonical diff (DiffMismatch)
 - [Phase 03]: 03-09: Job JSON uses an integer v (1); ledger records keep the string tag; JobResult.logs is a stage-keyed JSON object
 - [Phase 03]: 03-09: The first golden wire files are 24 reviewed insta snapshots plus one SHA-256 pin over their bodies, computed with shasum from the .snap files
+- [Phase 03]: a second RunStarted equal to the first is a skipped duplicate; a different one is DuplicateRunStarted
+- [Phase 03]: FoldError gained ManifestConflict, since two ManifestChanged for one generation have different keys
+- [Phase 03]: next_note_ordinal returns Option<u32>; None once ordinal u32::MAX is used, so a note is never silently dropped
+- [Phase 03]: the fold refuses a Kept whose incumbent is not incumbent_before(generation), matching 03-11 conclude
 
 ### Pending Todos
 
@@ -181,6 +186,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T14:49:28.744Z
+Last session: 2026-10-14T15:00:21.840Z
 Stopped at: Completed 03-09-PLAN.md
 Resume file: None

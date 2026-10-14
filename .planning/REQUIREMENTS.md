@@ -39,7 +39,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **CORE-06**: `Metric` rejects NaN and infinities, normalizes `-0.0`, and implements `Ord` via `total_cmp`; a scorecard metric can be marked `held_out`
 - [x] **CORE-07**: `Outcome` is `Scored | Rejected(Reason) | Crashed | TimedOut`; failure is a value, never an error
 - [x] **CORE-08**: The `Event` set is frozen before golden files and includes `RunStarted`, `ManifestChanged`, `Proposed` (with parent, tier, rationale blob, model ID, prompt hash), `Judged` (with judge version, trial index, backend info), `Selected`, `Spent`, `Steered`, `StopRequested`, `ReviewRequested`, `Reviewed`, `ReportAcknowledged`; every event has a documented content-derived `EventKey`
-- [ ] **CORE-09**: Run state is only ever rebuilt by folding events; the fold is property-tested for determinism and golden-file tested for `Record::V1`
+- [x] **CORE-09**: Run state is only ever rebuilt by folding events; the fold is property-tested for determinism and golden-file tested for `Record::V1`
 - [ ] **CORE-10**: `select_greedy` applies `min_improvement`, breaks ties on `ExperimentId`, and is property-tested as permutation-invariant
 - [x] **CORE-11**: Routing is a pure function of manifest and ledger that moves one tier up after `STALL_STEP` generations without improvement; `ProposerSpec::eligible` reports a reason for every ineligible tier
 - [x] **CORE-12**: The sweep sampler is seeded, uses its own range mapping, and yields identical samples for identical seeds across runs
@@ -215,7 +215,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-06 | Phase 3 | Complete |
 | CORE-07 | Phase 3 | Complete |
 | CORE-08 | Phase 3 | Complete |
-| CORE-09 | Phase 3 | Pending |
+| CORE-09 | Phase 3 | Complete |
 | CORE-10 | Phase 3 | Pending |
 | CORE-11 | Phase 3 | Complete |
 | CORE-12 | Phase 3 | Complete |
