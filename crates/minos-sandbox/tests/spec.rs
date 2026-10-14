@@ -59,7 +59,10 @@ fn launch_key_prints_hex() -> TestResult {
     let key = LaunchKey::of::<Candidate>(&baseline_of_t(), &judge_ab()?, 0);
     let hex = key.to_hex();
     assert_eq!(hex.len(), 64);
-    assert!(hex.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')));
+    assert!(
+        hex.bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    );
     assert_eq!(key.to_string(), hex);
     assert!(format!("{key:?}").contains(&hex));
     assert_eq!(base16ct::lower::encode_string(key.as_bytes()), hex);
