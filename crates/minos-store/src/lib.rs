@@ -4,7 +4,7 @@
 //! no supertraits, because the local milestone has no async runtime. Every implementation keeps the same
 //! contract, and one test file (`tests/contract.rs`) runs every case against each of them:
 //!
-//! - `MemoryStore` (the `memory` module, from Task 2 of plan 04-02) holds everything in memory, for every test above the store.
+//! - [`MemoryStore`] holds everything in memory, for every test above the store.
 //! - `FileStore` (plan 04-05) keeps JSON Lines ledgers and blob files under the project's `.minos/` directory.
 //! - The AWS milestone's table and object stores implement the same traits.
 //!
@@ -28,8 +28,12 @@
 //! `Outcome`: a store fault is never blamed on a candidate. No variant carries file bytes; each names IDs,
 //! numbers, and fixed text only.
 
+pub mod memory;
+
 use minos_core::id::{BlobId, RunId};
 use minos_core::ledger::{Line, Record};
+
+pub use memory::MemoryStore;
 
 /// What an [`Ledger::append`] did. Every variant carries the `seq` of the line that holds the key.
 #[must_use]
@@ -74,6 +78,11 @@ pub struct LedgerRead {
 }
 
 impl LedgerRead {
+    /// A read of `lines`, which the store has verified, with `torn_tail` incomplete tail lines dropped.
+    pub(crate) const fn new(lines: Vec<Line>, torn_tail: u64) -> Self {
+        Self { lines, torn_tail }
+    }
+
     /// The lines, in `seq` order from 0.
     #[must_use]
     pub fn lines(&self) -> &[Line] {

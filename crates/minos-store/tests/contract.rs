@@ -126,7 +126,10 @@ fn runs_are_independent<L: Ledger>(ledger: &L) -> TestResult {
 }
 
 fn unknown_run_reads_empty<L: Ledger>(ledger: &L) -> TestResult {
-    ledger.append(&run(), steered(1, 0, b"note"))?;
+    assert_eq!(
+        ledger.append(&run(), steered(1, 0, b"note"))?,
+        Appended::New { seq: 0 }
+    );
 
     let read = ledger.read(&other_run())?;
 
