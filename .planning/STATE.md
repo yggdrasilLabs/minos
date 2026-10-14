@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: store-source-snapshot-and-sandbox-types
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-10-14T20:23:26.891Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-10-14T21:44:39.649Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 38
-  completed_plans: 31
+  completed_plans: 32
   percent: 38
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 04 (store-source-snapshot-and-sandbox-types) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 04 execution started
 
@@ -88,6 +88,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 03 P13 | 6 min | 3 tasks | 4 files |
 | Phase 04 P01 | 5min | 3 tasks | 13 files |
 | Phase 04 P02 | 5min | 2 tasks | 3 files |
+| Phase 04 P03 | 17min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-02: Appended is must_use and not non_exhaustive; a same-key different-record append returns Conflict and writes nothing (first write wins)
 - [Phase 04]: 04-02: LedgerRead::new is pub(crate); a store in another crate (AWS milestone) would need a public constructor
 - [Phase 04]: 04-02: only STORE-01 marked complete; STORE-03 and STORE-04 close with the file store in 04-05
+- [Phase 04]: 04-03: preflight takes the backend's Capabilities, not the backend, so the sandbox types need no Backend trait; the runner calls preflight(&backend.capabilities(), plan)
+- [Phase 04]: 04-03: InputDisk and JudgeData are publicly constructible in Phase 4; Phase 5 may restrict InputDisk; preflight refuses a Judge plan whose judge data equals its input disk
 
 ### Pending Todos
 
@@ -206,6 +209,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T20:23:26.887Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-10-14T21:44:39.644Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None

@@ -58,12 +58,12 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 ### Sandbox Types (SBX)
 
-- [ ] **SBX-01**: `SandboxSpec<R: Role>` exists for `Candidate` and `Judge`; only `SandboxSpec<Judge>` has a method to mount judge data; no role has a method to attach a network
+- [x] **SBX-01**: `SandboxSpec<R: Role>` exists for `Candidate` and `Judge`; only `SandboxSpec<Judge>` has a method to mount judge data; no role has a method to attach a network
 - [ ] **SBX-02**: `trybuild` compile-fail tests prove a `Candidate` spec cannot receive judge data and that `launch` cannot be called without `Cleared`
-- [ ] **SBX-03**: `seal()` is the only constructor of `LaunchPlan`; `preflight(host, plan) -> Result<Cleared, Vec<Refusal>>` is the only constructor of `Cleared`, and `Cleared` owns the plan
+- [x] **SBX-03**: `seal()` is the only constructor of `LaunchPlan`; `preflight(host, plan) -> Result<Cleared, Vec<Refusal>>` is the only constructor of `Cleared`, and `Cleared` owns the plan
 - [ ] **SBX-04**: `Untrusted<T>` has no `Deref`, `Display`, or `Debug`; its only exits are `into_scorecard`, `into_log_excerpt`, and `into_diff_texts`, each with caps
 - [ ] **SBX-05**: The output tar reader accepts regular files only, enforces caps on entry count, entry size, and total bytes, rejects path traversal, and never unpacks to disk; it has a fuzz corpus
-- [ ] **SBX-06**: Launches are idempotent: the launch key derives from `ExperimentId` plus role plus trial, and every launch carries a hard maximum duration
+- [x] **SBX-06**: Launches are idempotent: the launch key derives from `ExperimentId` plus role plus trial, and every launch carries a hard maximum duration
 
 ### Guest (GUEST)
 
@@ -228,12 +228,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORE-02 | Phase 4 | Pending |
 | STORE-03 | Phase 4 | Pending |
 | STORE-04 | Phase 4 | Pending |
-| SBX-01 | Phase 4 | Pending |
+| SBX-01 | Phase 4 | Complete |
 | SBX-02 | Phase 4 | Pending |
-| SBX-03 | Phase 4 | Pending |
+| SBX-03 | Phase 4 | Complete |
 | SBX-04 | Phase 4 | Pending |
 | SBX-05 | Phase 4 | Pending |
-| SBX-06 | Phase 4 | Pending |
+| SBX-06 | Phase 4 | Complete |
 | GUEST-01 | Phase 5 | Pending |
 | GUEST-02 | Phase 5 | Pending |
 | GUEST-03 | Phase 5 | Pending |
