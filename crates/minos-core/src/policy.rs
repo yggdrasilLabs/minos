@@ -1,5 +1,6 @@
 //! Pure selection policy: the scorecard gate check, the lower-median reduction of trials, the improvement test,
-//! greedy selection, the generation conclusion, and the noise check (CORE-10; 03-CONTEXT D-11, D-12).
+//! greedy selection, the generation conclusion, the noise check, the circuit breaker, and the spend check
+//! (CORE-10, CORE-17; 03-CONTEXT D-09, D-11, D-12, D-14).
 //!
 //! Every `if` that decides an experiment's fate lives here, and every function is a pure function of recorded
 //! results: no clock, no randomness, and no dependence on the order of its input. Trials are sorted before they
@@ -14,10 +15,11 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use crate::id::{ExperimentId, MetricName};
-use crate::ledger::{Decision, DecisionKind};
+use crate::ledger::{Decision, DecisionKind, SpendSource, StopReason};
 use crate::limits::{MIN_NOISE_TRIALS, NOISE_REFUSE_MULTIPLE, NOISE_WARN_MULTIPLE};
-use crate::manifest::{Goal, JudgeSpec, JudgeVersion, Manifest, Objective};
+use crate::manifest::{Budget, Goal, JudgeSpec, JudgeVersion, Manifest, Objective};
 use crate::metric::{Metric, Scorecard};
+use crate::money::{ApproxCost, Cost, CostError, Prices};
 use crate::outcome::{Outcome, Reason};
 use crate::state::RunState;
 
@@ -427,5 +429,103 @@ pub fn noise_check(floor: Option<&NoiseFloor>, objective: &Objective) -> NoiseVe
         NoiseVerdict::Warn
     } else {
         NoiseVerdict::Ok
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Circuit breaker
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The circuit breaker (CORE-17, D-14): whether the run must stop before its next generation.
+///
+/// It counts the consecutive [`DecisionKind::NoValidCandidates`] decisions walking down from
+/// [`RunState::last_concluded_generation`]; the walk ends at any other decision or at a generation with no
+/// decision. At least `max_empty_generations` of them gives [`StopReason::NoValidCandidates`]. Otherwise an
+/// `infra_streak` of at least `max_infra_failures` gives [`StopReason::InfraFailures`]. The empty streak is
+/// checked first, so when both limits are met the result is always [`StopReason::NoValidCandidates`]. Both limits
+/// are at least 1 (`Manifest::try_from`), so the breaker cannot be disabled, and it trips at exactly the limit,
+/// never a generation early.
+///
+/// Infrastructure failures are retried and are not [`Outcome`]s, so the ledger does not record them: the loop
+/// supplies the current streak from memory and records a trip as `StopRequested { reason: InfraFailures }`. A
+/// restart resets the streak, which is acceptable because a restart is a human action (03-RESEARCH Open
+/// Question 8).
+#[must_use]
+pub fn circuit_breaker(state: &RunState, budget: &Budget, infra_streak: u32) -> Option<StopReason> {
+    let limit = budget.max_empty_generations();
+    let mut empty: u32 = 0;
+    let mut generation = state.last_concluded_generation();
+    while generation > 0 && empty < limit {
+        match state.decision(generation).map(Decision::kind) {
+            Some(DecisionKind::NoValidCandidates) => {
+                empty = empty.saturating_add(1);
+                generation = generation.saturating_sub(1);
+            }
+            Some(DecisionKind::Improved { .. } | DecisionKind::Kept { .. }) | None => break,
+        }
+    }
+    if empty >= limit {
+        Some(StopReason::NoValidCandidates)
+    } else if infra_streak >= budget.max_infra_failures() {
+        Some(StopReason::InfraFailures)
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Spend check
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The result of [`spend_ok`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpendCheck {
+    /// Spend and tokens are within the manifest's caps.
+    Within {
+        /// The metered spend so far.
+        spent: ApproxCost,
+        /// The tokens used so far.
+        tokens: u64,
+    },
+    /// A cap is exceeded: [`StopReason::SpendCap`] or [`StopReason::TokenCap`].
+    Stop(StopReason),
+}
+
+/// Prices every recorded spend and compares the totals with the manifest's caps (D-09, COST-01).
+///
+/// Each [`SpendSource::ModelCall`] is priced with its model's rates, and each candidate and judge run with the
+/// compute rates alone, through [`Cost::of`], and the costs are summed with checked arithmetic. Spend strictly
+/// above [`Budget::spend_cap_micro`] stops with [`StopReason::SpendCap`]; otherwise total tokens strictly above
+/// [`Budget::max_tokens`] stop with [`StopReason::TokenCap`], and a token total that overflows counts as above.
+/// Dollars are derived here from usage and the user's price table and are never stored. The loop checks this
+/// before each generation and each model call (LOOP-07).
+///
+/// # Errors
+///
+/// A [`CostError`] when a recorded model has no rates in `prices` (even at zero tokens), or when a cost
+/// overflows. The loop stops and reports it: a spend it cannot price is never treated as free.
+pub fn spend_ok(
+    state: &RunState,
+    manifest: &Manifest,
+    prices: &Prices,
+) -> Result<SpendCheck, CostError> {
+    let mut total = Cost::ZERO;
+    for (_, spend) in state.spends() {
+        let model = match spend.source() {
+            SpendSource::ModelCall { model, .. } => Some(model),
+            SpendSource::Candidate { .. } | SpendSource::Judge { .. } => None,
+        };
+        total = total.checked_add(Cost::of(prices, model, spend.usage())?)?;
+    }
+    let budget = manifest.budget();
+    if total.micro_dollars() > budget.spend_cap_micro() {
+        return Ok(SpendCheck::Stop(StopReason::SpendCap));
+    }
+    match state.total_usage().total_tokens() {
+        Some(tokens) if tokens <= budget.max_tokens() => Ok(SpendCheck::Within {
+            spent: total.approx(),
+            tokens,
+        }),
+        Some(_) | None => Ok(SpendCheck::Stop(StopReason::TokenCap)),
     }
 }

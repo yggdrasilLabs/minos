@@ -156,7 +156,12 @@ fn kept(generation: u32) -> Record {
     )
 }
 
-fn model_call(generation: u32, call: u32, name: &str, usage: Usage) -> Result<Record, Box<dyn Error>> {
+fn model_call(
+    generation: u32,
+    call: u32,
+    name: &str,
+    usage: Usage,
+) -> Result<Record, Box<dyn Error>> {
     Ok(rec(Event::Spent {
         generation,
         source: SpendSource::ModelCall {
@@ -241,7 +246,10 @@ fn an_improvement_resets_the_empty_streak() -> TestResult {
         selected(2, DecisionKind::Improved { winner }),
         empty(3),
     ]);
-    assert_eq!(circuit_breaker(&state(&records)?, manifest.budget(), 0), None);
+    assert_eq!(
+        circuit_breaker(&state(&records)?, manifest.budget(), 0),
+        None
+    );
     Ok(())
 }
 
@@ -249,7 +257,10 @@ fn an_improvement_resets_the_empty_streak() -> TestResult {
 fn a_missing_generation_ends_the_empty_streak() -> TestResult {
     let manifest = breaker_manifest(3, 3)?;
     let records = ledger([empty(1), empty(2), empty(4), empty(5)]);
-    assert_eq!(circuit_breaker(&state(&records)?, manifest.budget(), 0), None);
+    assert_eq!(
+        circuit_breaker(&state(&records)?, manifest.budget(), 0),
+        None
+    );
     Ok(())
 }
 
@@ -344,10 +355,9 @@ fn spend_above_the_cap_stops() -> TestResult {
         SpendCheck::Stop(StopReason::SpendCap)
     );
     // At one micro-dollar per token, a million tokens is exactly $1, which is not above the cap.
-    let unit = Prices::parse_toml(&PRICES.replace(
-        r#"input_token = "0.000003""#,
-        r#"input_token = "0.000001""#,
-    ))?;
+    let unit = Prices::parse_toml(
+        &PRICES.replace(r#"input_token = "0.000003""#, r#"input_token = "0.000001""#),
+    )?;
     let at = ledger([
         model_call(1, 0, "mid", Usage::tokens(400_000, 0, 0, 0))?,
         model_call(2, 0, "mid", Usage::tokens(600_000, 0, 0, 0))?,
