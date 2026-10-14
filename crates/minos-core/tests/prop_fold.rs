@@ -128,7 +128,13 @@ fn proposed(
     generation: u32,
     tier: Tier,
 ) -> Result<Event, Box<dyn Error>> {
-    Ok(proposed_with(exp, parent, generation, tier, origin_for(tier)?))
+    Ok(proposed_with(
+        exp,
+        parent,
+        generation,
+        tier,
+        origin_for(tier)?,
+    ))
 }
 
 fn judged(exp: ExperimentId, trial: u32, outcome: Outcome) -> Result<Event, Box<dyn Error>> {
@@ -180,13 +186,7 @@ fn valid_ledger() -> Result<Vec<Record>, Box<dyn Error>> {
             usage: Usage::tokens(100, 20, 3, 4),
         }),
         rec(judged(e1, 0, scored(120.0)?)?),
-        rec(judged(
-            e2,
-            0,
-            Outcome::Crashed {
-                stage: Stage::Run,
-            },
-        )?),
+        rec(judged(e2, 0, Outcome::Crashed { stage: Stage::Run })?),
         rec(Event::Spent {
             generation: 1,
             source: SpendSource::Candidate { exp: e1, trial: 0 },
@@ -314,7 +314,10 @@ fn decisions_and_incumbents() -> TestResult {
         Some(&DecisionKind::Kept { incumbent: e1 })
     );
     assert!(state.decision(3).is_none());
-    let generations: Vec<u32> = state.decisions().map(|(generation, _)| generation).collect();
+    let generations: Vec<u32> = state
+        .decisions()
+        .map(|(generation, _)| generation)
+        .collect();
     assert_eq!(generations, vec![1, 2]);
     assert_eq!(state.last_concluded_generation(), 2);
     assert_eq!(state.incumbent_before(0), baseline());
@@ -448,11 +451,11 @@ fn an_empty_ledger_is_refused() -> TestResult {
 
 #[test]
 fn the_first_record_must_be_run_started() -> TestResult {
-    let records = [rec(judged(baseline(), 0, scored(1.0)?)?), rec(run_started())];
-    assert!(matches!(
-        fold_err(&records)?,
-        FoldError::FirstNotRunStarted
-    ));
+    let records = [
+        rec(judged(baseline(), 0, scored(1.0)?)?),
+        rec(run_started()),
+    ];
+    assert!(matches!(fold_err(&records)?, FoldError::FirstNotRunStarted));
     Ok(())
 }
 
@@ -512,10 +515,7 @@ fn a_wrong_baseline_is_refused() -> TestResult {
 #[test]
 fn the_same_key_with_different_content_conflicts() -> TestResult {
     let records = with(judged(exp(1)?, 0, scored(1.0)?)?)?;
-    assert!(matches!(
-        fold_err(&records)?,
-        FoldError::KeyConflict { .. }
-    ));
+    assert!(matches!(fold_err(&records)?, FoldError::KeyConflict { .. }));
     Ok(())
 }
 
@@ -578,20 +578,14 @@ fn a_parent_that_is_unknown_is_refused() -> TestResult {
 #[test]
 fn a_parent_from_the_same_generation_is_refused() -> TestResult {
     let records = with(proposed(exp(10)?, exp(1)?, 1, Tier::SingleShot)?)?;
-    assert!(matches!(
-        fold_err(&records)?,
-        FoldError::BadParent { .. }
-    ));
+    assert!(matches!(fold_err(&records)?, FoldError::BadParent { .. }));
     Ok(())
 }
 
 #[test]
 fn a_parent_from_a_later_generation_is_refused() -> TestResult {
     let records = with(proposed(exp(10)?, exp(3)?, 1, Tier::SingleShot)?)?;
-    assert!(matches!(
-        fold_err(&records)?,
-        FoldError::BadParent { .. }
-    ));
+    assert!(matches!(fold_err(&records)?, FoldError::BadParent { .. }));
     Ok(())
 }
 
