@@ -1,14 +1,20 @@
 //! The seeded sweep (CORE-12): the seed, the raw `ChaCha8` stream against a published known-answer vector, golden
-//! samples, determinism, and the range of every drawn value.
+//! samples, determinism, the range of every drawn value, and rendering a sample into a validated cumulative diff.
 //!
 //! Params are built by parsing a manifest through `Manifest::parse_toml`, so every param here is one a user could
 //! declare.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 
+use minos_core::diff::DiffError;
+use minos_core::diff::apply::{Tree, apply};
+use minos_core::diff::compose::ComposeError;
 use minos_core::id::{ManifestId, RunId, TreeId};
+use minos_core::limits::Limits;
 use minos_core::manifest::{Manifest, ParamDomain, ParamName, SweepParam};
-use minos_core::sweep::{ParamValue, Sample, SweepError, sample, seed};
+use minos_core::path::RelPath;
+use minos_core::sweep::{ParamValue, Sample, SweepError, render, sample, seed};
 use proptest::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use rand_core::{Rng, SeedableRng};
@@ -316,4 +322,372 @@ proptest! {
         prop_assert_eq!(samples.len(), expected);
         prop_assert!(samples.iter().all(|item| well_formed(manifest.params(), item)));
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------------------------------------------
+
+const CONF: &str = "src/conf.rs";
+const PARSE: &str = "src/parse.rs";
+
+/// The base `src/conf.rs`: the `WIDTH` line sits between two others, so the hunk carries context on both sides.
+const CONF_TEXT: &str = "// conf\nconst WIDTH: usize = 8;\nconst DEPTH: usize = 2;\n";
+
+/// A single-point integer param `name` in `file`, so `sample` always assigns `value`.
+fn fixed_int(name: &str, file: &str, anchor: &str, value: i64) -> String {
+    format!(
+        "\n[[param]]\nname = \"{name}\"\nfile = \"{file}\"\nanchor = \"{anchor}\"\nmin = {value}\nmax = {value}\nstep = 1\n"
+    )
+}
+
+fn rel(path: &str) -> Result<RelPath, Box<dyn Error>> {
+    Ok(RelPath::try_from(path)?)
+}
+
+/// A base tree with `src/conf.rs` set to `conf`, plus `src/parse.rs` and `src/lib.rs`.
+fn tree(conf: &[u8]) -> Result<Tree, Box<dyn Error>> {
+    let mut tree = Tree::new();
+    tree.insert(rel(CONF)?, conf.to_vec());
+    tree.insert(
+        rel(PARSE)?,
+        b"const CHUNK: usize = 4;\nfn parse() {}\n".to_vec(),
+    );
+    tree.insert(rel("src/lib.rs")?, b"pub mod parse;\n".to_vec());
+    Ok(tree)
+}
+
+/// The first sample of `params`, rendered against `base` with the manifest's writable set.
+fn render_first(
+    manifest: &Manifest,
+    base: &Tree,
+) -> Result<Result<minos_core::diff::Diff, SweepError>, Box<dyn Error>> {
+    let samples = sample(&golden_run(), 1, manifest.params(), 1)?;
+    let first = samples.first().ok_or("sample returned no sample")?;
+    Ok(render(
+        base,
+        manifest.params(),
+        first,
+        manifest.writable(),
+        &Limits::standard(),
+    ))
+}
+
+/// The UTF-8 text of `path` in `tree`.
+fn text_of(tree: &Tree, path: &str) -> Result<String, Box<dyn Error>> {
+    let bytes = tree.get(&rel(path)?).ok_or("the path is missing")?;
+    Ok(String::from_utf8(bytes.to_vec())?)
+}
+
+#[test]
+fn render_replaces_the_rest_of_the_anchored_line() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let diff = render_first(&manifest, &base)??;
+    assert_eq!(
+        diff.paths().map(RelPath::as_str).collect::<Vec<_>>(),
+        [CONF]
+    );
+    let applied = apply(&base, &diff)?;
+    assert_eq!(
+        text_of(&applied, CONF)?,
+        "// conf\nconst WIDTH: usize = 16\nconst DEPTH: usize = 2;\n"
+    );
+    assert_eq!(text_of(&applied, PARSE)?, text_of(&base, PARSE)?);
+    Ok(())
+}
+
+#[test]
+fn render_keeps_a_missing_final_newline() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let base = tree(b"// conf\nconst WIDTH: usize = 8;")?;
+    let diff = render_first(&manifest, &base)??;
+    assert_eq!(
+        text_of(&apply(&base, &diff)?, CONF)?,
+        "// conf\nconst WIDTH: usize = 16"
+    );
+    Ok(())
+}
+
+#[test]
+fn render_is_one_cumulative_diff_across_files() -> TestResult {
+    let params = format!(
+        "{}{}",
+        fixed_int("width", CONF, "const WIDTH: usize = ", 32),
+        fixed_int("chunk", PARSE, "const CHUNK: usize = ", 64)
+    );
+    let manifest = manifest(&params)?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let diff = render_first(&manifest, &base)??;
+    assert_eq!(
+        diff.paths().map(RelPath::as_str).collect::<Vec<_>>(),
+        [CONF, PARSE]
+    );
+    let applied = apply(&base, &diff)?;
+    assert_eq!(
+        text_of(&applied, CONF)?,
+        "// conf\nconst WIDTH: usize = 32\nconst DEPTH: usize = 2;\n"
+    );
+    assert_eq!(
+        text_of(&applied, PARSE)?,
+        "const CHUNK: usize = 64\nfn parse() {}\n"
+    );
+    Ok(())
+}
+
+#[test]
+fn render_is_deterministic() -> TestResult {
+    let manifest = manifest(&format!(
+        "{}{}",
+        fixed_int("width", CONF, "const WIDTH: usize = ", 32),
+        fixed_int("depth", CONF, "const DEPTH: usize = ", 3)
+    ))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let first = render_first(&manifest, &base)??;
+    let second = render_first(&manifest, &base)??;
+    assert_eq!(first.as_bytes(), second.as_bytes());
+    Ok(())
+}
+
+#[test]
+fn render_sampled_values_land_on_their_lines() -> TestResult {
+    let manifest = manifest(
+        r#"
+[[param]]
+name = "width"
+file = "src/conf.rs"
+anchor = "const WIDTH: usize = "
+min = 9
+max = 1000
+step = 7
+
+[[param]]
+name = "mode"
+file = "src/parse.rs"
+anchor = "const CHUNK: usize = "
+choices = ["fast", "small", "safe"]
+"#,
+    )?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    for item in sample(&golden_run(), 5, manifest.params(), 8)? {
+        let diff = render(
+            &base,
+            manifest.params(),
+            &item,
+            manifest.writable(),
+            &Limits::standard(),
+        )?;
+        let applied = apply(&base, &diff)?;
+        let width = item
+            .get(&name("width")?)
+            .ok_or("width unassigned")?
+            .render_text();
+        let mode = item
+            .get(&name("mode")?)
+            .ok_or("mode unassigned")?
+            .render_text();
+        assert_eq!(
+            text_of(&applied, CONF)?,
+            format!("// conf\nconst WIDTH: usize = {width}\nconst DEPTH: usize = 2;\n")
+        );
+        assert_eq!(
+            text_of(&applied, PARSE)?,
+            format!("const CHUNK: usize = {mode}\nfn parse() {{}}\n")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn render_of_the_base_values_is_no_change() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 8))?;
+    let base = tree(b"// conf\nconst WIDTH: usize = 8\n")?;
+    assert!(matches!(
+        render_first(&manifest, &base)?,
+        Err(SweepError::NoChange)
+    ));
+    Ok(())
+}
+
+#[test]
+fn render_refuses_a_missing_anchor() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const HEIGHT: usize = ", 16))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let error = render_first(&manifest, &base)?;
+    assert_eq!(
+        error,
+        Err(SweepError::AnchorMissing {
+            name: name("width")?
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn render_refuses_an_ambiguous_anchor() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const ", 16))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let error = render_first(&manifest, &base)?;
+    assert_eq!(
+        error,
+        Err(SweepError::AnchorAmbiguous {
+            name: name("width")?
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn render_refuses_two_params_on_one_line() -> TestResult {
+    let manifest = manifest(&format!(
+        "{}{}",
+        fixed_int("width", CONF, "const WIDTH: usize = ", 16),
+        fixed_int("wide", CONF, "const WIDTH", 32)
+    ))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let error = render_first(&manifest, &base)?;
+    assert_eq!(
+        error,
+        Err(SweepError::AnchorConflict {
+            name: name("wide")?
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn render_matches_anchors_against_the_base_not_earlier_edits() -> TestResult {
+    // The first param's new value would make the second anchor match the WIDTH line; matching is against the
+    // base, so the second anchor still finds no line.
+    let manifest = manifest(&format!(
+        "{}{}",
+        fixed_int("width", CONF, "const WIDTH: usize = ", 16),
+        fixed_int("wide", CONF, "const WIDTH: usize = 1", 32)
+    ))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let error = render_first(&manifest, &base)?;
+    assert_eq!(
+        error,
+        Err(SweepError::AnchorMissing {
+            name: name("wide")?
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn render_refuses_a_missing_file() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let mut base = Tree::new();
+    base.insert(rel(PARSE)?, b"fn parse() {}\n".to_vec());
+    let error = render_first(&manifest, &base)?;
+    assert_eq!(error, Err(SweepError::FileMissing { path: rel(CONF)? }));
+    Ok(())
+}
+
+#[test]
+fn render_refuses_a_file_that_is_not_text() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let base = tree(b"const WIDTH: usize = 8;\n\xff\n")?;
+    let error = render_first(&manifest, &base)?;
+    assert_eq!(error, Err(SweepError::NotText { path: rel(CONF)? }));
+    Ok(())
+}
+
+#[test]
+fn render_cannot_edit_a_file_outside_the_writable_set() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let samples = sample(&golden_run(), 1, manifest.params(), 1)?;
+    let first = samples.first().ok_or("sample returned no sample")?;
+    let writable: BTreeSet<RelPath> = [rel(PARSE)?].into_iter().collect();
+    let error = render(
+        &base,
+        manifest.params(),
+        first,
+        &writable,
+        &Limits::standard(),
+    );
+    assert!(matches!(
+        error,
+        Err(SweepError::Compose(ComposeError::Invalid(
+            DiffError::NotWritable { .. }
+        )))
+    ));
+    Ok(())
+}
+
+#[test]
+fn render_of_a_carriage_return_file_fails_diff_validation() -> TestResult {
+    let manifest = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let base = tree(b"// conf\r\nconst WIDTH: usize = 8;\r\n")?;
+    assert!(matches!(
+        render_first(&manifest, &base)?,
+        Err(SweepError::Compose(ComposeError::Invalid(_)))
+    ));
+    Ok(())
+}
+
+#[test]
+fn render_refuses_a_sample_from_other_params() -> TestResult {
+    let drawn = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let other = manifest(&fixed_int("depth", CONF, "const DEPTH: usize = ", 3))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let samples = sample(&golden_run(), 1, drawn.params(), 1)?;
+    let first = samples.first().ok_or("sample returned no sample")?;
+    let error = render(
+        &base,
+        other.params(),
+        first,
+        other.writable(),
+        &Limits::standard(),
+    );
+    assert_eq!(
+        error,
+        Err(SweepError::Undeclared {
+            name: name("width")?
+        })
+    );
+    let both = manifest(&format!(
+        "{}{}",
+        fixed_int("width", CONF, "const WIDTH: usize = ", 16),
+        fixed_int("depth", CONF, "const DEPTH: usize = ", 3)
+    ))?;
+    let error = render(
+        &base,
+        both.params(),
+        first,
+        both.writable(),
+        &Limits::standard(),
+    );
+    assert_eq!(
+        error,
+        Err(SweepError::Unassigned {
+            name: name("depth")?
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn render_refuses_a_value_outside_the_domain() -> TestResult {
+    let drawn = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 16))?;
+    let narrower = manifest(&fixed_int("width", CONF, "const WIDTH: usize = ", 17))?;
+    let base = tree(CONF_TEXT.as_bytes())?;
+    let samples = sample(&golden_run(), 1, drawn.params(), 1)?;
+    let first = samples.first().ok_or("sample returned no sample")?;
+    let error = render(
+        &base,
+        narrower.params(),
+        first,
+        narrower.writable(),
+        &Limits::standard(),
+    );
+    assert_eq!(
+        error,
+        Err(SweepError::Domain {
+            name: name("width")?
+        })
+    );
+    Ok(())
 }
