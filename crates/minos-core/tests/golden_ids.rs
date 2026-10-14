@@ -2,14 +2,14 @@
 //!
 //! Every hex literal below was computed outside the code under test with `/usr/bin/shasum -a 256` and `xxd`; the
 //! shell recipe sits in a comment above each literal so a reviewer can recompute it. These are plain `assert_eq!`
-//! checks on hex literals and never insta snapshots, so they cannot be auto-accepted.
+//! checks on hex literals and never snapshot assertions, so they cannot be auto-accepted.
 
 use std::error::Error;
 use std::str::FromStr;
 
 use minos_core::id::{
-    BlobId, ExperimentId, IdHasher, IdParseError, ImageDigest, ManifestId, MetricName, ModelId, NameError,
-    PricesId, PromptHash, ReportHash, RunId, TreeId,
+    BlobId, ExperimentId, IdHasher, IdParseError, ImageDigest, ManifestId, MetricName, ModelId,
+    NameError, PricesId, PromptHash, ReportHash, RunId, TreeId,
 };
 use proptest::prelude::*;
 
@@ -113,13 +113,25 @@ fn id_parse_is_strict() -> TestResult {
     assert_eq!(parsed, BlobId::of(b"abc"));
 
     let upper = ABC_SHA256.to_uppercase();
-    assert!(matches!(BlobId::from_str(&upper), Err(IdParseError::Malformed)));
+    assert!(matches!(
+        BlobId::from_str(&upper),
+        Err(IdParseError::Malformed)
+    ));
     let short = ABC_SHA256.get(..63).ok_or("63-character prefix")?;
-    assert!(matches!(BlobId::from_str(short), Err(IdParseError::Malformed)));
+    assert!(matches!(
+        BlobId::from_str(short),
+        Err(IdParseError::Malformed)
+    ));
     let long = format!("{ABC_SHA256}0");
-    assert!(matches!(BlobId::from_str(&long), Err(IdParseError::Malformed)));
+    assert!(matches!(
+        BlobId::from_str(&long),
+        Err(IdParseError::Malformed)
+    ));
     let non_hex = format!("g{}", ABC_SHA256.get(1..).ok_or("suffix")?);
-    assert!(matches!(BlobId::from_str(&non_hex), Err(IdParseError::Malformed)));
+    assert!(matches!(
+        BlobId::from_str(&non_hex),
+        Err(IdParseError::Malformed)
+    ));
     assert!(matches!(BlobId::from_str(""), Err(IdParseError::Malformed)));
     Ok(())
 }
@@ -147,17 +159,32 @@ fn metric_name_grammar() -> TestResult {
     assert_eq!(name.as_str(), "throughput_mb_s");
     assert_eq!(name.to_string(), "throughput_mb_s");
 
-    assert!(matches!(MetricName::from_str("Throughput"), Err(NameError::BadStart)));
-    assert!(matches!(MetricName::from_str("1abc"), Err(NameError::BadStart)));
+    assert!(matches!(
+        MetricName::from_str("Throughput"),
+        Err(NameError::BadStart)
+    ));
+    assert!(matches!(
+        MetricName::from_str("1abc"),
+        Err(NameError::BadStart)
+    ));
     assert!(matches!(MetricName::from_str(""), Err(NameError::Empty)));
     assert!(matches!(
         MetricName::from_str(&"a".repeat(65)),
         Err(NameError::TooLong { max: 64 })
     ));
     assert!(MetricName::from_str(&"a".repeat(64)).is_ok());
-    assert!(matches!(MetricName::from_str("a\tb"), Err(NameError::BadByte { index: 1 })));
-    assert!(matches!(MetricName::from_str("ab\u{7f}"), Err(NameError::BadByte { index: 2 })));
-    assert!(matches!(MetricName::from_str("aB"), Err(NameError::BadByte { index: 1 })));
+    assert!(matches!(
+        MetricName::from_str("a\tb"),
+        Err(NameError::BadByte { index: 1 })
+    ));
+    assert!(matches!(
+        MetricName::from_str("ab\u{7f}"),
+        Err(NameError::BadByte { index: 2 })
+    ));
+    assert!(matches!(
+        MetricName::from_str("aB"),
+        Err(NameError::BadByte { index: 1 })
+    ));
     Ok(())
 }
 
@@ -177,8 +204,14 @@ fn model_id_grammar() -> TestResult {
     assert!(ModelId::from_str(&"m".repeat(128)).is_ok());
 
     assert!(matches!(ModelId::from_str(""), Err(NameError::Empty)));
-    assert!(matches!(ModelId::from_str(".haiku"), Err(NameError::BadStart)));
-    assert!(matches!(ModelId::from_str("a b"), Err(NameError::BadByte { index: 1 })));
+    assert!(matches!(
+        ModelId::from_str(".haiku"),
+        Err(NameError::BadStart)
+    ));
+    assert!(matches!(
+        ModelId::from_str("a b"),
+        Err(NameError::BadByte { index: 1 })
+    ));
     assert!(matches!(
         ModelId::from_str(&"m".repeat(129)),
         Err(NameError::TooLong { max: 128 })
