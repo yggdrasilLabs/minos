@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 current_phase_name: core-types-and-pure-logic
-status: executing
-stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-10-14T15:27:26.337Z"
+status: verifying
+stopped_at: Completed 03-13-PLAN.md
+last_updated: "2026-10-14T15:36:57.029Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 03 execution started
+last_activity_desc: Completed 03-13-PLAN.md; Phase 03 ready for verification
 progress:
   total_phases: 8
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 29
-  completed_plans: 28
-  percent: 25
+  completed_plans: 29
+  percent: 38
 ---
 
 # Project State
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
-Last activity: 2026-10-14 — Phase 03 execution started
+Status: Phase complete — ready for verification
+Last activity: 2026-10-14 — Completed 03-13-PLAN.md; Phase 03 ready for verification (cargo clean done)
 
-Progress: [█████░░░░░] 55% (16 of 29 plans)
+Progress: [██████████] 100% (29 of 29 plans)
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P10 | 7 min | 2 tasks | 3 files |
 | Phase 03 P11 | 8 min | 3 tasks | 6 files |
 | Phase 03 P12 | 8min | 2 tasks | 4 files |
+| Phase 03 P13 | 6 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -170,6 +171,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-12: build_report refuses a target whose diff blob does not hash to its ExperimentId, and any blob that does not match its BlobId
 - [Phase 03]: 03-12: summary clears_noise is the delta magnitude above NOISE_WARN_MULTIPLE x spread; a zero spread counts as no noise floor, so the anomaly flag falls back to the largest earlier lineage step
 - [Phase 03]: 03-12: provenance lists every EXPECTED_KRUN_LAYERS member missing from any lineage trial as reduced hardening; only weak isolation raises a flag
+- [Phase 03]: 03-13: minos-core exposes explicit crate-root pub use re-exports and keeps every module public
+- [Phase 03]: 03-13: GATE-06 is marked green only after cargo clean runs; no cargo command runs after it in the phase
 
 ### Pending Todos
 
@@ -194,6 +197,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T15:27:17.609Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-10-14T15:36:49.542Z
+Stopped at: Completed 03-13-PLAN.md
 Resume file: None

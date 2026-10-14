@@ -45,7 +45,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Workspace and Gates** - Five plain cargo commands enforce lints, supply-chain policy, and crate layering from the first commit (completed 2026-10-09)
 - [x] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md (completed 2026-10-10)
-- [ ] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core`
+- [x] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core` (completed 2026-10-14)
 - [ ] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts
 - [ ] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor`
 - [ ] **Phase 6: Proposers** - Seeded sweep and a locked-down `claude -p` single_shot behind the `ModelProvider` abstraction
@@ -156,7 +156,7 @@ Plans:
   4. Money, contracts, and display are safe by construction. `Spent` carries usage only, never dollars. Price rates parse from strings into pico-dollar `u128` with integer micro-dollar totals and no float. `JobRequest` and `JobResult` define the loop-to-runner contract. The renderer strips C0, C1, and ESC sequences and shows bidi and zero-width characters visibly (CORE-13, CORE-14, CORE-15, COST-01)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 12/13 plans executed
+**Plans**: 13/13 plans complete
 Plans:
 **Wave 1**
 
@@ -190,7 +190,7 @@ Plans:
 
 **Wave 7** *(blocked on all prior plans)*
 
-- [ ] 03-13-PLAN.md — Crate-root re-exports, CLAUDE.md, validation map, deliberate-violation evidence, full gate, then `cargo clean` (wave 7)
+- [x] 03-13-PLAN.md — Crate-root re-exports, CLAUDE.md, validation map, deliberate-violation evidence, full gate, then `cargo clean` (wave 7)
 
 **Ordering constraint**: CORE-08 (freeze the `Event` set and document every `EventKey`) lands before any golden wire-format file is committed
 **Research**: Standard patterns; skip research-phase
@@ -296,7 +296,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 |-------|----------------|--------|-----------|
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
-| 3. Core Types and Pure Logic | 12/13 | In Progress|  |
+| 3. Core Types and Pure Logic | 13/13 | Complete   | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |
 | 6. Proposers | 0/TBD | Not started | - |
