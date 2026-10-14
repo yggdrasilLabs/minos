@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 4
-current_phase_name: Store, Source Snapshot, and Sandbox Types
+current_phase: 04
+current_phase_name: store-source-snapshot-and-sandbox-types
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-10-14T18:11:21.182Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-10-14T18:37:24.131Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 8
   completed_phases: 3
-  total_plans: 29
-  completed_plans: 29
+  total_plans: 38
+  completed_plans: 30
   percent: 38
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 03 — core-types-and-pure-logic
+**Current focus:** Phase 04 — store-source-snapshot-and-sandbox-types
 
 ## Current Position
 
-Phase: 4 — Store, Source Snapshot, and Sandbox Types
-Plan: Not started
+Phase: 04 (store-source-snapshot-and-sandbox-types) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-10-14 — Phase 03 complete, transitioned to Phase 4
+Last activity: 2026-10-14 — Phase 04 execution started
 
 Progress: [██████████] 100% (29 of 29 plans)
 
@@ -86,6 +86,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 03 P11 | 8 min | 3 tasks | 6 files |
 | Phase 03 P12 | 8min | 2 tasks | 4 files |
 | Phase 03 P13 | 6 min | 3 tasks | 4 files |
+| Phase 04 P01 | 5min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-12: provenance lists every EXPECTED_KRUN_LAYERS member missing from any lineage trial as reduced hardening; only weak isolation raises a flag
 - [Phase 03]: 03-13: minos-core exposes explicit crate-root pub use re-exports and keeps every module public
 - [Phase 03]: 03-13: GATE-06 is marked green only after cargo clean runs; no cargo command runs after it in the phase
+- [Phase 04]: 04-01: packer, denylist, secret scan, and git clean check live in new library crate minos-source; only minos-cli links it (deny.toml wrapper; a minos-loop edge is refused)
+- [Phase 04]: 04-01: crate clippy bans for tar and ignore use public re-export paths (tar::Builder, tar::Entry, ignore::WalkBuilder); all 24 entries fire once
+- [Phase 04]: 04-01: CLI-11, SBX-05, STORE-02 checkboxes left open; 04-05, 04-06, and 04-07 deliver them
 
 ### Pending Todos
 
@@ -198,6 +202,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T16:54:42.857Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-store-source-snapshot-and-sandbox-types/04-CONTEXT.md
+Last session: 2026-10-14T18:36:54.931Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
