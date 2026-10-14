@@ -156,7 +156,7 @@ Plans:
   4. Money, contracts, and display are safe by construction. `Spent` carries usage only, never dollars. Price rates parse from strings into pico-dollar `u128` with integer micro-dollar totals and no float. `JobRequest` and `JobResult` define the loop-to-runner contract. The renderer strips C0, C1, and ESC sequences and shows bidi and zero-width characters visibly (CORE-13, CORE-14, CORE-15, COST-01)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 8/13 plans executed
+**Plans**: 9/13 plans executed
 Plans:
 **Wave 1**
 
@@ -177,7 +177,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion; first golden wire files)*
 
 - [x] 03-08-PLAN.md — Seeded sweep sampler and sample rendering (wave 4)
-- [ ] 03-09-PLAN.md — `JobRequest`/`JobResult` and the golden wire snapshots with a byte pin (wave 4)
+- [x] 03-09-PLAN.md — `JobRequest`/`JobResult` and the golden wire snapshots with a byte pin (wave 4)
 - [ ] 03-10-PLAN.md — The fold to `RunState`, permutation-invariant and tamper-detecting (wave 4)
 
 **Wave 5** *(blocked on 03-10)*
@@ -296,7 +296,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 |-------|----------------|--------|-----------|
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
-| 3. Core Types and Pure Logic | 8/13 | In Progress|  |
+| 3. Core Types and Pure Logic | 9/13 | In Progress|  |
 | 4. Store, Source Snapshot, and Sandbox Types | 0/TBD | Not started | - |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |
 | 6. Proposers | 0/TBD | Not started | - |
