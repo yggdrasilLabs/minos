@@ -6,8 +6,8 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 
-use minos_core::diff::Diff;
 use minos_core::diff::apply::{ApplyError, Tree, apply};
+use minos_core::diff::{Diff, FileDiff, HunkLine};
 use minos_core::limits::Limits;
 use minos_core::outcome::Reason;
 use minos_core::path::{PathError, RelPath};
@@ -66,20 +66,41 @@ fn applied(base: &str, diff: &Diff) -> Result<Vec<u8>, Box<dyn Error>> {
     src_of(&apply(&tree_with(base.as_bytes())?, diff)?)
 }
 
+/// `line 1\n` to `line N\n`.
+fn numbered(count: u32) -> String {
+    (1..=count).fold(String::new(), |mut text, n| {
+        text.push_str("line ");
+        text.push_str(&n.to_string());
+        text.push('\n');
+        text
+    })
+}
+
 fn fail<E: std::fmt::Display>(error: E) -> TestCaseError {
     TestCaseError::fail(error.to_string())
 }
 
 /// File contents over a small line alphabet, with and without a final newline.
 fn file_text() -> impl Strategy<Value = String> {
+    text_of(0)
+}
+
+/// Like [`file_text`], with at least one line, so a diff against it always reads a base line.
+fn non_empty_text() -> impl Strategy<Value = String> {
+    text_of(1)
+}
+
+fn text_of(min_lines: usize) -> impl Strategy<Value = String> {
     let line = prop::sample::select(vec!["a", "b", "c", "", " d", "-- a/x", "\\ No newline"]);
-    (prop::collection::vec(line, 0..12), any::<bool>()).prop_map(|(lines, final_newline)| {
-        let mut text = lines.join("\n");
-        if final_newline && !lines.is_empty() {
-            text.push('\n');
-        }
-        text
-    })
+    (prop::collection::vec(line, min_lines..12), any::<bool>()).prop_map(
+        |(lines, final_newline)| {
+            let mut text = lines.join("\n");
+            if final_newline && !lines.is_empty() {
+                text.push('\n');
+            }
+            text
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -111,13 +132,16 @@ fn tree_accessors() -> TestResult {
 fn applies_a_simple_modify() -> TestResult {
     let base = "fn parse() {\n    old();\n}\n";
     let modified = "fn parse() {\n    new();\n}\n";
-    assert_eq!(applied(base, &diff_of(base, modified)?)?, modified.as_bytes());
+    assert_eq!(
+        applied(base, &diff_of(base, modified)?)?,
+        modified.as_bytes()
+    );
     Ok(())
 }
 
 #[test]
 fn applies_several_hunks_in_one_file() -> TestResult {
-    let base: String = (1..=30).map(|n| format!("line {n}\n")).collect();
+    let base = numbered(30);
     let modified = base
         .replace("line 2\n", "line two\n")
         .replace("line 28\n", "line twenty-eight\nextra\n");
@@ -184,7 +208,9 @@ fn applies_to_an_empty_file() -> TestResult {
 #[test]
 fn rejects_a_context_mismatch() -> TestResult {
     let diff = diff_of("a\nb\nc\n", "a\nB\nc\n")?;
-    let error = apply(&tree_with(b"a\nb\nX\n")?, &diff).err().ok_or("applied")?;
+    let error = apply(&tree_with(b"a\nb\nX\n")?, &diff)
+        .err()
+        .ok_or("applied")?;
     assert_eq!(
         error,
         ApplyError::ContextMismatch {
@@ -219,7 +245,14 @@ fn never_searches_another_offset() -> TestResult {
     let error = apply(&tree_with(b"x\ny\na\nb\nc\n")?, &diff)
         .err()
         .ok_or("applied")?;
-    assert!(matches!(error, ApplyError::ContextMismatch { hunk: 1, line: 1, .. }));
+    assert!(matches!(
+        error,
+        ApplyError::ContextMismatch {
+            hunk: 1,
+            line: 1,
+            ..
+        }
+    ));
     Ok(())
 }
 
@@ -245,7 +278,9 @@ fn rejects_a_hunk_past_the_end() -> TestResult {
     let diff = parse(
         "diff --git a/src/parse.rs b/src/parse.rs\n--- a/src/parse.rs\n+++ b/src/parse.rs\n@@ -9,1 +9,1 @@\n-a\n+b\n",
     )?;
-    let error = apply(&tree_with(b"a\nb\n")?, &diff).err().ok_or("applied")?;
+    let error = apply(&tree_with(b"a\nb\n")?, &diff)
+        .err()
+        .ok_or("applied")?;
     assert_eq!(
         error,
         ApplyError::OutOfRange {
@@ -263,7 +298,9 @@ fn rejects_a_hunk_past_the_end() -> TestResult {
     let insert = parse(
         "diff --git a/src/parse.rs b/src/parse.rs\n--- a/src/parse.rs\n+++ b/src/parse.rs\n@@ -3,0 +4,1 @@\n+b\n",
     )?;
-    let error = apply(&tree_with(b"a\nb\n")?, &insert).err().ok_or("applied")?;
+    let error = apply(&tree_with(b"a\nb\n")?, &insert)
+        .err()
+        .ok_or("applied")?;
     assert!(matches!(error, ApplyError::OutOfRange { hunk: 1, .. }));
     Ok(())
 }
@@ -273,7 +310,9 @@ fn rejects_a_hunk_that_runs_past_the_end() -> TestResult {
     let diff = parse(
         "diff --git a/src/parse.rs b/src/parse.rs\n--- a/src/parse.rs\n+++ b/src/parse.rs\n@@ -2,2 +2,2 @@\n b\n-c\n+C\n",
     )?;
-    let error = apply(&tree_with(b"a\nb\n")?, &diff).err().ok_or("applied")?;
+    let error = apply(&tree_with(b"a\nb\n")?, &diff)
+        .err()
+        .ok_or("applied")?;
     assert!(matches!(error, ApplyError::OutOfRange { hunk: 1, .. }));
     Ok(())
 }
@@ -295,14 +334,16 @@ fn rejects_a_new_end_of_file_before_the_base_ends() -> TestResult {
     let diff = parse(
         "diff --git a/src/parse.rs b/src/parse.rs\n--- a/src/parse.rs\n+++ b/src/parse.rs\n@@ -1,1 +1,1 @@\n-a\n+x\n\\ No newline at end of file\n",
     )?;
-    let error = apply(&tree_with(b"a\nb\n")?, &diff).err().ok_or("applied")?;
+    let error = apply(&tree_with(b"a\nb\n")?, &diff)
+        .err()
+        .ok_or("applied")?;
     assert!(matches!(error, ApplyError::OutOfRange { hunk: 1, .. }));
     Ok(())
 }
 
 #[test]
 fn reports_the_failing_hunk_number() -> TestResult {
-    let base: String = (1..=30).map(|n| format!("line {n}\n")).collect();
+    let base = numbered(30);
     let modified = base
         .replace("line 2\n", "line two\n")
         .replace("line 28\n", "line twenty-eight\n");
@@ -360,18 +401,18 @@ proptest! {
     }
 
     #[test]
-    fn context_change_is_rejected(base in file_text(), modified in file_text(), pick in any::<prop::sample::Index>(), byte in any::<u8>()) {
+    fn context_change_is_rejected(base in non_empty_text(), modified in file_text(), pick in any::<prop::sample::Index>(), byte in any::<u8>()) {
         prop_assume!(base != modified);
         let diff = diff_of(&base, &modified).map_err(fail)?;
         // Every base line the diff reads (context or delete), as a 0-based line index.
         let mut read = Vec::new();
-        for hunk in diff.files().iter().flat_map(|file| file.hunks()) {
+        for hunk in diff.files().iter().flat_map(FileDiff::hunks) {
             let mut index = usize::try_from(hunk.old_start()).map_err(fail)?;
             if hunk.old_len() > 0 {
                 index = index.saturating_sub(1);
             }
             for line in hunk.lines() {
-                if !matches!(line, minos_core::diff::HunkLine::Insert(_)) {
+                if !matches!(line, HunkLine::Insert(_)) {
                     read.push(index);
                     index += 1;
                 }
