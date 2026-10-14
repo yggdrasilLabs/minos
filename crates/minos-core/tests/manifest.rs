@@ -9,8 +9,9 @@ use std::str::FromStr;
 use minos_core::id::{MetricName, ModelId};
 use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::manifest::{
-    ChoiceList, CommandArgv, DurationMs, Eligibility, Goal, IneligibleReason, IntRange, MinImprovement,
-    ParamDomain, ParamName, ProjectName, ProposerSpec, SourceExclude, SweepParam, Tier,
+    ChoiceList, CommandArgv, DurationMs, Eligibility, Goal, IneligibleReason, IntRange,
+    MinImprovement, ParamDomain, ParamName, ProjectName, ProposerSpec, SourceExclude, SweepParam,
+    Tier,
 };
 use minos_core::path::RelPath;
 
@@ -79,7 +80,10 @@ fn image_ref_rejects_a_tag_beside_a_digest() -> TestResult {
 
 #[test]
 fn image_ref_rejects_a_missing_digest() -> TestResult {
-    assert!(matches!(image_rejected("alpine")?, ImageError::MissingDigest));
+    assert!(matches!(
+        image_rejected("alpine")?,
+        ImageError::MissingDigest
+    ));
     Ok(())
 }
 
@@ -134,7 +138,10 @@ fn base_images_accepts_pins_scratch_and_stage_aliases() -> TestResult {
     let shown: Vec<String> = refs.iter().map(ToString::to_string).collect();
     assert_eq!(
         shown,
-        vec![format!("alpine@sha256:{HEX}"), format!("rust@sha256:{HEX2}")]
+        vec![
+            format!("alpine@sha256:{HEX}"),
+            format!("rust@sha256:{HEX2}")
+        ]
     );
     Ok(())
 }
@@ -142,35 +149,50 @@ fn base_images_accepts_pins_scratch_and_stage_aliases() -> TestResult {
 #[test]
 fn base_images_rejects_a_tagged_from() -> TestResult {
     let error = dockerfile_rejected("# base\nFROM alpine:3.20\n")?;
-    assert!(matches!(error, ImageError::Unpinned { line: 2 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::Unpinned { line: 2 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
 #[test]
 fn base_images_rejects_a_variable_from() -> TestResult {
     let error = dockerfile_rejected("ARG BASE\nFROM $BASE\n")?;
-    assert!(matches!(error, ImageError::Variable { line: 2 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::Variable { line: 2 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
 #[test]
 fn base_images_rejects_a_braced_variable_with_a_digest() -> TestResult {
     let error = dockerfile_rejected(&format!("FROM ${{BASE}}@sha256:{HEX}\n"))?;
-    assert!(matches!(error, ImageError::Variable { line: 1 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::Variable { line: 1 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
 #[test]
 fn base_images_rejects_a_from_with_no_image() -> TestResult {
     let error = dockerfile_rejected("FROM --platform=linux/arm64\n")?;
-    assert!(matches!(error, ImageError::EmptyFrom { line: 1 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::EmptyFrom { line: 1 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
 #[test]
 fn base_images_reports_the_first_line_of_a_continued_from() -> TestResult {
     let error = dockerfile_rejected("RUN true\nFROM \\\n  alpine:3.20\n")?;
-    assert!(matches!(error, ImageError::Unpinned { line: 2 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::Unpinned { line: 2 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
@@ -184,15 +206,23 @@ fn base_images_skips_comments_inside_a_continuation() -> TestResult {
 
 #[test]
 fn base_images_rejects_a_flag_without_a_value() -> TestResult {
-    let error = dockerfile_rejected(&format!("FROM --platform linux/arm64 alpine@sha256:{HEX}\n"))?;
-    assert!(matches!(error, ImageError::MalformedFrom { line: 1 }), "got: {error}");
+    let error = dockerfile_rejected(&format!(
+        "FROM --platform linux/arm64 alpine@sha256:{HEX}\n"
+    ))?;
+    assert!(
+        matches!(error, ImageError::MalformedFrom { line: 1 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
 #[test]
 fn base_images_rejects_a_changed_escape_character() -> TestResult {
     let error = dockerfile_rejected(&format!("# escape=`\nFROM alpine@sha256:{HEX}\n"))?;
-    assert!(matches!(error, ImageError::EscapeDirective { line: 1 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::EscapeDirective { line: 1 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
@@ -201,7 +231,10 @@ fn base_images_rejects_an_unpinned_syntax_frontend() -> TestResult {
     let error = dockerfile_rejected(&format!(
         "# syntax=docker/dockerfile:1\nFROM alpine@sha256:{HEX}\n"
     ))?;
-    assert!(matches!(error, ImageError::Unpinned { line: 1 }), "got: {error}");
+    assert!(
+        matches!(error, ImageError::Unpinned { line: 1 }),
+        "got: {error}"
+    );
     let pinned = format!("# syntax=docker/dockerfile@sha256:{HEX2}\nFROM alpine@sha256:{HEX}\n");
     assert_eq!(base_images(&pinned)?.len(), 1);
     Ok(())
@@ -270,8 +303,14 @@ fn command_argv_program_paths() -> TestResult {
     assert_eq!(dot.program(), Some(&path("judge")?));
     let nested = CommandArgv::try_from(argv(&["judge/run.sh", "--fast"]))?;
     assert_eq!(nested.program(), Some(&path("judge/run.sh")?));
-    assert_eq!(nested.as_slice(), argv(&["judge/run.sh", "--fast"]).as_slice());
-    assert_eq!(CommandArgv::try_from(argv(&["/usr/bin/python3"]))?.program(), None);
+    assert_eq!(
+        nested.as_slice(),
+        argv(&["judge/run.sh", "--fast"]).as_slice()
+    );
+    assert_eq!(
+        CommandArgv::try_from(argv(&["/usr/bin/python3"]))?.program(),
+        None
+    );
     assert_eq!(CommandArgv::try_from(argv(&["python3"]))?.program(), None);
     assert!(CommandArgv::try_from(argv(&["./../x"])).is_err());
     assert!(CommandArgv::try_from(argv(&["a/../x"])).is_err());
@@ -293,7 +332,9 @@ fn duration_parses_seconds_minutes_and_hours() -> TestResult {
 
 #[test]
 fn duration_rejects_out_of_range_and_malformed_text() {
-    for bad in ["0s", "61m", "2", "2 m", "-1m", "1.5m", "2min", "", "m", "1234567s", "2h"] {
+    for bad in [
+        "0s", "61m", "2", "2 m", "-1m", "1.5m", "2min", "", "m", "1234567s", "2h",
+    ] {
         assert!(DurationMs::parse(bad).is_err(), "{bad:?} accepted");
     }
 }
@@ -327,7 +368,9 @@ fn min_improvement_parses_an_absolute_amount() -> TestResult {
 
 #[test]
 fn min_improvement_rejects_bad_text() {
-    for bad in ["1001%", "-1%", "1e3", "abc", "", "%", ".5", "5.", "5 %", "+5%", "1.2.3", "5%%"] {
+    for bad in [
+        "1001%", "-1%", "1e3", "abc", "", "%", ".5", "5.", "5 %", "+5%", "1.2.3", "5%%",
+    ] {
         assert!(MinImprovement::parse(bad).is_err(), "{bad:?} accepted");
     }
 }
@@ -335,12 +378,24 @@ fn min_improvement_rejects_bad_text() {
 #[test]
 fn min_improvement_threshold_never_divides() -> TestResult {
     let five = MinImprovement::parse("5%")?;
-    assert_eq!(five.threshold_at(200.0).map(f64::to_bits), Some(10.0_f64.to_bits()));
-    assert_eq!(five.threshold_at(-200.0).map(f64::to_bits), Some(10.0_f64.to_bits()));
-    assert_eq!(five.threshold_at(0.0).map(f64::to_bits), Some(0.0_f64.to_bits()));
+    assert_eq!(
+        five.threshold_at(200.0).map(f64::to_bits),
+        Some(10.0_f64.to_bits())
+    );
+    assert_eq!(
+        five.threshold_at(-200.0).map(f64::to_bits),
+        Some(10.0_f64.to_bits())
+    );
+    assert_eq!(
+        five.threshold_at(0.0).map(f64::to_bits),
+        Some(0.0_f64.to_bits())
+    );
     assert_eq!(five.threshold_at(f64::INFINITY), None);
     let quarter = MinImprovement::parse("0.25")?;
-    assert_eq!(quarter.threshold_at(1e9).map(f64::to_bits), Some(0.25_f64.to_bits()));
+    assert_eq!(
+        quarter.threshold_at(1e9).map(f64::to_bits),
+        Some(0.25_f64.to_bits())
+    );
     Ok(())
 }
 
@@ -366,7 +421,10 @@ fn tier_rank_follows_declaration_order() {
 #[test]
 fn tier_serializes_in_snake_case() -> TestResult {
     assert_eq!(serde_json::to_string(&Tier::SingleShot)?, "\"single_shot\"");
-    assert!(matches!(serde_json::from_str::<Tier>("\"agentic\"")?, Tier::Agentic));
+    assert!(matches!(
+        serde_json::from_str::<Tier>("\"agentic\"")?,
+        Tier::Agentic
+    ));
     Ok(())
 }
 
@@ -387,7 +445,10 @@ fn sweep_eligibility_needs_a_param() -> TestResult {
         sweep.declared_eligibility(&[]),
         Eligibility::Ineligible(IneligibleReason::NoParams)
     ));
-    assert!(matches!(sweep.declared_eligibility(&[sample_param()?]), Eligibility::Eligible));
+    assert!(matches!(
+        sweep.declared_eligibility(&[sample_param()?]),
+        Eligibility::Eligible
+    ));
     Ok(())
 }
 
@@ -399,7 +460,10 @@ fn single_shot_eligibility_needs_a_model() -> TestResult {
         Eligibility::Ineligible(IneligibleReason::NoModel)
     ));
     let modelled = ProposerSpec::new(Tier::SingleShot, Some(ModelId::from_str("mid")?), 4)?;
-    assert!(matches!(modelled.declared_eligibility(&[]), Eligibility::Eligible));
+    assert!(matches!(
+        modelled.declared_eligibility(&[]),
+        Eligibility::Eligible
+    ));
     Ok(())
 }
 
@@ -430,7 +494,10 @@ fn ineligible_reasons_have_fixed_text() {
         IneligibleReason::NoParams,
         IneligibleReason::NoModel,
         IneligibleReason::NotInThisRelease,
-        IneligibleReason::SurfaceTooLarge { bytes: 300_000, limit: 262_144 },
+        IneligibleReason::SurfaceTooLarge {
+            bytes: 300_000,
+            limit: 262_144,
+        },
     ] {
         assert!(!reason.to_string().is_empty());
     }
@@ -458,7 +525,10 @@ fn int_range_rejects_bad_bounds() {
     assert!(IntRange::new(1, 2, 0).is_err(), "step 0 accepted");
     assert!(IntRange::new(1, 2, -1).is_err(), "negative step accepted");
     assert!(IntRange::new(0, 999_999, 1).is_ok());
-    assert!(IntRange::new(0, 1_000_000, 1).is_err(), "over MAX_PARAM_POINTS accepted");
+    assert!(
+        IntRange::new(0, 1_000_000, 1).is_err(),
+        "over MAX_PARAM_POINTS accepted"
+    );
     assert!(IntRange::new(i64::MIN, i64::MAX, 1).is_err());
 }
 
@@ -469,10 +539,22 @@ fn choice_list_rules() -> TestResult {
     assert_eq!(list.get(1), Some("small"));
     assert_eq!(list.get(2), None);
     assert!(ChoiceList::new(Vec::new()).is_err(), "empty accepted");
-    assert!(ChoiceList::new(argv(&["a", "a"])).is_err(), "duplicate accepted");
-    assert!(ChoiceList::new(argv(&["a\nb"])).is_err(), "newline accepted");
-    assert!(ChoiceList::new(argv(&[""])).is_err(), "empty choice accepted");
-    assert!(ChoiceList::new(vec!["a".repeat(257)]).is_err(), "long choice accepted");
+    assert!(
+        ChoiceList::new(argv(&["a", "a"])).is_err(),
+        "duplicate accepted"
+    );
+    assert!(
+        ChoiceList::new(argv(&["a\nb"])).is_err(),
+        "newline accepted"
+    );
+    assert!(
+        ChoiceList::new(argv(&[""])).is_err(),
+        "empty choice accepted"
+    );
+    assert!(
+        ChoiceList::new(vec!["a".repeat(257)]).is_err(),
+        "long choice accepted"
+    );
     let many: Vec<String> = (0..65).map(|index| format!("c{index}")).collect();
     assert!(ChoiceList::new(many).is_err(), "65 choices accepted");
     Ok(())
@@ -494,7 +576,10 @@ fn sweep_param_anchor_rules() -> TestResult {
     assert_eq!(param.name().as_str(), "chunk");
     assert!(matches!(param.domain(), ParamDomain::Choices(list) if list.len() == 2));
     assert!(make(String::new()).is_err(), "empty anchor accepted");
-    assert!(make("a\tb".to_owned()).is_err(), "control character accepted");
+    assert!(
+        make("a\tb".to_owned()).is_err(),
+        "control character accepted"
+    );
     assert!(make("a".repeat(257)).is_err(), "long anchor accepted");
     assert!(make("a".repeat(256)).is_ok());
     Ok(())
@@ -526,6 +611,9 @@ fn source_exclude_covers_case_insensitively_at_component_boundaries() -> TestRes
 
 #[test]
 fn metric_names_used_in_the_manifest_are_core_names() -> TestResult {
-    assert_eq!(MetricName::from_str("throughput_mb_s")?.as_str(), "throughput_mb_s");
+    assert_eq!(
+        MetricName::from_str("throughput_mb_s")?.as_str(),
+        "throughput_mb_s"
+    );
     Ok(())
 }
