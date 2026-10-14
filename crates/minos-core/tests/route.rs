@@ -148,7 +148,9 @@ fn sweep_proposal(exp: ExperimentId, generation: u32) -> Record {
 /// A ledger whose generations 1 to `count` each ended with no valid candidate.
 fn stalled(count: u32) -> Vec<Record> {
     let mut records = vec![run_started()];
-    records.extend((1..=count).map(|generation| selected(generation, DecisionKind::NoValidCandidates)));
+    records.extend(
+        (1..=count).map(|generation| selected(generation, DecisionKind::NoValidCandidates)),
+    );
     records
 }
 
@@ -329,7 +331,10 @@ fn an_improvement_resets_routing_to_the_lowest_tier() -> TestResult {
         selected(4, DecisionKind::Improved { winner }),
     ]);
     let route = routed(&manifest, &records)?;
-    assert_eq!((route.tier(), route.stall(), route.step()), (Tier::Sweep, 0, 0));
+    assert_eq!(
+        (route.tier(), route.stall(), route.step()),
+        (Tier::Sweep, 0, 0)
+    );
     records.push(selected(5, DecisionKind::NoValidCandidates));
     let route = routed(&manifest, &records)?;
     assert_eq!((route.tier(), route.stall()), (Tier::Sweep, 1));
