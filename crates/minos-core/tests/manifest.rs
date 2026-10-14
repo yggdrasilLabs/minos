@@ -904,9 +904,16 @@ fn absent_source_and_readable_are_empty() -> TestResult {
         "[source]\nexclude = [\"judge/\", \"docs/\", \"target/\"]\n",
         "",
     )?;
+    // With no excludes, the judge command may name no project path (rule 6), so it is a program on PATH.
+    let text = edit(
+        &text,
+        r#"command = ["./judge"]"#,
+        r#"command = ["judge-bin"]"#,
+    )?;
     let manifest = Manifest::parse_toml(&text)?;
     assert!(manifest.readable().is_empty());
     assert!(manifest.excludes().is_empty());
+    assert!(manifest.judge().paths().is_empty());
     Ok(())
 }
 
@@ -1381,8 +1388,48 @@ fn bare_judge_words_are_not_judge_paths() -> TestResult {
 }
 
 #[test]
+fn rejects_a_judge_path_outside_the_source_excludes() -> TestResult {
+    // The judge runs from its own pushed data; a judge path the snapshot would pack is refused, so the candidate
+    // sandbox never sees the scorer's source. `example_with_judge_command` drops "judge/" from the excludes.
+    for (command, path) in [
+        (r#"["./judge"]"#, "judge"),
+        (r#"["python3", "judge/score.py"]"#, "judge/score.py"),
+    ] {
+        let error = rejected(&example_with_judge_command(command)?)?;
+        assert!(
+            matches!(&error, ManifestError::JudgeNotExcluded { path: found } if found.as_str() == path),
+            "{command}: got: {error}"
+        );
+    }
+    // Covered by an exclude entry, in any ASCII case, it is accepted.
+    let text = example(
+        r#"exclude = ["judge/", "docs/", "target/"]"#,
+        r#"exclude = ["Judge/", "docs/", "target/"]"#,
+    )?;
+    assert!(Manifest::parse_toml(&text).is_ok());
+    Ok(())
+}
+
+#[test]
+fn rejects_readable_judge_path() -> TestResult {
+    let text = example(
+        r#"readable = ["src/lib.rs"]"#,
+        r#"readable = ["src/lib.rs", "judge"]"#,
+    )?;
+    let error = rejected(&text)?;
+    assert!(
+        matches!(&error, ManifestError::JudgeReadable { path } if path.as_str() == "judge"),
+        "got: {error}"
+    );
+    Ok(())
+}
+
+#[test]
 fn judge_flags_and_absolute_paths_are_not_judge_paths() -> TestResult {
-    let text = example_with_judge_command(r#"["./judge", "--out=/out/score.json", "-v"]"#)?;
+    let text = example(
+        r#"command = ["./judge"]"#,
+        r#"command = ["./judge", "--out=/out/score.json", "-v"]"#,
+    )?;
     let manifest = Manifest::parse_toml(&text)?;
     assert_eq!(strings(manifest.judge().paths()), ["judge"]);
     Ok(())

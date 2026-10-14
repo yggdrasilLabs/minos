@@ -9,14 +9,17 @@
 //!    `max_infra_failures` have minimums of 1, so the circuit breaker cannot be disabled; 03-CONTEXT D-13, D-14).
 //! 2. The surface (03-CONTEXT D-01): `writable` holds 1 to 64 exact files with no duplicates, `readable` has no
 //!    duplicates, and the two are disjoint as exact path sets.
-//! 3. Judge integrity: `writable` contains no judge path, and neither `program` nor the Dockerfile.
+//! 3. Judge integrity: `writable` contains no judge path, and neither `program` nor the Dockerfile; `readable`
+//!    contains no judge path, so the proposer never receives the scorer's source in its prompt.
 //! 4. No `writable` or `readable` path lies under a `[source] exclude` entry (compared case-insensitively).
 //! 5. No two distinct paths among `writable`, `readable`, `program`, the Dockerfile, and the judge paths are equal
 //!    under ASCII case folding, which fails closed on a case-insensitive filesystem.
-//! 6. The policy is greedy (pareto and review are not in this release) with exactly one objective.
-//! 7. No metric name is shared among gates, objectives, and held-out metrics.
-//! 8. Params have unique names and live in writable files.
-//! 9. Proposers have one entry per tier, and at least one is eligible on manifest facts alone.
+//! 6. Every judge path lies under a `[source] exclude` entry, so the judge program is never in the source
+//!    snapshot the candidate sandbox sees (the judge runs from its own pushed data, never from the tree).
+//! 7. The policy is greedy (pareto and review are not in this release) with exactly one objective.
+//! 8. No metric name is shared among gates, objectives, and held-out metrics.
+//! 9. Params have unique names and live in writable files.
+//! 10. Proposers have one entry per tier, and at least one is eligible on manifest facts alone.
 //!
 //! **Judge paths** are the `[source] exclude` entries (rule 4) plus every judge argv entry that names a
 //! project-relative path: the program and every later argument, or the text after the first `=` of an option. An
@@ -26,8 +29,9 @@
 //! [`CommandArgv::program`]. Otherwise one leading `./` is stripped, and what remains must be a valid
 //! [`RelPath`], which is then a judge path. An entry that looks like a path but is not a valid [`RelPath`], and
 //! an option without `=` that has a `/` or `\`, is refused rather than ignored. So
-//! `["python3", "judge/score.py"]` makes `judge/score.py` a judge path and nothing of `python3`, and the judge
-//! path cannot be writable. Only the judge command is read this way, never build, run, or check.
+//! `["python3", "judge/score.py"]` makes `judge/score.py` a judge path and nothing of `python3`; the judge path
+//! can be neither writable nor readable, and must lie under a `[source] exclude` entry (rules 3 and 6). Only the
+//! judge command is read this way, never build, run, or check.
 //!
 //! **The `[judge] version` integer** is a local label naming which pushed judge data the project uses. The
 //! recorded identity is [`JudgeVersion`]: the hash of that data's tree and the canonical judge spec. Judge data
@@ -1461,6 +1465,21 @@ pub enum ManifestError {
         /// The excluded path.
         path: RelPath,
     },
+    /// A readable path is named by the judge command: the proposer must never see the scorer's source.
+    #[error("{path} is named by judge.command, so it cannot be in surface.readable")]
+    JudgeReadable {
+        /// The judge path.
+        path: RelPath,
+    },
+    /// A path the judge command names is not under any `[source] exclude` entry, so it would be packed into the
+    /// source snapshot the candidate sandbox sees.
+    #[error(
+        "{path} is named by judge.command but no [source] exclude entry covers it; the judge must stay out of the source snapshot"
+    )]
+    JudgeNotExcluded {
+        /// The judge path.
+        path: RelPath,
+    },
     /// The policy kind is not available in this release.
     #[error("policy kind {kind} is not available in this release; use greedy")]
     PolicyNotAvailable {
@@ -1799,7 +1818,8 @@ impl TryFrom<RawManifest> for Manifest {
             });
         }
 
-        // 3. Judge integrity: nothing the judge command names, and neither program nor Dockerfile, is writable.
+        // 3. Judge integrity: nothing the judge command names, and neither program nor Dockerfile, is writable,
+        //    and nothing the judge command names is readable.
         let paths = judge_paths(&command)?;
         let program = project.program;
         let dockerfile = environment.dockerfile;
@@ -1815,6 +1835,9 @@ impl TryFrom<RawManifest> for Manifest {
                     with,
                 });
             }
+        }
+        if let Some(path) = paths.iter().find(|path| readable.contains(*path)) {
+            return Err(ManifestError::JudgeReadable { path: path.clone() });
         }
 
         // 4. No surface path under an exclude entry.
@@ -1842,7 +1865,15 @@ impl TryFrom<RawManifest> for Manifest {
                 .chain(&paths),
         )?;
 
-        // 6. Policy.
+        // 6. Every judge path lies under an exclude entry, so the judge program never enters the snapshot.
+        if let Some(path) = paths
+            .iter()
+            .find(|path| !excludes.iter().any(|exclude| exclude.covers(path)))
+        {
+            return Err(ManifestError::JudgeNotExcluded { path: path.clone() });
+        }
+
+        // 7. Policy.
         match policy.kind {
             RawPolicyKind::Greedy => {}
             RawPolicyKind::Pareto => {
@@ -1861,7 +1892,7 @@ impl TryFrom<RawManifest> for Manifest {
             }
         };
 
-        // 7. Metric names are unique across gates, objectives, and held-out metrics.
+        // 8. Metric names are unique across gates, objectives, and held-out metrics.
         let mut metrics = BTreeSet::new();
         let declared = gates
             .iter()
@@ -1877,7 +1908,7 @@ impl TryFrom<RawManifest> for Manifest {
             }
         }
 
-        // 8. Params: unique names, each in a writable file.
+        // 9. Params: unique names, each in a writable file.
         let mut names = BTreeSet::new();
         for param in &params {
             if !names.insert(param.name()) {
@@ -1892,7 +1923,7 @@ impl TryFrom<RawManifest> for Manifest {
             }
         }
 
-        // 9. Proposers: one per tier, at least one eligible.
+        // 10. Proposers: one per tier, at least one eligible.
         proposers.sort_by_key(ProposerSpec::tier);
         if proposers
             .windows(2)

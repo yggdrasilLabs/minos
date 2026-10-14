@@ -64,6 +64,9 @@ program = "program.md"
 [surface]
 writable = ["src/parse.rs"]
 
+[source]
+exclude = ["judge/"]
+
 [environment]
 dockerfile = "minos.Dockerfile"
 requires = {{ arch = "arm64" }}
