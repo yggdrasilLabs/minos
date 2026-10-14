@@ -34,7 +34,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **CORE-01**: `ExperimentId`, `BlobId`, `ManifestId`, `TreeId`, `PricesId`, `JudgeVersion` are distinct SHA-256 newtypes; composite IDs use a domain-separation prefix and length-prefixed fields; golden vectors guard every hash
 - [x] **CORE-02**: `RelPath` rejects `..`, absolute paths, empty strings, and non-normal components, and is property-tested
 - [ ] **CORE-03**: `Manifest::try_from(RawManifest)` enforces: `writable` non-empty and disjoint from `readable` and judge paths, policy matches objective count, budgets within `limits.rs`, at least one eligible proposer tier; `RawManifest` uses `deny_unknown_fields`. Images are digests: `ImageRef` and `image::base_images` reject any Dockerfile `FROM` line that is not digest-pinned (amended 2026-10-14, user decision: the v1 manifest names a Dockerfile rather than an image, so the check runs on the Dockerfile text and `Manifest::try_from` stays pure)
-- [ ] **CORE-04**: `Diff::parse(text, &manifest)` enforces a size cap, requires every touched path in `writable`, rejects renames, mode changes, symlinks, and binary patches, and re-serializes to canonical bytes that are what `ExperimentId` hashes
+- [x] **CORE-04**: `Diff::parse(text, &manifest)` enforces a size cap, requires every touched path in `writable`, rejects renames, mode changes, symlinks, and binary patches, and re-serializes to canonical bytes that are what `ExperimentId` hashes
 - [ ] **CORE-05**: A strict exact-position patch applier in core applies a canonical `Diff` to an in-memory tree and fails on any context mismatch; the guest and `adopt` use this same applier
 - [ ] **CORE-06**: `Metric` rejects NaN and infinities, normalizes `-0.0`, and implements `Ord` via `total_cmp`; a scorecard metric can be marked `held_out`
 - [ ] **CORE-07**: `Outcome` is `Scored | Rejected(Reason) | Crashed | TimedOut`; failure is a value, never an error
@@ -210,7 +210,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-01 | Phase 3 | Complete |
 | CORE-02 | Phase 3 | Complete |
 | CORE-03 | Phase 3 | Pending |
-| CORE-04 | Phase 3 | Pending |
+| CORE-04 | Phase 3 | Complete |
 | CORE-05 | Phase 3 | Pending |
 | CORE-06 | Phase 3 | Pending |
 | CORE-07 | Phase 3 | Pending |

@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Phase 3 planned (13 plans, 7 waves); ready to execute
-last_updated: "2026-10-14T13:19:48.774Z"
+last_updated: "2026-10-14T13:35:32.230Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 17
+  completed_plans: 18
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -73,6 +73,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 02 P10 | 7min | 3 tasks | 5 files |
 | Phase 02 P11 | 9min | 2 tasks | 2 files |
 | Phase 03 P01 | 6min | 3 tasks | 26 files |
+| Phase 03 P02 | 9 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-01: serde_json float_roundtrip on workspace-wide; .config/insta.yaml update: no, so the gate never writes snapshots
 - [Phase 03]: 03-01: IdHasher is public (Phase 4 LaunchKey); digest_id! is pub(crate) for JudgeVersion, EventKey, SpendId, ReviewId in later plans
 - [Phase 03]: 03-01: RelPath is an ASCII [A-Za-z0-9._+-] grammar with bytewise Ord; ascii_case_key exists only for the 03-05 case-fold collision check
+- [Phase 03]: 03-02: HunkLine::text excludes the trailing newline; has_newline reports it
+- [Phase 03]: 03-02: a no-newline marker closes its side for the rest of the section (no later line of that side, no later hunk)
+- [Phase 03]: 03-02: stage 7 re-runs stages 1-5 on the canonical text so every Diff re-parses under the same caps; file and hunk caps fire in the stage 2 grammar
 
 ### Pending Todos
 
@@ -149,6 +153,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T13:19:36.080Z
+Last session: 2026-10-14T13:35:19.310Z
 Stopped at: Phase 3 planned and verified (plan checker passed on revision 1; coverage gates 18/18 requirements, 18/18 decisions). Next: /gsd-execute-phase 3
 Resume file: .planning/phases/03-core-types-and-pure-logic/03-01-PLAN.md
