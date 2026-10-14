@@ -48,8 +48,8 @@
 //! new record version, `"v":"2"`.
 //!
 //! No ledger type holds a 128-bit integer or a dollar amount: serde cannot carry a 128-bit integer inside an
-//! internally tagged enum,
-//! and dollars are derived from [`Usage`] and the user's price table, never stored (COST-01).
+//! internally tagged enum, and dollars are derived from [`Usage`] and the user's price table, never stored
+//! (COST-01).
 
 use std::collections::BTreeSet;
 use std::fmt;

@@ -1034,3 +1034,103 @@ fn closed_enums_serialize_as_snake_case() -> TestResult {
     );
     Ok(())
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Golden key vectors
+// ---------------------------------------------------------------------------------------------------------------
+//
+// Every literal below was computed outside the code under test with `printf`, `xxd -r -p`, and
+// `/usr/bin/shasum -a 256`, following the encodings in the `ledger` module docs; the recipe sits above each
+// literal. The run is the golden_ids.rs RunId (manifest `m`, base `t`, 1760000000):
+// RUN=6a65b71b41e24c3b7d21e317e6a8fc29a41fcd29085ec93bbe13aa9b464c56cb
+// Plan 03-09's Line snapshots pin the other kinds' keys byte for byte.
+
+/// The 03-05 `JudgeVersion` golden vector, reused as a fixed judge.
+const GOLDEN_JUDGE: &str = "3a2f24af3506ea83d0d0450c710b7813c5db892a487399d34a6d8cf894b0bc12";
+
+#[test]
+fn run_started_key_golden_vector() -> TestResult {
+    // { printf 'minos/event/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 1 | xxd -r -p; } \
+    //   | /usr/bin/shasum -a 256
+    let event = one_of_each()?
+        .into_iter()
+        .next()
+        .ok_or("one_of_each is empty")?;
+    assert_eq!(
+        event.key(&run()).to_hex(),
+        "bbac84d088b6f76added7798ffd7e3f97681db8ef3de0952ad039e293755afb8"
+    );
+    Ok(())
+}
+
+#[test]
+fn judged_key_golden_vector() -> TestResult {
+    // EXP=6fd8be380eff4cb315d50a3f594a1baa7241164600eb22e68978748be04a75cb   # ExperimentId::baseline(t)
+    // JV=3a2f24af3506ea83d0d0450c710b7813c5db892a487399d34a6d8cf894b0bc12
+    // { printf 'minos/event/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 4 | xxd -r -p;
+    //   printf '%s' "$EXP" | xxd -r -p; printf '%s' "$JV" | xxd -r -p; printf '%016x' 2 | xxd -r -p; } \
+    //   | /usr/bin/shasum -a 256
+    let event = Event::Judged {
+        exp: ExperimentId::baseline(&TreeId::of(b"t")),
+        judge: JudgeVersion::from_str(GOLDEN_JUDGE)?,
+        trial: 2,
+        outcome: Outcome::TimedOut { stage: Stage::Run },
+        backend: backend(Isolation::Hardware, &EXPECTED_KRUN_LAYERS),
+    };
+    assert_eq!(
+        event.key(&run()).to_hex(),
+        "135717dd1d86cf9b8abfcab7b979f1df0da7ab78f8f45f0087c0795535f70b0c"
+    );
+    Ok(())
+}
+
+#[test]
+fn stop_requested_key_golden_vector() {
+    // { printf 'minos/event/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 8 | xxd -r -p;
+    //   printf '%016x' 3 | xxd -r -p; printf '%016x' 1 | xxd -r -p; } | /usr/bin/shasum -a 256
+    let event = Event::StopRequested {
+        generation: 3,
+        reason: StopReason::UserStop,
+    };
+    assert_eq!(
+        event.key(&run()).to_hex(),
+        "a1ceffd3a6ce3985cacd08e42c5acc64c636aef49b3a635ed1106945a51595c4"
+    );
+}
+
+#[test]
+fn spend_id_and_spent_key_golden_vectors() -> TestResult {
+    let source = SpendSource::ModelCall {
+        call: 0,
+        model: haiku()?,
+    };
+    // { printf 'minos/spend/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 1 | xxd -r -p;
+    //   printf '%016x' 1 | xxd -r -p; printf '%016x' 0 | xxd -r -p; printf '%016x' 5 | xxd -r -p;
+    //   printf 'haiku'; } | /usr/bin/shasum -a 256
+    let spend = "8ce6004e03487d662b8a03af64d8582abd0aab9a3408f4cc4348093a3168e691";
+    assert_eq!(SpendId::of(&run(), 1, &source).to_hex(), spend);
+    // SPEND=8ce6004e03487d662b8a03af64d8582abd0aab9a3408f4cc4348093a3168e691
+    // { printf 'minos/event/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 6 | xxd -r -p;
+    //   printf '%s' "$SPEND" | xxd -r -p; } | /usr/bin/shasum -a 256
+    let event = Event::Spent {
+        generation: 1,
+        source,
+        usage: Usage::tokens(100, 20, 3, 4),
+    };
+    assert_eq!(
+        event.key(&run()).to_hex(),
+        "b8949c911a694b628efb3ca307478d8d33f4d7ba0588529adc97ca7fab3089be"
+    );
+    Ok(())
+}
+
+#[test]
+fn review_id_golden_vector() {
+    // SUBJ=$(printf 'review' | /usr/bin/shasum -a 256 | cut -d' ' -f1)
+    // { printf 'minos/review/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 2 | xxd -r -p;
+    //   printf '%s' "$SUBJ" | xxd -r -p; } | /usr/bin/shasum -a 256
+    assert_eq!(
+        ReviewId::of(&run(), ReviewKind::Params, &BlobId::of(b"review")).to_hex(),
+        "39a4cc8d5022ea005ddb1f8196bc58cd49f7f81eb20f3d6e4914208c27319373"
+    );
+}
