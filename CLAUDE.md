@@ -141,61 +141,68 @@ id.rs  path.rs  manifest.rs  experiment.rs  outcome.rs  policy.rs  route.rs
 ledger.rs  require.rs  usage.rs  report.rs  tool.rs  limits.rs
 ```
 
-**IDs.** `ExperimentId`, `BlobId`, `ManifestId`, `TreeId`, and `PricesId` are distinct types over a SHA-256 digest. Hashing uses a domain-separation prefix and length-prefixed fields:
+**IDs.** `ExperimentId`, `BlobId`, `ManifestId`, `TreeId`, `PricesId`, `ImageDigest`, `JudgeVersion`, `RunId`, `EventKey`, `SpendId`, `ReviewId`, `PromptHash`, and `ReportHash` are distinct types over a SHA-256 digest, each printed and serialized as 64 lowercase hex characters. Plain IDs (`BlobId`, `TreeId`, `ManifestId`, `PricesId`, `ImageDigest`) are the bare SHA-256 of content, so they match the checksum S3 verifies. Composite IDs are hashed only through one builder, `IdHasher`: a NUL-terminated domain, then each field as a fixed 32-byte digest, a `u64` big-endian integer, or a `u64` big-endian length prefix followed by the bytes:
 
 ```rust
 impl ExperimentId {
     pub fn of(base: &TreeId, diff: &Diff) -> Self {
-        let mut h = Sha256::new();
-        h.update(b"minos/experiment/v1\0");
-        h.update(base.as_bytes());
-        h.update((diff.len() as u64).to_be_bytes());
-        h.update(diff.as_bytes());
-        Self(h.finalize().into())
+        Self::from_digest(
+            IdHasher::new("minos/experiment/v1") // the domain, then one NUL
+                .digest(base.as_bytes())
+                .bytes(diff.as_bytes()) // u64 big-endian length, then the canonical diff
+                .finish(),
+        )
     }
 }
 ```
+
+`ExperimentId::baseline(&TreeId)` hashes the base tree with a zero-length diff, so no experiment built from a parsed diff can share its ID (03-CONTEXT.md D-04). `RunId::of(manifest, base, started_at)` takes the start time as an argument the shell reads, because core has no clock (D-06).
 
 SHA-256 is deliberate: S3 verifies it natively, so the ID doubles as the upload checksum.
 
 **Paths.** `RelPath` accepts only normal components: no `..`, no absolute paths, no empty string.
 
-**Manifest.** `RawManifest` mirrors `minos.toml`. `Manifest::try_from` adds the cross-field checks: `writable` is non-empty and disjoint from readable and judge paths, the policy matches the number of objectives, budgets are within `limits.rs`, images are digests and not tags, and the proposer ladder has at least one eligible tier.
+**Manifest.** `RawManifest` mirrors `minos.toml`; every raw table refuses unknown keys, and `Manifest::try_from` is the only constructor of `Manifest`. Its cross-field checks: `writable` holds 1 to 64 exact files, never a directory or a glob, and is exact-path disjoint from `readable` (03-CONTEXT.md D-01); `writable` never contains `program.md` (the `[project] program` path), the Dockerfile, or any project path the judge command names, which is `argv[0]` and every later argument, or the value of a `--name=value` option, that parses as a `RelPath` after one leading `./` is stripped, and a path-like judge argument that is not a valid `RelPath` is rejected rather than ignored; no surface path lies under a `[source] exclude` entry; distinct surface, program, Dockerfile, and judge paths must not collide under ASCII case folding; greedy is the only v1 policy and needs exactly one objective; budgets, `[policy] stall_step`, and `[budget] max_empty_generations` and `max_infra_failures` are bounded by `limits.rs` and have defaults, with minimums of 1 so the circuit breaker cannot be disabled (D-13, D-14); and at least one proposer is eligible on manifest facts alone. The `[judge] version` integer is a local label naming which pushed judge data the project uses; the recorded `JudgeVersion` hashes the judge data tree plus the canonical judge spec (the argv, the gates, and the objectives with goal and held-out pairing), and excludes the label and `min_improvement`. The v1 manifest names a Dockerfile, not an image, so "images are digests" is enforced by `ImageRef` and by `image::base_images` on the Dockerfile's `FROM` lines, and `Manifest::try_from` stays pure: it reads no file.
 
 **Diff.** `Diff::parse(text, writable, limits)` (the writable set comes from `Manifest::writable()`) enforces byte, line, file, and hunk caps from `limits.rs`; the text is LF only, so a CR or NUL byte is rejected and a CRLF surface file cannot be edited in v1. Every touched path must equal a `writable` entry byte for byte (03-CONTEXT.md D-01). Renames, copies, mode changes, symlink and gitlink modes, binary patches, and `/dev/null` create or delete sections are rejected (D-02: a diff may only modify an existing writable file). A diff that changes nothing, with no hunks or with a hunk whose old and new lines are identical, is rejected (D-03). Diffy's parser is one stage of seven: our own line grammar runs first and rejects every line diffy would skip (prose, extra lines, a `diff --git` path that disagrees with `---`/`+++`, quoted paths, timestamps), and a line-accounting check proves diffy read every line. The result is re-serialized to a canonical form (sections sorted by path, `diff --git a/P b/P`, `--- a/P`, `+++ b/P`, `@@ -a,b +c,d @@` with both lengths and no function context, no `index` line, `\ No newline at end of file` after a line lacking its newline), which must re-parse to the same diff, and `ExperimentId::of(base, &diff)` hashes those canonical bytes, never the text a model wrote. An experiment's diff is cumulative from the run's base tree, because `ExperimentId` takes only the base `TreeId` and the diff (user decision 2026-10-14, 03-CONTEXT.md D-04 amendment; 03-RESEARCH Open Question 1 RESOLVED). The baseline is `ExperimentId::baseline(&TreeId)`, and no parsed `Diff` is ever empty (D-04). An `Experiment` can only be built from a parsed `Diff`, so an experiment that edits the judge cannot be represented. One strict applier, `diff::apply::apply`, serves the guest, `adopt`, and the report: every context and deleted line must equal the base line at the hunk's stated position byte for byte, newline presence included, with no offset search, no fuzz, and no create or delete branch; a hunk may not append after a line that lacks its newline, and a new side that ends without one must also end the base. `diff::compose::compose` applies the parent's cumulative diff and then the proposal, and `diff_trees` re-derives one canonical diff from file contents, so equal candidate trees get equal IDs and a proposal that restores the base is `NoChange`.
 
-**Metrics.** `Metric` wraps an `f64` that must be finite, and implements `Ord` with `total_cmp`. A candidate can influence the numbers a judge emits; a NaN must never reach policy code.
+**Metrics.** `Metric` wraps an `f64` that must be finite, and implements `Ord` with `total_cmp`. A candidate can influence the numbers a judge emits; a NaN must never reach policy code. `serde_json` is built with `float_roundtrip`, so a ledger metric keeps its exact bits through a JSON round trip. The scorecard wire form is a versioned array, which rejects a duplicate metric name, and each metric can be marked held-out (measured on data the proposer never sees).
 
 **Outcome.** Failure is a value:
 
 ```rust
-pub enum Outcome { Scored(Scorecard), Rejected(Reason), Crashed, TimedOut }
+pub enum Outcome { Scored(Scorecard), Rejected(Reason), Crashed { stage: Stage }, TimedOut { stage: Stage } }
+pub enum Stage { Build, Run, Judge }
 ```
+
+Every `Reason` payload is a validated name or path (`MetricName`, `RelPath`) or a number, never free text.
 
 **Policy.** `select_greedy` and `select_pareto` are pure functions of recorded results. They apply `min_improvement` from the manifest and break ties on `ExperimentId`, so the result is identical under any permutation of the input.
 
-**Ledger.** Run state is never stored. It is rebuilt by folding events:
+**Ledger.** Run state is never stored. It is rebuilt by folding events. The ledger is append-only JSON Lines of `Line { seq, key, record }`, and each record is `{"v":"1","<snake_case_variant>":{...}}`. The event set is frozen (CORE-08):
 
 ```rust
 #[serde(tag = "v")]
-pub enum Record { V1(Event) }
+pub enum Record { #[serde(rename = "1")] V1(Event) }
 
 pub enum Event {
-    RunStarted { run: RunId, manifest: ManifestId, baseline: ExperimentId },
-    ManifestChanged { manifest: ManifestId },
-    Proposed { exp: ExperimentId, parent: ExperimentId, tier: Tier },
-    Judged { exp: ExperimentId, judge: JudgeVersion, outcome: Outcome, backend: BackendInfo },
+    RunStarted { run: RunId, manifest: ManifestId, base: TreeId, baseline: ExperimentId, started_at: u64 },
+    ManifestChanged { manifest: ManifestId, from_generation: u32 },
+    Proposed { exp: ExperimentId, parent: ExperimentId, generation: u32, tier: Tier, diff: BlobId, rationale: BlobId, origin: Origin },
+    Judged { exp: ExperimentId, judge: JudgeVersion, trial: u32, outcome: Outcome, backend: BackendInfo },
     Selected { generation: u32, decision: Decision },
-    Spent { exp: Option<ExperimentId>, usage: Usage },
+    Spent { generation: u32, source: SpendSource, usage: Usage },
+    Steered { generation: u32, ordinal: u32, note: BlobId },
+    StopRequested { generation: u32, reason: StopReason },
     ReviewRequested { request: ReviewId, kind: ReviewKind },
     Reviewed { request: ReviewId, answer: ReviewAnswer },
     ReportAcknowledged { exp: ExperimentId, report: ReportHash },
 }
 ```
 
-`Judged` is keyed by experiment and judge version, so re-scoring appends records and never rewrites history.
+`Origin` is `Sweep` or `Model { model, prompt }`. `SpendSource` is `ModelCall { call, model }`, `Candidate { exp, trial }`, or `Judge { exp, trial }`, so `Spent` carries usage only, never dollars. `StopReason` and the review enums are closed, steering notes are blobs, and no shell or model text sits inline in a line. `Decision` records `Improved { winner }`, `Kept { incumbent }`, or `NoValidCandidates` with the proposed and dropped counts, and `BackendInfo` records the backend, architecture, isolation level, active confinement layers, and image digests. Every event's content-derived `EventKey` is documented in `crates/minos-core/src/ledger.rs`; the store verifies each line's key on read and treats an append whose key already exists as a no-op. `Judged` is keyed by experiment, judge version, and trial, so re-scoring appends records and never rewrites history. Generation 0 is baseline calibration; proposals start at generation 1. Adding an enum variant or an `Option` field keeps every existing line parseable; a required new field, a rename, or a type change needs `"v":"2"`. No ledger type holds a 128-bit integer or a dollar amount.
 
-**Wire formats are an API.** These types persist in checkpoints, S3, and the ledger. Golden-file tests guard serialization, golden vectors guard hashing, and the `v` tag is how a format changes.
+**Wire formats are an API.** These types persist in checkpoints, S3, and the ledger. Golden-file tests guard serialization, golden vectors guard hashing, and the `v` tag is how a format changes. Golden wire files are insta snapshots paired with a SHA-256 pin of the exact bytes, because insta normalizes trailing whitespace and line endings when it compares, and `.config/insta.yaml` sets `update: no` so the gate never writes or accepts a snapshot.
 
 ## minos-sandbox
 
@@ -319,6 +326,8 @@ model = "mid"
 batch = 4
 ```
 
+Optional keys and their defaults: `[policy] stall_step` (3), `[budget] judge` (2m), `max_tokens` (5000000), `max_empty_generations` (3), and `max_infra_failures` (3); sweep knobs are `[[param]]` tables with `name`, `file` (a writable file), and `anchor`, then either `min`, `max`, and `step` or `choices`. Sweep params are integer ranges (`min`, `max`, `step`) or string `choices` only, with no float or log ranges, so the sweep needs no float math. `max_infra_failures` counts consecutive infrastructure failures, which are retried rather than recorded as outcomes, so the loop supplies that streak from memory to `circuit_breaker` and a restart resets it.
+
 ### Proposer ladder
 
 The loop is fixed code. A model appears only in the propose step, and only where a tier calls for it.
@@ -345,6 +354,7 @@ The judge is a command plus private data that runs in its own sandbox and writes
 - When scoring requires executing candidate code (for example, loading a trained model), the judge and candidate run in separate sandboxes and talk over a mediated channel. They never share a process.
 - Noisy metrics are measured repeatedly. `minos check` runs the baseline several times to establish the noise floor, which informs `min_improvement`.
 - Every `Judged` event records backend and architecture. A run with a speed objective is pinned to one backend class.
+- A gate passes only when its metric is exactly 1. The judge writes its scorecard as `{"v":1,"metrics":[{"name":"<metric>","value":<number>,"held_out":<bool>}]}`, an array so a duplicate metric name is a rejection rather than a silent overwrite.
 
 ## Environments and source
 
