@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","report_acknowledged":{"exp":"dfbe8a4051bd859ba14490ccb032733c6156346299754d9cfd9a25c9c69bfb4a","report":"b3c176821e180f7bb71d623ca9a3666f282021764f3fa037fe11dc72c4b68487"}}

@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","selected":{"generation":3,"decision":{"kind":"no_valid_candidates","proposed":4,"dropped":4}}}

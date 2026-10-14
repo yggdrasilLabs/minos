@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","steered":{"generation":2,"ordinal":0,"note":"edb465624291e4053c6c5ea4b7eb320dec773e10a57d26b95dcf0564f8e310f8"}}

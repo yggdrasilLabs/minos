@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","spent":{"generation":1,"source":{"candidate":{"exp":"dfbe8a4051bd859ba14490ccb032733c6156346299754d9cfd9a25c9c69bfb4a","trial":0}},"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"vcpu_ms":4000,"mem_mib_ms":2048000}}}

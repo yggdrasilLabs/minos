@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","proposed":{"exp":"dfbe8a4051bd859ba14490ccb032733c6156346299754d9cfd9a25c9c69bfb4a","parent":"6fd8be380eff4cb315d50a3f594a1baa7241164600eb22e68978748be04a75cb","generation":1,"tier":"single_shot","diff":"b621bdd202b460e596c44bdb513ff64fef4536e63b5a79c7d30869f2e026d72d","rationale":"f350895acb597dcc8a039060a9ce12f0c9c6504f51c2bfc25034f04c4c786675","origin":{"model":{"model":"haiku","prompt":"c91644f81dc5d1904f6454527a0813431735367232d364c7408c4ff85566cf9b"}}}}

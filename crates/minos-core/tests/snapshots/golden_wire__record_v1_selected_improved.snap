@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","selected":{"generation":1,"decision":{"kind":{"improved":{"winner":"dfbe8a4051bd859ba14490ccb032733c6156346299754d9cfd9a25c9c69bfb4a"}},"proposed":4,"dropped":1}}}

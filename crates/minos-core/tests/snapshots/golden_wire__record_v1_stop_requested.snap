@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","stop_requested":{"generation":3,"reason":"spend_cap"}}

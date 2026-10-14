@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","judged":{"exp":"dfbe8a4051bd859ba14490ccb032733c6156346299754d9cfd9a25c9c69bfb4a","judge":"3a2f24af3506ea83d0d0450c710b7813c5db892a487399d34a6d8cf894b0bc12","trial":3,"outcome":{"timed_out":{"stage":"run"}},"backend":{"backend":"krun","arch":"arm64","isolation":"hardware","layers":["seatbelt","rlimits"],"root_image":"4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2","kernel":"6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c"}}}

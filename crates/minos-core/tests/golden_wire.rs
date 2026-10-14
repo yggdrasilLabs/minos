@@ -739,7 +739,10 @@ fn all_golden_bytes_pinned() -> TestResult {
         all.push_str(&line);
         all.push('\n');
     }
-    assert_eq!(sha256_hex(all.as_bytes()), "PIN");
+    assert_eq!(
+        sha256_hex(all.as_bytes()),
+        "8020cfdeb958e6e74187ffafc315a7aea756daef4011aceeb61a647d9f2b1039"
+    );
     Ok(())
 }
 

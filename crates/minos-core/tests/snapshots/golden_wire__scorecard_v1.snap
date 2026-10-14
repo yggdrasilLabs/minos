@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":1,"metrics":[{"name":"held_out_mb_s","value":0.5,"held_out":true},{"name":"identical_output","value":1.0,"held_out":false},{"name":"throughput_mb_s","value":12.25,"held_out":false}]}

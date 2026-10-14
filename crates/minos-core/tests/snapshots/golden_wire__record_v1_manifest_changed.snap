@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/golden_wire.rs
+expression: line
+---
+{"v":"1","manifest_changed":{"manifest":"29c1b289e7522195b362e44f54e05470b69ad20540ab60a18a05e5bf6951f13d","from_generation":2}}
