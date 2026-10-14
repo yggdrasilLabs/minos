@@ -83,6 +83,7 @@ crates/
   minos-core/            types, validation, policy, routing, report; sync, no I/O
   minos-store/           Ledger and Blobs traits; file-backed and in-memory impls
   minos-sandbox/         roles, specs, sealed plans, Untrusted<T>, Backend trait
+  minos-source/          the deterministic source snapshot: walk, denylist, secret scan, clean check, ustar tarball
   minos-backend-krun/    LaunchPlan -> libkrun VM, driven through the minos-vmm process
   minos-vmm/             per-VM launcher; the only binary that links the VMM crate
   minos-guest/           static binary inside every VM
@@ -96,11 +97,12 @@ Later milestones, not in the workspace yet: `minos-backend-lambda` (LaunchPlan -
 
 Dependency direction is strict, and `deny.toml` enforces it with `[bans]` wrapper entries, so a crate that links outside its lane is refused by `cargo deny check`:
 
-- `core` depends on no internal crate; `store`, `sandbox`, `propose`, and `guest` depend on `core`.
+- `core` depends on no internal crate; `store`, `sandbox`, `source`, `propose`, and `guest` depend on `core`.
 - `backend-krun` depends on `sandbox` (and `core`). It is the only crate that knows about `minos-vmm`.
 - `runner` depends on `core`, `store`, and `sandbox`, and is generic over `Backend`. It never names a backend crate.
 - `loop` depends on `core`, `store`, and `propose`. It never links `sandbox` or a backend, so it never sees raw sandbox output. The orchestrator, when it arrives, follows the same rule.
 - `vmm` depends on no internal crate.
+- `source` depends on `core` only and only `cli` links it. It reads the user's own working tree and execs the user's `git` read-only for the clean check (04-CONTEXT D-02), so it never sits in the loop's or the runner's graph.
 - `cli` composes everything and is the only crate that picks a concrete backend (`Runner<KrunBackend, FileStore>`).
 
 Backends are separate crates, not feature flags, so a Lambda binary never links hypervisor code.
@@ -474,7 +476,7 @@ Milestone v1 is local-first, on macOS arm64 (02-CONTEXT.md D-07; `.planning/ROAD
 
 1. Workspace and gates: the plain cargo gate commands and Cargo-native policy.
 2. Platform spikes (libkrun boot, egress, vsock, signing, Seatbelt, root images, the `claude -p` contract), recorded in `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md`. In parallel: `minos-core` with its tests.
-3. `minos-store` (file and memory), `minos-sandbox`, and the deterministic source tarball.
+3. `minos-store` (file and memory), `minos-sandbox`, and the deterministic source tarball (`minos-source`).
 4. `minos-guest` and the krun backend (`minos-backend-krun`, `minos-vmm`), `minos env build`, and `minos host doctor`. In parallel: `minos-propose` with the seeded sweep and the `claude` CLI provider.
 5. `minos-runner` and `minos-loop`, the loop built against fakes first.
 6. The CLI and the sample `optimize` project end to end, including `report` and `adopt`.
