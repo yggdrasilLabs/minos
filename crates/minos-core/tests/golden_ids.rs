@@ -21,6 +21,13 @@ const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
 #[test]
+#[should_panic(expected = "an IdHasher domain contains no NUL byte")]
+fn id_hasher_refuses_a_nul_in_the_domain() {
+    // The NUL after the domain is its terminator; a NUL inside would let "a" + "\0b" collide with "a\0b".
+    let _ = IdHasher::new("minos/test\0v1");
+}
+
+#[test]
 fn blob_id_is_the_plain_sha256() {
     assert_eq!(BlobId::of(b"").to_hex(), EMPTY_SHA256);
     assert_eq!(BlobId::of(b"abc").to_hex(), ABC_SHA256);

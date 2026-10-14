@@ -44,8 +44,18 @@ pub struct IdHasher(Sha256);
 
 impl IdHasher {
     /// Starts a hash in `domain`, which must contain no NUL byte (the NUL written after it ends the domain).
+    ///
+    /// # Panics
+    ///
+    /// If `domain` contains a NUL byte: the terminator would then be ambiguous and two domains could collide.
+    /// Domains are `&'static str` constants, so this is a programming error caught by the first test that hashes
+    /// in the domain, never a runtime condition.
     #[must_use]
     pub fn new(domain: &'static str) -> Self {
+        assert!(
+            !domain.as_bytes().contains(&0),
+            "an IdHasher domain contains no NUL byte"
+        );
         let mut hasher = Sha256::new();
         hasher.update(domain.as_bytes());
         hasher.update([0_u8]);
