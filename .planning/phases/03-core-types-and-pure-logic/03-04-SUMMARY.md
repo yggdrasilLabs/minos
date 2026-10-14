@@ -91,7 +91,7 @@ Exact products (all asserted in `aws_rate_products_are_exact`):
 |---|---|
 | `cargo fmt --all --check` | ok |
 | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
-| `cargo test --workspace` | exit 0. money: 44 passed (41 tests and 3 proptests, plus the Rate round-trip proptest). render: 29 passed (26 tests and 3 proptests). Every other suite passes as before |
+| `cargo test --workspace` | exit 0. money: 44 passed (40 tests and 4 proptests). render: 29 passed (26 tests and 3 proptests). Every other suite passes as before |
 | `cargo deny check` | advisories, bans, licenses, and sources all ok. The only warning is the existing `unmatched wrapper` for minos-sandbox |
 | `cargo doc --workspace --no-deps` | ok |
 | C-01 `[lints] workspace = true` | all crates ok, no MISSING |

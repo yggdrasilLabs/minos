@@ -44,8 +44,8 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **CORE-11**: Routing is a pure function of manifest and ledger that moves one tier up after `STALL_STEP` generations without improvement; `ProposerSpec::eligible` reports a reason for every ineligible tier
 - [ ] **CORE-12**: The sweep sampler is seeded, uses its own range mapping, and yields identical samples for identical seeds across runs
 - [ ] **CORE-13**: `JobRequest` and `JobResult` are defined in core as the loop-to-runner contract
-- [ ] **CORE-14**: Money is pico-dollar `u128` rates parsed from strings and integer micro-dollar totals; no float touches a dollar value
-- [ ] **CORE-15**: A single allowlist renderer strips C0, C1, and ESC sequences and renders bidi and zero-width characters visibly; every sandbox- or model-originated string passes through it before display
+- [x] **CORE-14**: Money is pico-dollar `u128` rates parsed from strings and integer micro-dollar totals; no float touches a dollar value
+- [x] **CORE-15**: A single allowlist renderer strips C0, C1, and ESC sequences and renders bidi and zero-width characters visibly; every sandbox- or model-originated string passes through it before display
 - [ ] **CORE-16**: `build_report` is a pure function of ledger and blobs, produces a stable hash, and includes summary vs noise floor, cumulative diff, lineage, provenance (isolation level, judge version, image digests, model ID, prompt hash), and the v1 flags: anomalous jump, held-out divergence, literals matching visible inputs, new dependencies, encoded blobs
 - [ ] **CORE-17**: A circuit-breaker rule in core returns a stop decision after K generations with no valid candidate or K consecutive infrastructure failures
 
@@ -134,7 +134,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 ### Cost (COST)
 
-- [ ] **COST-01**: The ledger stores usage only (vCPU-seconds, GB-seconds, tokens in and out); dollars are derived from `~/.config/minos/prices.toml` with rates as strings
+- [x] **COST-01**: The ledger stores usage only (vCPU-seconds, GB-seconds, tokens in and out); dollars are derived from `~/.config/minos/prices.toml` with rates as strings
 - [ ] **COST-02**: Exactly one type formats cost, always as `approx. cost: $X.XX` with token counts beside it; no command prints an estimate or the word "exact"
 
 ### Sample Project and Docs (DOCS)
@@ -220,8 +220,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-11 | Phase 3 | Pending |
 | CORE-12 | Phase 3 | Pending |
 | CORE-13 | Phase 3 | Pending |
-| CORE-14 | Phase 3 | Pending |
-| CORE-15 | Phase 3 | Pending |
+| CORE-14 | Phase 3 | Complete |
+| CORE-15 | Phase 3 | Complete |
 | CORE-16 | Phase 3 | Pending |
 | CORE-17 | Phase 3 | Pending |
 | STORE-01 | Phase 4 | Pending |
@@ -283,7 +283,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-09 | Phase 8 | Pending |
 | CLI-10 | Phase 8 | Pending |
 | CLI-11 | Phase 4 | Pending |
-| COST-01 | Phase 3 | Pending |
+| COST-01 | Phase 3 | Complete |
 | COST-02 | Phase 8 | Pending |
 | DOCS-01 | Phase 8 | Pending |
 | DOCS-02 | Phase 8 | Pending |

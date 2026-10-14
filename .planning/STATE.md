@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-10-14T13:43:10.777Z"
+last_updated: "2026-10-14T13:52:19.203Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 19
+  completed_plans: 20
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -75,6 +75,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P01 | 6min | 3 tasks | 26 files |
 | Phase 03 P02 | 9 min | 2 tasks | 4 files |
 | Phase 03 P03 | 4 min | 2 tasks | 3 files |
+| Phase 03 P04 | 6 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-02: stage 7 re-runs stages 1-5 on the canonical text so every Diff re-parses under the same caps; file and hunk caps fire in the stage 2 grammar
 - [Phase 03]: 03-03: Scorecard wire form is a versioned array of {name,value,held_out}; duplicates rejected, byte cap checked before parsing, JSON errors keep only line, column, and category
 - [Phase 03]: 03-03: Outcome::Crashed and TimedOut carry a Stage; Reason payloads are MetricName or RelPath only; Reason is not a std Error
+- [Phase 03]: 03-04: TokenRates private fields drop the _token suffix and serde renames them to the TOML keys; accessors keep the *_token names
+- [Phase 03]: 03-04: Cost::of with Some(model) always requires the model in prices.toml (fails closed even at zero tokens); Cost and ApproxCost have no serde, so no dollar type can be persisted
+- [Phase 03]: 03-04: LogExcerpt drops leftover UTF-8 continuation bytes after a cut, then trims leading chars if <U+XXXX> expansion passes the cap
 
 ### Pending Todos
 
@@ -156,6 +160,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T13:43:10.773Z
+Last session: 2026-10-14T13:52:04.436Z
 Stopped at: Completed 03-03-PLAN.md
 Resume file: None
