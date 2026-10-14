@@ -210,7 +210,32 @@ Plans:
   4. Packing the same working tree twice yields byte-identical tarballs and the same `TreeId` (sorted paths, zeroed metadata, regular files only), honoring `.gitignore`, `.minosignore`, and the hard denylist. A planted secret blocks the pack, and a dirty tree is refused unless `--allow-dirty` is given (CLI-11)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
+**Plans**: 9 plans
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — New `minos-source` crate, every Phase 4 dependency edge, `deny.toml` layering, three crate `clippy.toml` files with each ban proven to fire, CLAUDE.md Workspace (wave 1)
+
+**Wave 2** *(blocked on 04-01)*
+
+- [ ] 04-02-PLAN.md — `Ledger` and `Blobs` sync traits, `Appended`, `StoreError`, `MemoryStore`, shared contract tests (wave 2)
+- [ ] 04-03-PLAN.md — Sealed roles, `LaunchKey` with golden vectors, `SandboxSpec`, `seal`, `LaunchPlan`, `Capabilities`, `Refusal`, `Cleared`, `preflight` (wave 2)
+- [ ] 04-04-PLAN.md — Hard denylist, nine-pattern secret scanner, read-only git clean check, CLAUDE.md git carve-out (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-05-PLAN.md — `FileStore`: locked, durable JSONL ledger with torn-tail repair and corruption refusals; atomic, verified blobs (wave 3)
+- [ ] 04-06-PLAN.md — `Untrusted<T>`, role-typed `GuestOutput<R>`, `Finished<R>`, raw-mode output tar reader with committed hostile corpus and properties, the three capped exits (wave 3)
+- [ ] 04-07-PLAN.md — `snapshot`: four-source walk, offenders, caps, negation refusal, scan, clean check, deterministic ustar tarball and `TreeId`, CLAUDE.md Source rules (wave 3)
+
+**Wave 4** *(blocked on 04-06)*
+
+- [ ] 04-08-PLAN.md — `Backend` and `RunningVm`, fake-backend flow, `trybuild` compile-fail suite (12 cases plus a pass case), CLAUDE.md sandbox signatures (wave 4)
+
+**Wave 5** *(blocked on all prior plans)*
+
+- [ ] 04-09-PLAN.md — CLAUDE.md store section and open questions, validation map, deliberate-violation evidence, full gate, then `cargo clean` (wave 5)
+
 **Research**: Standard patterns; skip research-phase
 **Note (2026-10-14, from the Phase 3 plan check)**: `RelPath` (Phase 3, CORE-02) is ASCII-only in v1: each component matches `[A-Za-z0-9._+-]+`, is not `.` or `..`, and does not start with `-`. Phase 4's source packing (CLI-11) and hostile-tar parsing (SBX-05) inherit that grammar. Phase 4 must either live with it (refuse a project file or output entry whose name falls outside it, with a clear error) or widen it with a property test that keeps every CORE-02 rejection.
 
