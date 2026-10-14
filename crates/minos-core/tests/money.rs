@@ -122,10 +122,7 @@ fn rate_rejects_a_seventh_integer_digit() -> TestResult {
 
 #[test]
 fn rate_rejects_other_bytes() -> TestResult {
-    assert!(matches!(
-        rejected("0x10")?,
-        RateError::BadByte { index: 1 }
-    ));
+    assert!(matches!(rejected("0x10")?, RateError::BadByte { index: 1 }));
     assert!(matches!(rejected("1,5")?, RateError::BadByte { index: 1 }));
     assert!(matches!(
         rejected("1.5.3")?,
@@ -166,7 +163,11 @@ proptest! {
 
 /// An independent decimal rendering of a pico value, with all twelve fractional digits.
 fn pico_text(pico: u128) -> String {
-    format!("{}.{:012}", pico / 1_000_000_000_000, pico % 1_000_000_000_000)
+    format!(
+        "{}.{:012}",
+        pico / 1_000_000_000_000,
+        pico % 1_000_000_000_000
+    )
 }
 
 // ---------------------------------------------------------------------------------------------------------------
