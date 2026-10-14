@@ -123,10 +123,19 @@ fn invisible_table_edges() {
     for c in [
         '\u{ad}',
         '\u{34f}',
+        '\u{600}',
+        '\u{605}',
         '\u{61c}',
+        '\u{6dd}',
+        '\u{70f}',
+        '\u{890}',
+        '\u{891}',
+        '\u{8e2}',
         '\u{115f}',
         '\u{1160}',
+        '\u{180b}',
         '\u{180e}',
+        '\u{180f}',
         '\u{200b}',
         '\u{200f}',
         '\u{2028}',
@@ -137,11 +146,23 @@ fn invisible_table_edges() {
         '\u{2064}',
         '\u{2066}',
         '\u{2069}',
+        '\u{206a}',
+        '\u{206f}',
         '\u{3164}',
         '\u{fe00}',
         '\u{fe0f}',
         '\u{feff}',
         '\u{ffa0}',
+        '\u{fff9}',
+        '\u{fffb}',
+        '\u{110bd}',
+        '\u{110cd}',
+        '\u{13430}',
+        '\u{1343f}',
+        '\u{1bca0}',
+        '\u{1bca3}',
+        '\u{1d173}',
+        '\u{1d17a}',
         '\u{e0000}',
         '\u{e007f}',
         '\u{e0100}',
@@ -157,10 +178,29 @@ fn invisible_table_edges() {
         'a',
         ' ',
         '\u{ac}',
+        '\u{5ff}',
+        '\u{606}',
+        '\u{6dc}',
+        '\u{6de}',
+        '\u{88f}',
+        '\u{892}',
+        '\u{180a}',
+        '\u{1810}',
         '\u{200a}',
         '\u{2030}',
         '\u{2065}',
+        '\u{2070}',
         '\u{fdff}',
+        '\u{fff8}',
+        '\u{fffc}',
+        '\u{110bc}',
+        '\u{110be}',
+        '\u{1342f}',
+        '\u{13440}',
+        '\u{1bc9f}',
+        '\u{1bca4}',
+        '\u{1d172}',
+        '\u{1d17b}',
         '\u{e0080}',
         '\u{e01f0}',
     ] {
@@ -169,6 +209,73 @@ fn invisible_table_edges() {
             "U+{:04X} should be visible",
             u32::from(c)
         );
+    }
+}
+
+/// The exact invisible-format set, as inclusive scalar ranges: every General Category `Cf` code point of
+/// Unicode 16.0, plus U+034F, the Hangul fillers, U+2028, U+2029, and the variation selectors. A Unicode
+/// addition is a deliberate edit of both this table and `is_invisible_format`.
+const INVISIBLE_RANGES: &[(u32, u32)] = &[
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x0600, 0x0605),
+    (0x061C, 0x061C),
+    (0x06DD, 0x06DD),
+    (0x070F, 0x070F),
+    (0x0890, 0x0891),
+    (0x08E2, 0x08E2),
+    (0x115F, 0x1160),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x2028, 0x2029),
+    (0x202A, 0x202E),
+    (0x2060, 0x2064),
+    (0x2066, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF9, 0xFFFB),
+    (0x1_10BD, 0x1_10BD),
+    (0x1_10CD, 0x1_10CD),
+    (0x1_3430, 0x1_343F),
+    (0x1_BCA0, 0x1_BCA3),
+    (0x1_D173, 0x1_D17A),
+    (0xE_0000, 0xE_007F),
+    (0xE_0100, 0xE_01EF),
+];
+
+#[test]
+fn invisible_table_is_exactly_the_pinned_ranges() {
+    let mut count: u32 = 0;
+    for c in char::MIN..=char::MAX {
+        let value = u32::from(c);
+        let pinned = INVISIBLE_RANGES
+            .iter()
+            .any(|(low, high)| (*low..=*high).contains(&value));
+        assert_eq!(
+            is_invisible_format(c),
+            pinned,
+            "U+{value:04X}: table says {}, pinned ranges say {pinned}",
+            is_invisible_format(c)
+        );
+        count += u32::from(pinned);
+    }
+    let expected: u32 = INVISIBLE_RANGES
+        .iter()
+        .map(|(low, high)| high - low + 1)
+        .sum();
+    assert_eq!(count, expected);
+    // Every Cf code point the renderer shows is one `char::is_control` does not drop, so none is lost twice.
+    for (low, high) in INVISIBLE_RANGES {
+        for value in *low..=*high {
+            if let Some(c) = char::from_u32(value) {
+                assert!(
+                    !c.is_control(),
+                    "U+{value:04X} is a control, not a format character"
+                );
+            }
+        }
     }
 }
 

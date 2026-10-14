@@ -20,15 +20,21 @@ use crate::limits::MAX_LOG_EXCERPT_BYTES;
 
 /// Whether `c` is an invisible format character that [`SafeText`] shows as `<U+XXXX>`.
 ///
-/// Std Rust has no Unicode general-category API beyond `char::is_control`, so the set is an explicit table:
+/// Std Rust has no Unicode general-category API beyond `char::is_control`, so the set is an explicit table. It
+/// holds every General Category `Cf` (format) code point of Unicode 16.0 plus a few invisible marks, and a test
+/// pins the exact set, so a future Unicode addition is a deliberate edit here:
 ///
 /// - bidi controls (Trojan Source, CVE-2021-42574): U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to
-///   U+2069;
+///   U+2069, and the deprecated U+206A to U+206F;
 /// - zero-width and other invisible characters: U+00AD soft hyphen, U+034F combining grapheme joiner, U+180E,
 ///   U+200B to U+200D, U+2060 to U+2064, U+FEFF byte order mark;
+/// - number and mark signs that are `Cf`: U+0600 to U+0605, U+06DD, U+070F, U+0890, U+0891, U+08E2 (Arabic
+///   and Syriac), U+110BD and U+110CD (Kaithi);
+/// - other format controls: U+FFF9 to U+FFFB (interlinear annotation), U+13430 to U+1343F (Egyptian
+///   hieroglyph), U+1BCA0 to U+1BCA3 (shorthand), U+1D173 to U+1D17A (musical symbol);
 /// - Hangul fillers that render as blank space: U+115F, U+1160, U+3164, U+FFA0;
 /// - line and paragraph separators U+2028 and U+2029, which some terminals and editors treat as line breaks;
-/// - variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF;
+/// - variation selectors U+180B to U+180F (Mongolian), U+FE00 to U+FE0F, and U+E0100 to U+E01EF;
 /// - tag characters U+E0000 to U+E007F, used for "ASCII smuggling" of hidden instructions into models.
 #[must_use]
 pub const fn is_invisible_format(c: char) -> bool {
@@ -36,20 +42,31 @@ pub const fn is_invisible_format(c: char) -> bool {
         c,
         '\u{00AD}'
             | '\u{034F}'
+            | '\u{0600}'..='\u{0605}'
             | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
             | '\u{115F}'
             | '\u{1160}'
-            | '\u{180E}'
+            | '\u{180B}'..='\u{180F}'
             | '\u{200B}'..='\u{200F}'
             | '\u{2028}'
             | '\u{2029}'
             | '\u{202A}'..='\u{202E}'
             | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
+            | '\u{2066}'..='\u{206F}'
             | '\u{3164}'
             | '\u{FE00}'..='\u{FE0F}'
             | '\u{FEFF}'
             | '\u{FFA0}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
             | '\u{E0000}'..='\u{E007F}'
             | '\u{E0100}'..='\u{E01EF}'
     )
