@@ -137,9 +137,11 @@ The three clippy lints are `forbid`, not `deny`, so neither `#[allow(...)]` nor 
 Core has no async, no AWS, no filesystem, no clock, and no randomness beyond seeded generators. That makes it safe to call during durable replay and easy to property-test. A clippy `disallowed-methods` rule bans `SystemTime::now` in this crate; time arrives as an argument.
 
 ```
-id.rs  path.rs  manifest.rs  experiment.rs  outcome.rs  policy.rs  route.rs
-ledger.rs  require.rs  usage.rs  report.rs  tool.rs  limits.rs
+lib.rs  limits.rs  id.rs  path.rs  text.rs  metric.rs  outcome.rs  usage.rs  money.rs  image.rs  manifest.rs
+diff/{mod,apply,compose}.rs  experiment.rs  ledger.rs  state.rs  policy.rs  route.rs  sweep.rs  job.rs  report.rs
 ```
+
+`tool.rs` (the agentic `ToolCall` enum) arrives with the agentic tier (TIER-01), and the `requires` table lives in manifest.rs. `lib.rs` re-exports the principal types at the crate root, and every module stays public.
 
 **IDs.** `ExperimentId`, `BlobId`, `ManifestId`, `TreeId`, `PricesId`, `ImageDigest`, `JudgeVersion`, `RunId`, `EventKey`, `SpendId`, `ReviewId`, `PromptHash`, and `ReportHash` are distinct types over a SHA-256 digest, each printed and serialized as 64 lowercase hex characters. Plain IDs (`BlobId`, `TreeId`, `ManifestId`, `PricesId`, `ImageDigest`) are the bare SHA-256 of content, so they match the checksum S3 verifies. Composite IDs are hashed only through one builder, `IdHasher`: a NUL-terminated domain, then each field as a fixed 32-byte digest, a `u64` big-endian integer, or a `u64` big-endian length prefix followed by the bytes:
 
@@ -177,7 +179,7 @@ pub enum Stage { Build, Run, Judge }
 
 Every `Reason` payload is a validated name or path (`MetricName`, `RelPath`) or a number, never free text.
 
-**Policy.** `select_greedy` and `select_pareto` are pure functions of recorded results. They apply `min_improvement` from the manifest and break ties on `ExperimentId`, so the result is identical under any permutation of the input.
+**Policy.** `select_greedy` is a pure function of recorded results. Repeated trials of one experiment reduce to the lower median per metric, never a mean (03-CONTEXT.md D-11). It applies `min_improvement` from the manifest by multiply-and-compare (the incumbent plus or minus its threshold, never a division) and breaks ties on `ExperimentId`, so the result is identical under any permutation of the input. `conclude` turns one generation into a `Decision`, re-checking every recorded scorecard against the judge spec first (each gate exactly 1, every objective present, held-out flags as declared). `noise_check` compares the objective's threshold with the baseline's spread and only advises (D-12); `route` picks the proposer tier (D-13); `circuit_breaker` stops a run once `max_empty_generations` consecutive generations end with no valid candidate, or once the loop's streak of infrastructure failures reaches `max_infra_failures` (D-14); and `spend_ok` prices metered usage from `prices.toml` and checks it and the token total against the manifest caps. All of them live in core. `select_pareto` is deferred with POL-01.
 
 **Ledger.** Run state is never stored. It is rebuilt by folding events. The ledger is append-only JSON Lines of `Line { seq, key, record }`, and each record is `{"v":"1","<snake_case_variant>":{...}}`. The event set is frozen (CORE-08):
 
@@ -339,6 +341,8 @@ The loop is fixed code. A model appears only in the propose step, and only where
 | `planned` | Fixed two-call pipeline: list ideas, drop those already tried, implement the rest | No |
 | `agentic` | A tool loop against an agent VM | Yes |
 
+The sweep tier draws each declared `[[param]]` value from a ChaCha8 stream seeded by run and generation, with Minos's own unbiased range mapping (never `rand`'s distributions), and renders a sample into a canonical diff by rewriting the remainder of each param's anchored line.
+
 Each project declares its ladder. `ProposerSpec::eligible` checks prerequisites (sweep needs params, single-shot needs the surface to fit the prompt budget), and `minos check` prints the route table with reasons. Routing is a pure function of manifest and ledger: move one tier up the eligible ladder after each `STALL_STEP` generations without improvement.
 
 Phase comes before tier. A project with no judge version starts in `DesignJudge`: the proposer drafts metrics and the run waits for the user's approval. The agent may propose judge changes, params, and dependencies. It never approves them. Each goes to the inbox.
@@ -403,6 +407,7 @@ The ledger stores usage, never dollars: vCPU-seconds, GB-seconds, snapshot megab
 - Rates are parsed from strings as exact decimals with pico-dollar precision (10^-12 USD; published AWS rates have 10 fractional digits). Totals are integer micro-dollars. No floats.
 - Output shows one figure, always measured: `approx. cost: $31.40`. Never print an estimate, and never use the word "exact". One type owns that formatting, so no command prints a bare dollar figure.
 - Spend caps compare the manifest limit against metered spend, checked before each generation.
+- In v1 `Usage` records `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `vcpu_ms`, and `mem_mib_ms`. Every rate in `prices.toml` is a string, so a numeric rate is a located parse error, and `ApproxCost` is the one dollar formatter.
 
 ## CLI
 
@@ -425,7 +430,7 @@ minos stop <run>
 
 ### Report and adopt
 
-`build_report` is a pure function in core, so the same ledger and blobs always give the same report, and the report can be hashed. It contains the summary against the noise floor, the cumulative diff from baseline to winner, the lineage, provenance (isolation level, judge version, image digests), and flags. Flags direct attention; they are not verdicts: new dependencies, spawned processes, sockets, environment reads, encoded blobs, literals that match visible benchmark inputs, operations the guest denied, held-out metrics diverging from visible ones, and weak isolation anywhere in the lineage.
+`build_report` is a pure function in core, so the same ledger and blobs always give the same report, and the report can be hashed. It contains the summary against the noise floor, the cumulative diff from baseline to winner, the lineage, provenance (isolation level, judge version, image digests), and flags. Flags direct attention; they are not verdicts: new dependencies, spawned processes, sockets, environment reads, encoded blobs, literals that match visible benchmark inputs, operations the guest denied, held-out metrics diverging from visible ones, and weak isolation anywhere in the lineage. v1 renders the anomalous-jump, held-out-divergence, literal-match, new-dependency, encoded-blob, and hidden-character flags, plus weak isolation, with the weakest isolation and any missing confinement layers shown in provenance; the runtime-behavior flags (spawned processes, sockets, environment reads, denied operations) arrive with RPT-01.
 
 `minos adopt` refuses without the hash of a report the user acknowledged for that exact experiment. It writes a patch file and never applies one. The renderer strips terminal escape sequences from every string that originated in a sandbox or a model.
 
