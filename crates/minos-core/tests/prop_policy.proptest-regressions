@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 91c9a6eed53daf40affe28bebbd386f46423d7374b5b0e7cad4f9f5881fd0d73 # shrinks to (original, shuffled) = ([(0, -3), (0, 2)], [(0, -3), (0, 2)]), incumbent = -2, maximize = false

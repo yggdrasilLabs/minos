@@ -202,12 +202,7 @@ fn proposed(
     }))
 }
 
-fn judged_by(
-    judge: JudgeVersion,
-    exp: ExperimentId,
-    trial: u32,
-    outcome: Outcome,
-) -> Record {
+fn judged_by(judge: JudgeVersion, exp: ExperimentId, trial: u32, outcome: Outcome) -> Record {
     rec(Event::Judged {
         exp,
         judge,
@@ -272,7 +267,8 @@ fn check_scorecard_passes_a_gate_of_exactly_one() -> TestResult {
     check_scorecard(
         manifest.judge(),
         &card(&[(GATE, 1.0, false), (OBJECTIVE, 3.0, false)])?,
-    )?;
+    )
+    .map_err(|reason| reason.to_string())?;
     Ok(())
 }
 
@@ -385,7 +381,8 @@ fn check_scorecard_requires_held_out_pairings_marked_held_out() -> TestResult {
             (OBJECTIVE, 3.0, false),
             ("hidden_mb_s", 2.0, true),
         ])?,
-    )?;
+    )
+    .map_err(|reason| reason.to_string())?;
     let unmarked = rejected(
         &manifest,
         &card(&[
@@ -426,7 +423,10 @@ fn lower_median_takes_the_lower_middle() -> TestResult {
     assert_eq!(lower_median(&metrics(&[3.0])?), Some(metric(3.0)?));
     assert_eq!(lower_median(&metrics(&[1.0, 2.0])?), Some(metric(1.0)?));
     assert_eq!(lower_median(&metrics(&[2.0, 1.0])?), Some(metric(1.0)?));
-    assert_eq!(lower_median(&metrics(&[5.0, 1.0, 3.0])?), Some(metric(3.0)?));
+    assert_eq!(
+        lower_median(&metrics(&[5.0, 1.0, 3.0])?),
+        Some(metric(3.0)?)
+    );
     assert_eq!(
         lower_median(&metrics(&[4.0, 1.0, 3.0, 2.0])?),
         Some(metric(2.0)?)
@@ -639,11 +639,12 @@ proptest! {
         let chosen = select_greedy(&original, incumbent, &objective);
         prop_assert_eq!(chosen, select_greedy(&shuffled, incumbent, &objective));
         if let Selection::Improved(winner) = chosen {
-            let best = original
+            // An ID may repeat with several values; the winner's is its best one.
+            let values = original
                 .iter()
                 .filter(|(id, _)| *id == winner)
-                .map(|(_, value)| *value)
-                .max()
+                .map(|(_, value)| *value);
+            let best = if maximize { values.max() } else { values.min() }
                 .ok_or_else(|| fail("the winner is not a candidate"))?;
             prop_assert!(improves(best, incumbent, &objective));
             for (id, value) in &original {
@@ -739,7 +740,13 @@ fn conclude_reports_no_valid_candidates() -> TestResult {
         proposed(e1, baseline(), 1)?,
         proposed(e2, baseline(), 1)?,
         proposed(e3, baseline(), 1)?,
-        judged(e1, 0, Outcome::Crashed { stage: Stage::Build })?,
+        judged(
+            e1,
+            0,
+            Outcome::Crashed {
+                stage: Stage::Build,
+            },
+        )?,
         judged(e2, 0, scored(500.0)?)?,
         judged(e2, 1, Outcome::Rejected(Reason::RunFailed))?,
         // A recorded Scored trial that fails the gate is not a valid score.
@@ -923,7 +930,11 @@ fn noise_floor_folds_the_baseline_trials() -> TestResult {
 #[test]
 fn noise_floor_skips_unscored_baseline_trials() -> TestResult {
     let mut records = baseline_trials(&[10.0, 10.5])?;
-    records.push(judged(baseline(), 7, Outcome::Crashed { stage: Stage::Run })?);
+    records.push(judged(
+        baseline(),
+        7,
+        Outcome::Crashed { stage: Stage::Run },
+    )?);
     let state = state(&records)?;
     let floor = noise_floor(&state, &judge()?, &name(OBJECTIVE)?).ok_or("no floor")?;
     assert_eq!(floor.trials(), 2);
@@ -940,21 +951,45 @@ fn noise_check_warns_without_a_floor() -> TestResult {
 
 #[test]
 fn noise_check_is_ok_with_zero_spread() -> TestResult {
-    assert_eq!(verdict(&[10.0, 10.0, 10.0], "maximize", "0.5")?, NoiseVerdict::Ok);
+    assert_eq!(
+        verdict(&[10.0, 10.0, 10.0], "maximize", "0.5")?,
+        NoiseVerdict::Ok
+    );
     Ok(())
 }
 
 #[test]
 fn noise_check_compares_the_threshold_with_the_spread() -> TestResult {
     // An absolute threshold of 0.5: refuse at a spread of 0.5, warn at 0.25 (2x), pass at 0.125 (4x).
-    assert_eq!(verdict(&[10.0, 10.5], "maximize", "0.5")?, NoiseVerdict::Refuse);
-    assert_eq!(verdict(&[10.0, 11.0], "minimize", "0.5")?, NoiseVerdict::Refuse);
-    assert_eq!(verdict(&[10.0, 10.25], "maximize", "0.5")?, NoiseVerdict::Warn);
-    assert_eq!(verdict(&[10.0, 10.125], "maximize", "0.5")?, NoiseVerdict::Ok);
+    assert_eq!(
+        verdict(&[10.0, 10.5], "maximize", "0.5")?,
+        NoiseVerdict::Refuse
+    );
+    assert_eq!(
+        verdict(&[10.0, 11.0], "minimize", "0.5")?,
+        NoiseVerdict::Refuse
+    );
+    assert_eq!(
+        verdict(&[10.0, 10.25], "maximize", "0.5")?,
+        NoiseVerdict::Warn
+    );
+    assert_eq!(
+        verdict(&[10.0, 10.125], "maximize", "0.5")?,
+        NoiseVerdict::Ok
+    );
     // A relative threshold of 5% at the median of 100 is 5.
-    assert_eq!(verdict(&[100.0, 105.0], "maximize", "5%")?, NoiseVerdict::Refuse);
-    assert_eq!(verdict(&[100.0, 103.0], "maximize", "5%")?, NoiseVerdict::Warn);
-    assert_eq!(verdict(&[100.0, 101.0], "maximize", "5%")?, NoiseVerdict::Ok);
+    assert_eq!(
+        verdict(&[100.0, 105.0], "maximize", "5%")?,
+        NoiseVerdict::Refuse
+    );
+    assert_eq!(
+        verdict(&[100.0, 103.0], "maximize", "5%")?,
+        NoiseVerdict::Warn
+    );
+    assert_eq!(
+        verdict(&[100.0, 101.0], "maximize", "5%")?,
+        NoiseVerdict::Ok
+    );
     Ok(())
 }
 
