@@ -116,7 +116,12 @@ proptest! {
 /// A baseline job for trial 0 of the tree `t` under the judge `ab..ab`.
 fn job(build_ms: u64, run_ms: u64, judge_ms: u64) -> Result<JobRequest, Box<dyn Error>> {
     let budget = JobBudget::new(build_ms, run_ms, judge_ms)?;
-    Ok(JobRequest::baseline(TreeId::of(b"t"), judge_ab()?, 0, budget)?)
+    Ok(JobRequest::baseline(
+        TreeId::of(b"t"),
+        judge_ab()?,
+        0,
+        budget,
+    )?)
 }
 
 fn root() -> ImageDigest {
@@ -136,7 +141,10 @@ fn machine_bounds() -> TestResult {
     assert_eq!(Machine::new(0, 512), Err(SpecError::Vcpus { vcpus: 0 }));
     assert_eq!(Machine::new(9, 512), Err(SpecError::Vcpus { vcpus: 9 }));
     assert_eq!(Machine::new(2, 127), Err(SpecError::Memory { mib: 127 }));
-    assert_eq!(Machine::new(2, 16_385), Err(SpecError::Memory { mib: 16_385 }));
+    assert_eq!(
+        Machine::new(2, 16_385),
+        Err(SpecError::Memory { mib: 16_385 })
+    );
     let low = Machine::new(1, 128)?;
     assert_eq!((low.vcpus(), low.memory_mib()), (1, 128));
     let high = Machine::new(8, 16_384)?;
@@ -150,7 +158,7 @@ fn candidate_duration_is_build_plus_run_plus_boot() -> TestResult {
     let spec = SandboxSpec::<Candidate>::new(&job, root(), input(), machine()?, Arch::Arm64)?;
     let plan = spec.seal();
     assert_eq!(plan.max_duration_ms(), 210_000);
-    assert_eq!(plan.max_duration(), Duration::from_millis(210_000));
+    assert_eq!(plan.max_duration(), Duration::from_secs(210));
     Ok(())
 }
 
@@ -185,7 +193,8 @@ fn over_ceiling_is_refused_not_clamped() -> TestResult {
     // Exactly at the ceiling is accepted.
     let at_ceiling = self::job(1_785_000, 1_785_000, 60_000)?;
     let plan =
-        SandboxSpec::<Candidate>::new(&at_ceiling, root(), input(), machine()?, Arch::Arm64)?.seal();
+        SandboxSpec::<Candidate>::new(&at_ceiling, root(), input(), machine()?, Arch::Arm64)?
+            .seal();
     assert_eq!(plan.max_duration_ms(), 3_600_000);
     Ok(())
 }

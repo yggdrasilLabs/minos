@@ -6,6 +6,8 @@
 
 pub mod key;
 pub mod role;
+pub mod spec;
 
 pub use key::LaunchKey;
 pub use role::{Candidate, Judge, Role, RoleKind};
+pub use spec::{InputDisk, JudgeData, LaunchPlan, Machine, SandboxSpec, SpecError};
