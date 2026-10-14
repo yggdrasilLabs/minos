@@ -1,0 +1,16 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every path below is proven to fire once (04-EVIDENCE.md "Clippy bans fire (04-01)").
+# A mistyped path only warns, so re-prove any entry you change.
+# Free functions such as std::fs::read stay allowed so tests can read committed fixtures.
+disallowed-methods = [
+  { path = "tar::Archive::unpack",  reason = "guest output is never extracted to disk; entries are read in memory under caps (SBX-05)" },
+  { path = "tar::Entry::unpack",    reason = "guest output is never extracted to disk; entries are read in memory under caps (SBX-05)" },
+  { path = "tar::Entry::unpack_in", reason = "guest output is never extracted to disk; entries are read in memory under caps (SBX-05)" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeSet" },
+  { path = "std::fs::File",              reason = "minos-sandbox opens no file; the output reader works on bytes in memory (04-CONTEXT D-16)" },
+  { path = "std::fs::OpenOptions",       reason = "minos-sandbox opens no file; the output reader works on bytes in memory (04-CONTEXT D-16)" },
+]

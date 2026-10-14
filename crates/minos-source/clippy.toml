@@ -1,0 +1,21 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every path below is proven to fire once (04-EVIDENCE.md "Clippy bans fire (04-01)").
+# A mistyped path only warns, so re-prove any entry you change.
+disallowed-methods = [
+  { path = "tar::Builder::append_data",           reason = "falls back to a GNU long-name entry for a path that does not fit ustar; build the ustar header by hand and call Builder::append (04-RESEARCH Pattern 6)" },
+  { path = "tar::Builder::append_path",           reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "tar::Builder::append_path_with_name", reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "tar::Builder::append_file",           reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "tar::Builder::append_dir",            reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "tar::Builder::append_dir_all",        reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "tar::Header::set_metadata",           reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "tar::Header::set_metadata_in_mode",   reason = "copies mtime, owner, and mode from disk, which breaks the deterministic tarball (CLI-11)" },
+  { path = "ignore::WalkBuilder::max_filesize",   reason = "silently skips large files; an over-cap file must fail the pack (04-CONTEXT D-05)" },
+  { path = "std::env::var",                       reason = "the snapshot must not depend on the environment; git runs with a fixed allowlisted environment (04-CONTEXT D-02)" },
+  { path = "std::env::var_os",                    reason = "the snapshot must not depend on the environment; git runs with a fixed allowlisted environment (04-CONTEXT D-02)" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeSet" },
+]

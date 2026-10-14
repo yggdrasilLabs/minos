@@ -1,0 +1,12 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every path below is proven to fire once (04-EVIDENCE.md "Clippy bans fire (04-01)").
+# A mistyped path only warns, so re-prove any entry you change.
+disallowed-methods = [
+  { path = "std::fs::File::create", reason = "the ledger is opened append-only through OpenOptions and a ledger record is never rewritten (STORE-02); File::create truncates an existing file" },
+  { path = "std::fs::write",        reason = "blob writes go temp-then-rename through tempfile (STORE-04); fs::write replaces a file in place" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeSet" },
+]
