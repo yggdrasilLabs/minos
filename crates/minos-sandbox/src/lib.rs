@@ -5,9 +5,11 @@
 //! a sandbox stays wrapped until a validating parser takes it.
 
 pub mod key;
+pub mod preflight;
 pub mod role;
 pub mod spec;
 
 pub use key::LaunchKey;
+pub use preflight::{Capabilities, Cleared, Refusal, preflight};
 pub use role::{Candidate, Judge, Role, RoleKind};
 pub use spec::{InputDisk, JudgeData, LaunchPlan, Machine, SandboxSpec, SpecError};
