@@ -298,11 +298,11 @@ pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunStat
         return Err(FoldError::FirstNotRunStarted);
     };
 
-    let computed = RunId::of(manifest, base, *started_at);
-    if *run != computed {
+    let computed_run = RunId::of(manifest, base, *started_at);
+    if *run != computed_run {
         return Err(FoldError::RunIdMismatch {
             recorded: *run,
-            computed,
+            computed: computed_run,
         });
     }
     let computed = ExperimentId::baseline(base);
@@ -316,7 +316,7 @@ pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunStat
     // Phase 1: key every record.
     let mut keyed: BTreeMap<EventKey, &Event> = BTreeMap::new();
     for event in std::iter::once(first).chain(records.map(Record::event)) {
-        let key = event.key(run);
+        let key = event.key(&computed_run);
         match keyed.get(&key) {
             None => {
                 keyed.insert(key, event);
