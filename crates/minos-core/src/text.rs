@@ -81,6 +81,14 @@ pub const fn is_invisible_format(c: char) -> bool {
 pub struct SafeText(String);
 
 /// Appends `c` as `<U+XXXX>`: uppercase hex, at least four digits.
+///
+/// The notation is not escaped in input: the eight ASCII bytes `<U+202E>` written by a model render unchanged
+/// and look like a rendered U+202E. That is deliberate. Rendering is idempotent (`new(new(x)) == new(x)`, a
+/// property test pins it), and any escape of a literal `<U+` would break it, because the rendering of a hidden
+/// character would itself be escaped on a second pass; idempotency is what lets a [`SafeText`] be rendered
+/// again safely wherever it is shown. What the renderer guarantees is that a `SafeText` holds no hidden code
+/// point, so a literal `<U+XXXX>` is only ever text the author wrote, visible to the reader; the report's
+/// `HiddenCharacters` flag fires on the actual code point in an added diff line, never on the notation.
 fn push_visible(out: &mut String, c: char) {
     let value = u32::from(c);
     let digits = (u32::BITS - value.leading_zeros()).div_ceil(4).max(4);
