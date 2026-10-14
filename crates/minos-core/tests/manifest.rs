@@ -1021,6 +1021,43 @@ fn rejects_writable_judge_program() -> TestResult {
 }
 
 #[test]
+fn rejects_reserved_surface_files() -> TestResult {
+    for (field, from, to, path) in [
+        (
+            "surface.writable",
+            r#"writable = ["src/parse.rs"]"#,
+            r#"writable = ["src/parse.rs", "minos.toml"]"#,
+            "minos.toml",
+        ),
+        (
+            "surface.writable",
+            r#"writable = ["src/parse.rs"]"#,
+            r#"writable = ["src/parse.rs", "Minos.Lock"]"#,
+            "Minos.Lock",
+        ),
+        (
+            "surface.readable",
+            r#"readable = ["src/lib.rs"]"#,
+            r#"readable = ["src/lib.rs", "minos.lock"]"#,
+            "minos.lock",
+        ),
+    ] {
+        let error = rejected(&example(from, to)?)?;
+        assert!(
+            matches!(&error, ManifestError::Reserved { field: found_field, path: found } if *found_field == field && found.as_str() == path),
+            "{to}: got: {error}"
+        );
+    }
+    // The manifest may be readable: it is the user's own configuration, not a secret from the proposer.
+    let text = example(
+        r#"readable = ["src/lib.rs"]"#,
+        r#"readable = ["src/lib.rs", "minos.toml"]"#,
+    )?;
+    assert!(Manifest::parse_toml(&text).is_ok());
+    Ok(())
+}
+
+#[test]
 fn rejects_readable_under_an_exclude() -> TestResult {
     let text = example(
         r#"readable = ["src/lib.rs"]"#,

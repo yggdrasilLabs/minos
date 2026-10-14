@@ -10,7 +10,10 @@
 //! 2. The surface (03-CONTEXT D-01): `writable` holds 1 to 64 exact files with no duplicates, `readable` has no
 //!    duplicates, and the two are disjoint as exact path sets.
 //! 3. Judge integrity: `writable` contains no judge path, and neither `program` nor the Dockerfile; `readable`
-//!    contains no judge path, so the proposer never receives the scorer's source in its prompt.
+//!    contains no judge path, so the proposer never receives the scorer's source in its prompt. `writable` holds
+//!    neither `minos.toml` nor `minos.lock`, and `readable` not `minos.lock` (compared ASCII
+//!    case-insensitively): an adopted patch could otherwise rewrite the judge command, the budgets, the
+//!    excludes, or the image pins for the next run.
 //! 4. No `writable` or `readable` path lies under a `[source] exclude` entry (compared case-insensitively).
 //! 5. No two distinct paths among `writable`, `readable`, `program`, the Dockerfile, and the judge paths are equal
 //!    under ASCII case folding, which fails closed on a case-insensitive filesystem.
@@ -61,6 +64,10 @@ use crate::path::RelPath;
 
 /// Domain of [`JudgeVersion`].
 const JUDGE_DOMAIN: &str = "minos/judge/v1";
+/// Project files that are never writable, as ASCII case keys: the manifest and the lockfile.
+const RESERVED_WRITABLE: [&str; 2] = ["minos.toml", "minos.lock"];
+/// Project files that are never readable, as ASCII case keys: the lockfile.
+const RESERVED_READABLE: [&str; 1] = ["minos.lock"];
 /// Micro-dollars per whole dollar, for the spend cap.
 const MICRO_PER_DOLLAR: u128 = 1_000_000;
 
@@ -1465,6 +1472,17 @@ pub enum ManifestError {
         /// The excluded path.
         path: RelPath,
     },
+    /// A surface list names a file Minos reserves: `minos.toml` or `minos.lock` in `writable`, or `minos.lock`
+    /// in `readable`.
+    #[error(
+        "{field} lists {path}, which Minos reserves; the manifest and lockfile are never surface files"
+    )]
+    Reserved {
+        /// Dotted path of the surface list.
+        field: &'static str,
+        /// The reserved path as written.
+        path: RelPath,
+    },
     /// A readable path is named by the judge command: the proposer must never see the scorer's source.
     #[error("{path} is named by judge.command, so it cannot be in surface.readable")]
     JudgeReadable {
@@ -1838,6 +1856,20 @@ impl TryFrom<RawManifest> for Manifest {
         }
         if let Some(path) = paths.iter().find(|path| readable.contains(*path)) {
             return Err(ManifestError::JudgeReadable { path: path.clone() });
+        }
+        for (field, set, reserved) in [
+            ("surface.writable", &writable, &RESERVED_WRITABLE[..]),
+            ("surface.readable", &readable, &RESERVED_READABLE[..]),
+        ] {
+            if let Some(path) = set
+                .iter()
+                .find(|path| reserved.contains(&path.ascii_case_key().as_str()))
+            {
+                return Err(ManifestError::Reserved {
+                    field,
+                    path: path.clone(),
+                });
+            }
         }
 
         // 4. No surface path under an exclude entry.
