@@ -423,7 +423,11 @@ fn anomalous_jump_falls_back_to_the_largest_earlier_delta() -> TestResult {
     let fixture = Fixture::build(
         &spec,
         vec![
-            Step::new(parse_line("    input.trim().len()"), "Small.", &[(102.0, 51.0)]),
+            Step::new(
+                parse_line("    input.trim().len()"),
+                "Small.",
+                &[(102.0, 51.0)],
+            ),
             Step::new(
                 parse_line("    input.as_bytes().len()"),
                 "Huge.",
@@ -446,7 +450,11 @@ fn anomalous_jump_fallback_is_quiet_for_a_comparable_delta() -> TestResult {
     let fixture = Fixture::build(
         &spec,
         vec![
-            Step::new(parse_line("    input.trim().len()"), "Small.", &[(102.0, 51.0)]),
+            Step::new(
+                parse_line("    input.trim().len()"),
+                "Small.",
+                &[(102.0, 51.0)],
+            ),
             Step::new(
                 parse_line("    input.as_bytes().len()"),
                 "Also small.",
@@ -587,7 +595,13 @@ fn literal_match_finds_digit_runs() -> TestResult {
 
 #[test]
 fn dependency_names_include_the_common_manifests() {
-    for file in ["Cargo.toml", "Cargo.lock", "package.json", "go.mod", "uv.lock"] {
+    for file in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "package.json",
+        "go.mod",
+        "uv.lock",
+    ] {
         assert!(DEPENDENCY_FILE_NAMES.contains(&file), "{file}");
     }
 }
