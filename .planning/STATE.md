@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-10-14T14:19:26.007Z"
+last_updated: "2026-10-14T14:31:17.046Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 22
+  completed_plans: 23
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 7 of 13
+Plan: 8 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -78,6 +78,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P04 | 6 min | 3 tasks | 5 files |
 | Phase 03 P05 | 15 min | 2 tasks | 3 files |
 | Phase 03 P06 | 9 min | 2 tasks | 5 files |
+| Phase 03 P07 | 9 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -145,6 +146,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-05: JudgeVersion golden vector 3a2f24af...bc12 over TreeId::of(b"judge") and the CLAUDE.md example judge spec
 - [Phase 03]: 03-06: The applier returns OutOfRange when a hunk appends after a base line lacking its newline or ends the new side without a newline before the base ends; only a file's last line can lack a newline
 - [Phase 03]: 03-06: diff_trees renders sections from diffy's parsed Patch structure, not its Display, then validates with Diff::parse, so equal candidate trees give byte-identical cumulative diffs
+- [Phase 03]: 03-07: BackendInfo deserializes through RawBackendInfo with strictly ascending layers, so each value has one wire form
+- [Phase 03]: 03-07: Record and Event are non_exhaustive; Isolation and DecisionKind stay exhaustive for the report and breaker
+- [Phase 03]: 03-07: Ledger frozen with eleven events and documented EventKeys before any golden wire file (CORE-08)
 
 ### Pending Todos
 
@@ -169,6 +173,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T14:19:02.723Z
+Last session: 2026-10-14T14:31:00.869Z
 Stopped at: Completed 03-05-PLAN.md
 Resume file: None
