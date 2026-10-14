@@ -40,14 +40,14 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **CORE-07**: `Outcome` is `Scored | Rejected(Reason) | Crashed | TimedOut`; failure is a value, never an error
 - [x] **CORE-08**: The `Event` set is frozen before golden files and includes `RunStarted`, `ManifestChanged`, `Proposed` (with parent, tier, rationale blob, model ID, prompt hash), `Judged` (with judge version, trial index, backend info), `Selected`, `Spent`, `Steered`, `StopRequested`, `ReviewRequested`, `Reviewed`, `ReportAcknowledged`; every event has a documented content-derived `EventKey`
 - [x] **CORE-09**: Run state is only ever rebuilt by folding events; the fold is property-tested for determinism and golden-file tested for `Record::V1`
-- [ ] **CORE-10**: `select_greedy` applies `min_improvement`, breaks ties on `ExperimentId`, and is property-tested as permutation-invariant
+- [x] **CORE-10**: `select_greedy` applies `min_improvement`, breaks ties on `ExperimentId`, and is property-tested as permutation-invariant
 - [x] **CORE-11**: Routing is a pure function of manifest and ledger that moves one tier up after `STALL_STEP` generations without improvement; `ProposerSpec::eligible` reports a reason for every ineligible tier
 - [x] **CORE-12**: The sweep sampler is seeded, uses its own range mapping, and yields identical samples for identical seeds across runs
 - [x] **CORE-13**: `JobRequest` and `JobResult` are defined in core as the loop-to-runner contract
 - [x] **CORE-14**: Money is pico-dollar `u128` rates parsed from strings and integer micro-dollar totals; no float touches a dollar value
 - [x] **CORE-15**: A single allowlist renderer strips C0, C1, and ESC sequences and renders bidi and zero-width characters visibly; every sandbox- or model-originated string passes through it before display
 - [ ] **CORE-16**: `build_report` is a pure function of ledger and blobs, produces a stable hash, and includes summary vs noise floor, cumulative diff, lineage, provenance (isolation level, judge version, image digests, model ID, prompt hash), and the v1 flags: anomalous jump, held-out divergence, literals matching visible inputs, new dependencies, encoded blobs
-- [ ] **CORE-17**: A circuit-breaker rule in core returns a stop decision after K generations with no valid candidate or K consecutive infrastructure failures
+- [x] **CORE-17**: A circuit-breaker rule in core returns a stop decision after K generations with no valid candidate or K consecutive infrastructure failures
 
 ### Store (STORE)
 
@@ -216,14 +216,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-07 | Phase 3 | Complete |
 | CORE-08 | Phase 3 | Complete |
 | CORE-09 | Phase 3 | Complete |
-| CORE-10 | Phase 3 | Pending |
+| CORE-10 | Phase 3 | Complete |
 | CORE-11 | Phase 3 | Complete |
 | CORE-12 | Phase 3 | Complete |
 | CORE-13 | Phase 3 | Complete |
 | CORE-14 | Phase 3 | Complete |
 | CORE-15 | Phase 3 | Complete |
 | CORE-16 | Phase 3 | Pending |
-| CORE-17 | Phase 3 | Pending |
+| CORE-17 | Phase 3 | Complete |
 | STORE-01 | Phase 4 | Pending |
 | STORE-02 | Phase 4 | Pending |
 | STORE-03 | Phase 4 | Pending |
