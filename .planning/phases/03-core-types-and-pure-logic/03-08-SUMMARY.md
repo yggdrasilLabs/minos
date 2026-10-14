@@ -92,3 +92,7 @@ None. `cargo deny check` prints `unused-wrapper` warnings for the `minos-core` b
 ## Known Stubs
 
 None.
+
+## Self-Check: PASSED
+
+Files: sweep.rs, tests/sweep.rs, and this SUMMARY exist. Commits 6e24b9a, 320c72e, 1ecfd43, 17f7273 exist.

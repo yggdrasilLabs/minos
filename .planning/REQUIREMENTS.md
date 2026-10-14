@@ -42,7 +42,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **CORE-09**: Run state is only ever rebuilt by folding events; the fold is property-tested for determinism and golden-file tested for `Record::V1`
 - [ ] **CORE-10**: `select_greedy` applies `min_improvement`, breaks ties on `ExperimentId`, and is property-tested as permutation-invariant
 - [x] **CORE-11**: Routing is a pure function of manifest and ledger that moves one tier up after `STALL_STEP` generations without improvement; `ProposerSpec::eligible` reports a reason for every ineligible tier
-- [ ] **CORE-12**: The sweep sampler is seeded, uses its own range mapping, and yields identical samples for identical seeds across runs
+- [x] **CORE-12**: The sweep sampler is seeded, uses its own range mapping, and yields identical samples for identical seeds across runs
 - [ ] **CORE-13**: `JobRequest` and `JobResult` are defined in core as the loop-to-runner contract
 - [x] **CORE-14**: Money is pico-dollar `u128` rates parsed from strings and integer micro-dollar totals; no float touches a dollar value
 - [x] **CORE-15**: A single allowlist renderer strips C0, C1, and ESC sequences and renders bidi and zero-width characters visibly; every sandbox- or model-originated string passes through it before display
@@ -218,7 +218,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-09 | Phase 3 | Pending |
 | CORE-10 | Phase 3 | Pending |
 | CORE-11 | Phase 3 | Complete |
-| CORE-12 | Phase 3 | Pending |
+| CORE-12 | Phase 3 | Complete |
 | CORE-13 | Phase 3 | Pending |
 | CORE-14 | Phase 3 | Complete |
 | CORE-15 | Phase 3 | Complete |

@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-10-14T14:31:17.046Z"
+stopped_at: Completed 03-08-PLAN.md
+last_updated: "2026-10-14T14:40:10.196Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 23
+  completed_plans: 24
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 8 of 13
+Plan: 9 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -79,6 +79,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P05 | 15 min | 2 tasks | 3 files |
 | Phase 03 P06 | 9 min | 2 tasks | 5 files |
 | Phase 03 P07 | 9 min | 2 tasks | 3 files |
+| Phase 03 P08 | 5 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -149,6 +150,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-07: BackendInfo deserializes through RawBackendInfo with strictly ascending layers, so each value has one wire form
 - [Phase 03]: 03-07: Record and Event are non_exhaustive; Isolation and DecisionKind stay exhaustive for the report and breaker
 - [Phase 03]: 03-07: Ledger frozen with eleven events and documented EventKeys before any golden wire file (CORE-08)
+- [Phase 03]: 03-08: render refuses a sample whose names are not exactly the params (Undeclared, Unassigned) or whose value is outside its domain (Domain)
+- [Phase 03]: 03-08: sweep anchors match base lines only, never an earlier param's edit, so render is independent of edit order
+- [Phase 03]: 03-08: the sweep's ChaCha8 stream is pinned to the published TC1 8-round vector; the golden samples were reproduced by an independent Python ChaCha8
 
 ### Pending Todos
 
@@ -173,6 +177,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T14:31:00.869Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-10-14T14:40:10.192Z
+Stopped at: Completed 03-08-PLAN.md
 Resume file: None
