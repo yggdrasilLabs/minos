@@ -192,7 +192,7 @@ Run on 2026-10-14 at `ec1eba6` (the commit after Task 2), in the order plan 03-1
 |---|---|---|---|
 | 1 | `cargo fmt --all --check` | 0 | no output |
 | 2 | `cargo clippy --workspace --all-targets -- -D warnings` | 0 | no warning |
-| 3 | `cargo test --workspace` | 0 | 40 test binaries, 713 passed, 0 failed, 25 ignored, all `#[ignore]` by design: the 24 VM spike tests and the `minos-backend-krun` initramfs cpio cross-check, which need a signed `minos-vmm` and environment variables |
+| 3 | `cargo test --workspace` | 0 | 40 test binaries, 713 passed, 0 failed, 25 ignored, all `#[ignore]` by design: the 24 VM spike tests and the `minos-backend-krun` initramfs cpio cross-check, which need a signed `minos-vmm`, libkrunfw, or `MINOS_*` environment variables |
 | 4 | `cargo deny check` | 0 | `advisories ok, bans ok, licenses ok, sources ok`; warnings only (duplicate versions, and the existing unused-wrapper entries for crates that do not link core or sandbox yet) |
 | 5 | `cargo doc --workspace --no-deps` | 0 | no warning |
 | 6 | C-01 `[lints] workspace = true` in every crate | 0 | 10 `ok` lines, no `MISSING` |

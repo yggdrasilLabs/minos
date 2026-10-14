@@ -59,7 +59,7 @@ Filled in from the plans 03-01 to 03-13 and their SUMMARY files. Task IDs are `<
 | 03-12-T1, 03-12-T2 | 03-12 | 6 | CORE-16 | T-03-12-02 to T-03-12-07 | Same inputs give identical report bytes and hash under shuffled ledger order; each flag (the five v1 flags plus hidden characters and weak isolation) fires on its fixture only; weak-isolation path golden (D-18) | golden + proptest | `cargo test -p minos-core --test report` | ✅ `tests/report.rs` | ✅ green |
 | 03-11-T3 | 03-11 | 5 | CORE-17 | T-03-11-04, T-03-11-05 | Breaker stops after exactly `max_empty_generations` empty generations and `max_infra_failures` infra failures | unit + proptest | `cargo test -p minos-core --test breaker` | ✅ `tests/breaker.rs` | ✅ green |
 | 03-04-T1, 03-04-T2, 03-07-T1, 03-09-T2 | 03-04, 03-07, 03-09 | 2, 3, 4 | COST-01 | T-03-04-06, T-03-07-06, T-03-09-05 | `Spent` has no dollar field (golden); a numeric rate in `prices.toml` is a parse error with a location | golden + unit | `cargo test -p minos-core --test money` and `cargo test -p minos-core --test golden_wire spent_carries_no_dollar_field` | ✅ `tests/money.rs`, `tests/golden_wire.rs` | ✅ green |
-| 03-13-T3 | 03-13 | 7 | GATE-06 | T-03-13-01, T-03-13-02 | `cargo clean` after the full gate passes, recorded in 03-EVIDENCE.md and 03-13-SUMMARY.md | manual | `cargo clean` | n/a | ⬜ pending (flipped to green in the 03-13 docs commit, after `cargo clean` runs) |
+| 03-13-T3 | 03-13 | 7 | GATE-06 | T-03-13-01, T-03-13-02 | `cargo clean` after the full gate passes, recorded in 03-EVIDENCE.md and 03-13-SUMMARY.md | manual | `cargo clean` (ran after the gate in 03-EVIDENCE.md; output in 03-13-SUMMARY.md) | n/a | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
