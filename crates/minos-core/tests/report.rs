@@ -11,7 +11,8 @@ use std::str::FromStr;
 use minos_core::diff::Diff;
 use minos_core::diff::apply::Tree;
 use minos_core::id::{
-    BlobId, ExperimentId, ImageDigest, ManifestId, MetricName, ModelId, PromptHash, RunId, TreeId,
+    BlobId, ExperimentId, ImageDigest, ManifestId, MetricName, ModelId, PromptHash, ReportHash,
+    RunId, TreeId,
 };
 use minos_core::ledger::{
     BackendInfo, BackendKind, ConfinementLayer, EXPECTED_KRUN_LAYERS, Event, Isolation, Origin,
@@ -23,10 +24,13 @@ use minos_core::metric::{Metric, Scorecard};
 use minos_core::outcome::Outcome;
 use minos_core::path::RelPath;
 use minos_core::report::{
-    DEPENDENCY_FILE_NAMES, Flag, MetricRole, ReportInput, SummaryRow, flags, summary,
+    DEPENDENCY_FILE_NAMES, Flag, MetricRole, Report, ReportError, ReportInput, SummaryRow,
+    build_report, flags, summary,
 };
 use minos_core::state::{RunState, fold};
 use minos_core::text::SafeText;
+use proptest::prelude::*;
+use sha2::{Digest, Sha256};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -329,6 +333,20 @@ impl Fixture {
     fn summary(&self) -> Result<Vec<SummaryRow>, Box<dyn Error>> {
         let state = self.state()?;
         Ok(summary(&self.input(&state))?)
+    }
+
+    fn report(&self) -> Result<Report, Box<dyn Error>> {
+        let state = self.state()?;
+        Ok(build_report(&self.input(&state))?)
+    }
+
+    /// The report error for this fixture, or an error when the report builds.
+    fn report_error(&self) -> Result<ReportError, Box<dyn Error>> {
+        let state = self.state()?;
+        match build_report(&self.input(&state)) {
+            Ok(_) => Err("the report built".into()),
+            Err(error) => Ok(error),
+        }
     }
 }
 
@@ -853,4 +871,274 @@ fn summary_noise_is_false_inside_the_noise_multiple() -> TestResult {
     let rows = one_step("    input.as_bytes().len()", &[(103.0, 51.5)])?.summary()?;
     assert_eq!(row(&rows, OBJECTIVE)?.clears_noise(), Some(false));
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The rendered report
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The section headings, in report order.
+const SECTIONS: [&str; 6] = [
+    "minos report v1",
+    "summary",
+    "flags",
+    "provenance",
+    "lineage",
+    "diff",
+];
+
+/// The fixture for the weak-isolation golden report: a weak first step without the dedicated user or rlimits,
+/// then a hardware step without the dedicated user.
+fn weak() -> Result<Fixture, Box<dyn Error>> {
+    Fixture::build(
+        &Spec::default(),
+        vec![
+            Step::new(
+                parse_line("    input.trim().len()"),
+                "Trim before counting.",
+                &[(108.0, 54.0), (110.0, 55.0), (112.0, 56.0)],
+            )
+            .on(backend_with(
+                Isolation::WeakProcess,
+                &[ConfinementLayer::Seatbelt],
+            )),
+            Step::new(
+                parse_line("    input.as_bytes().len()"),
+                "Count bytes directly.",
+                &[(118.0, 59.0), (120.0, 60.0), (122.0, 61.0)],
+            )
+            .on(backend_with(
+                Isolation::Hardware,
+                &[ConfinementLayer::Seatbelt, ConfinementLayer::Rlimits],
+            )),
+        ],
+    )
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+    base16ct::lower::encode_string(&digest)
+}
+
+fn fail(error: impl std::fmt::Display) -> TestCaseError {
+    TestCaseError::fail(error.to_string())
+}
+
+#[test]
+fn sections_are_in_order() -> TestResult {
+    let report = clean()?.report()?;
+    let lines: Vec<&str> = report.text().lines().collect();
+    let mut last = None;
+    for heading in SECTIONS {
+        let at = lines
+            .iter()
+            .position(|line| *line == heading)
+            .ok_or_else(|| format!("no section {heading}"))?;
+        assert!(
+            last.is_none_or(|before| at > before),
+            "{heading} is out of order"
+        );
+        last = Some(at);
+    }
+    Ok(())
+}
+
+#[test]
+fn clean_report_flags_section_says_none() -> TestResult {
+    let report = clean()?.report()?;
+    assert!(report.flags().is_empty());
+    assert!(report.text().contains("\nflags\n  none\n"));
+    Ok(())
+}
+
+#[test]
+fn report_is_lf_only_and_ends_with_a_newline() -> TestResult {
+    for fixture in [clean()?, weak()?] {
+        let report = fixture.report()?;
+        assert!(!report.text().contains('\r'));
+        assert!(report.text().ends_with('\n'));
+    }
+    Ok(())
+}
+
+#[test]
+fn hostile_rationale_renders_inert() -> TestResult {
+    let fixture = Fixture::build(
+        &Spec::default(),
+        vec![Step::new(
+            parse_line("    input.as_bytes().len() // \u{1b}[31mred\u{1b}[0m"),
+            "Faster.\u{1b}]52;c;bad\u{7} then \u{202e}reversed\nsecond line",
+            &[(110.0, 55.0)],
+        )],
+    )?;
+    let text = fixture.report()?.text().to_owned();
+    assert!(!text.contains('\u{1b}'));
+    assert!(!text.contains('\u{7}'));
+    assert!(!text.contains('\u{202e}'));
+    assert!(text.contains("<U+202E>reversed<U+000A>second line"));
+    assert!(text.contains("]52;c;bad"));
+    Ok(())
+}
+
+#[test]
+fn long_rationale_is_truncated_at_a_char_boundary() -> TestResult {
+    let rationale = "\u{e9}".repeat(300);
+    let fixture = Fixture::build(
+        &Spec::default(),
+        vec![Step::new(
+            parse_line("    input.as_bytes().len()"),
+            &rationale,
+            &[(110.0, 55.0)],
+        )],
+    )?;
+    let text = fixture.report()?.text().to_owned();
+    assert!(text.contains(&format!("{} [truncated]", "\u{e9}".repeat(100))));
+    assert!(!text.contains(&"\u{e9}".repeat(101)));
+    Ok(())
+}
+
+#[test]
+fn hash_covers_the_rendered_bytes() -> TestResult {
+    let report = clean()?.report()?;
+    assert_eq!(*report.hash(), ReportHash::of(report.text().as_bytes()));
+    Ok(())
+}
+
+#[test]
+fn same_inputs_give_the_same_report() -> TestResult {
+    let first = clean()?.report()?;
+    let second = clean()?.report()?;
+    assert_eq!(first.text(), second.text());
+    assert_eq!(first.hash(), second.hash());
+    assert_eq!(first.summary(), second.summary());
+    Ok(())
+}
+
+#[test]
+fn different_reports_have_different_hashes() -> TestResult {
+    assert_ne!(clean()?.report()?.hash(), weak()?.report()?.hash());
+    Ok(())
+}
+
+#[test]
+fn a_report_on_the_baseline_is_refused() -> TestResult {
+    let fixture = Fixture::build(&Spec::default(), Vec::new())?;
+    assert_eq!(fixture.report_error()?, ReportError::Baseline);
+    Ok(())
+}
+
+#[test]
+fn a_report_on_an_unknown_experiment_is_refused() -> TestResult {
+    let mut fixture = clean()?;
+    fixture.target = ExperimentId::from_str(&"cd".repeat(32))?;
+    assert_eq!(
+        fixture.report_error()?,
+        ReportError::NotInLedger {
+            exp: fixture.target
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn a_missing_diff_blob_is_refused() -> TestResult {
+    let mut fixture = clean()?;
+    let state = fixture.state()?;
+    let diff = *state
+        .proposal(&fixture.target)
+        .ok_or("no target proposal")?
+        .diff();
+    fixture.blobs.remove(&diff);
+    assert_eq!(
+        fixture.report_error()?,
+        ReportError::MissingBlob { blob: diff }
+    );
+    Ok(())
+}
+
+#[test]
+fn a_blob_that_does_not_match_its_id_is_refused() -> TestResult {
+    let mut fixture = clean()?;
+    let state = fixture.state()?;
+    let rationale = *state
+        .proposal(&fixture.target)
+        .ok_or("no target proposal")?
+        .rationale();
+    fixture.blobs.insert(rationale, b"tampered".to_vec());
+    assert_eq!(
+        fixture.report_error()?,
+        ReportError::MissingBlob { blob: rationale }
+    );
+    Ok(())
+}
+
+#[test]
+fn weak_isolation_report_shows_the_weakest_level_and_missing_layers() -> TestResult {
+    let report = weak()?.report()?;
+    let text = report.text();
+    assert!(text.contains("  isolation: weak (process only)\n"));
+    assert!(text.contains("  reduced hardening: dedicated_user, rlimits\n"));
+    assert!(report.flags().contains(&Flag::WeakIsolation {
+        level: Isolation::WeakProcess
+    }));
+    Ok(())
+}
+
+#[test]
+fn clean_report_shows_hardware_isolation() -> TestResult {
+    let text = clean()?.report()?.text().to_owned();
+    assert!(text.contains("  isolation: hardware virtualization\n"));
+    assert!(text.contains("  reduced hardening: none\n"));
+    Ok(())
+}
+
+#[test]
+fn golden_reports() -> TestResult {
+    insta::assert_snapshot!("clean_report", clean()?.report()?.text());
+    insta::assert_snapshot!("weak_isolation_report", weak()?.report()?.text());
+    Ok(())
+}
+
+#[test]
+fn golden_report_bytes_pinned() -> TestResult {
+    // insta trims trailing whitespace and normalizes line endings when it compares (03-RESEARCH Pitfall 4), so
+    // this pins the exact bytes of both golden texts, concatenated in this order. The pin was computed outside the
+    // code under test, from the accepted snapshot bodies (the text after each file's second `---` line), each of
+    // which insta stores without the report's final newline:
+    //
+    //   cd crates/minos-core/tests/snapshots
+    //   for n in clean_report weak_isolation_report; do
+    //     awk 'n >= 2 { print } /^---$/ { n++ }' "report__$n.snap"
+    //   done | shasum -a 256
+    let mut all = String::new();
+    all.push_str(clean()?.report()?.text());
+    all.push_str(weak()?.report()?.text());
+    assert_eq!(sha256_hex(all.as_bytes()), GOLDEN_REPORT_SHA256);
+    Ok(())
+}
+
+/// See `golden_report_bytes_pinned`.
+const GOLDEN_REPORT_SHA256: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
+proptest! {
+    #[test]
+    fn report_is_order_insensitive(seed in any::<u64>()) {
+        let fixture = clean().map_err(fail)?;
+        let expected = fixture.report().map_err(fail)?;
+        let (first, rest) = fixture.records.split_first().ok_or_else(|| fail("no records"))?;
+        // A deterministic shuffle of every record after RunStarted, keyed by the seed and each record's position.
+        let mut keyed: Vec<(String, Record)> = rest
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (sha256_hex(format!("{seed}/{index}").as_bytes()), record.clone()))
+            .collect();
+        keyed.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut shuffled = vec![first.clone()];
+        shuffled.extend(keyed.into_iter().map(|(_, record)| record));
+        let state = fold(&shuffled).map_err(fail)?;
+        let report = build_report(&fixture.input(&state)).map_err(fail)?;
+        prop_assert_eq!(report.text(), expected.text());
+        prop_assert_eq!(report.hash(), expected.hash());
+    }
 }
