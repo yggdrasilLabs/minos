@@ -20,11 +20,14 @@
 //!
 //! **Judge paths** are the `[source] exclude` entries (rule 4) plus every judge argv entry that names a
 //! project-relative path: the program and every later argument, or the text after the first `=` of an option. An
-//! absolute path (`/out/score.json`, a path inside the VM image) contributes nothing; one leading `./` is
-//! stripped; what remains is a judge path if it is a valid [`RelPath`]. An entry that looks like a path (it has a
-//! `/` or `\`, or is `.` or `..`) but is not a valid [`RelPath`], and an option without `=` that has a `/` or
-//! `\`, is refused rather than ignored. So `["python3", "judge/score.py"]` makes `judge/score.py` a judge path,
-//! and it cannot be writable. Only the judge command is read this way, never build, run, or check.
+//! absolute path (`/out/score.json`, a path inside the VM image) contributes nothing, and neither does a bare
+//! word, an entry with no `/` or `\` and no leading `./` that is not `.` or `..` (`python3`, `verbose`, the
+//! `json` of `--format=json`): it is a program on `PATH` or a plain argument, the same rule as
+//! [`CommandArgv::program`]. Otherwise one leading `./` is stripped, and what remains must be a valid
+//! [`RelPath`], which is then a judge path. An entry that looks like a path but is not a valid [`RelPath`], and
+//! an option without `=` that has a `/` or `\`, is refused rather than ignored. So
+//! `["python3", "judge/score.py"]` makes `judge/score.py` a judge path and nothing of `python3`, and the judge
+//! path cannot be writable. Only the judge command is read this way, never build, run, or check.
 //!
 //! **The `[judge] version` integer** is a local label naming which pushed judge data the project uses. The
 //! recorded identity is [`JudgeVersion`]: the hash of that data's tree and the canonical judge spec. Judge data
@@ -1644,11 +1647,18 @@ fn judge_paths(command: &CommandArgv) -> Result<BTreeSet<RelPath>, ManifestError
         if candidate.starts_with('/') {
             continue;
         }
-        let stripped = candidate.strip_prefix("./").unwrap_or(candidate);
-        if let Ok(path) = RelPath::try_from(stripped) {
-            paths.insert(path);
-        } else if path_like(candidate) || matches!(stripped, "." | "..") {
-            return Err(ManifestError::JudgeArgPath { index });
+        let dotted = candidate.strip_prefix("./");
+        let text = dotted.unwrap_or(candidate);
+        // The same rule as `CommandArgv::program`: a bare word names a program on PATH or is a plain argument,
+        // never a project path. Anything path-like must then be a valid RelPath.
+        if dotted.is_none() && !path_like(candidate) && !matches!(text, "." | "..") {
+            continue;
+        }
+        match RelPath::try_from(text) {
+            Ok(path) => {
+                paths.insert(path);
+            }
+            Err(_) => return Err(ManifestError::JudgeArgPath { index }),
         }
     }
     Ok(paths)

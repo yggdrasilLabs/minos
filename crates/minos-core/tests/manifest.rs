@@ -1368,6 +1368,19 @@ fn rejects_judge_argument_case_fold_collision() -> TestResult {
 }
 
 #[test]
+fn bare_judge_words_are_not_judge_paths() -> TestResult {
+    // A program name, a plain argument, and a bare option value name no project file, so later phases that
+    // mount or exclude judge paths never act on `python3` or `json`.
+    let text = example(
+        r#"command = ["./judge"]"#,
+        r#"command = ["python3", "judge/score.py", "--format=json", "verbose", "-q"]"#,
+    )?;
+    let manifest = Manifest::parse_toml(&text)?;
+    assert_eq!(strings(manifest.judge().paths()), ["judge/score.py"]);
+    Ok(())
+}
+
+#[test]
 fn judge_flags_and_absolute_paths_are_not_judge_paths() -> TestResult {
     let text = example_with_judge_command(r#"["./judge", "--out=/out/score.json", "-v"]"#)?;
     let manifest = Manifest::parse_toml(&text)?;
