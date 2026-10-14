@@ -20,7 +20,13 @@ fn rejected(text: &str) -> Result<PathError, Box<dyn Error>> {
 
 #[test]
 fn accepts_plain_relative_paths() -> TestResult {
-    for text in ["src/parse.rs", "a", ".gitignore", "dir/sub/file_1.rs", "a+b-c.txt"] {
+    for text in [
+        "src/parse.rs",
+        "a",
+        ".gitignore",
+        "dir/sub/file_1.rs",
+        "a+b-c.txt",
+    ] {
         assert_eq!(RelPath::from_str(text)?.as_str(), text);
         assert_eq!(RelPath::try_from(text)?.as_str(), text);
         assert_eq!(RelPath::try_from(text.to_owned())?.to_string(), text);
@@ -48,14 +54,35 @@ fn rejects_structural_forms() -> TestResult {
 
 #[test]
 fn rejects_forbidden_bytes_with_their_index() -> TestResult {
-    assert!(matches!(rejected("a\\b")?, PathError::ForbiddenByte { index: 1 }));
-    assert!(matches!(rejected("a\u{0}b")?, PathError::ForbiddenByte { index: 1 }));
+    assert!(matches!(
+        rejected("a\\b")?,
+        PathError::ForbiddenByte { index: 1 }
+    ));
+    assert!(matches!(
+        rejected("a\u{0}b")?,
+        PathError::ForbiddenByte { index: 1 }
+    ));
     // Cyrillic small a (U+0430) in place of the Latin a: a homoglyph of src/parse.rs.
-    assert!(matches!(rejected("src/p\u{430}rse.rs")?, PathError::ForbiddenByte { index: 5 }));
-    assert!(matches!(rejected("a b")?, PathError::ForbiddenByte { index: 1 }));
-    assert!(matches!(rejected("a\nb")?, PathError::ForbiddenByte { index: 1 }));
-    assert!(matches!(rejected("a:b")?, PathError::ForbiddenByte { index: 1 }));
-    assert!(matches!(rejected("*")?, PathError::ForbiddenByte { index: 0 }));
+    assert!(matches!(
+        rejected("src/p\u{430}rse.rs")?,
+        PathError::ForbiddenByte { index: 5 }
+    ));
+    assert!(matches!(
+        rejected("a b")?,
+        PathError::ForbiddenByte { index: 1 }
+    ));
+    assert!(matches!(
+        rejected("a\nb")?,
+        PathError::ForbiddenByte { index: 1 }
+    ));
+    assert!(matches!(
+        rejected("a:b")?,
+        PathError::ForbiddenByte { index: 1 }
+    ));
+    assert!(matches!(
+        rejected("*")?,
+        PathError::ForbiddenByte { index: 0 }
+    ));
     Ok(())
 }
 
@@ -74,8 +101,14 @@ fn rejects_over_length_and_depth() -> TestResult {
 
     assert!(RelPath::from_str(&"c".repeat(MAX_COMPONENT_BYTES)).is_ok());
     let long_component = "c".repeat(MAX_COMPONENT_BYTES + 1);
-    assert!(matches!(rejected(&long_component)?, PathError::ComponentTooLong));
-    assert!(matches!(rejected(&format!("dir/{long_component}"))?, PathError::ComponentTooLong));
+    assert!(matches!(
+        rejected(&long_component)?,
+        PathError::ComponentTooLong
+    ));
+    assert!(matches!(
+        rejected(&format!("dir/{long_component}"))?,
+        PathError::ComponentTooLong
+    ));
     Ok(())
 }
 
@@ -93,7 +126,10 @@ fn ordering_and_equality_are_bytewise() -> TestResult {
 #[test]
 fn accessors() -> TestResult {
     let path = RelPath::from_str("dir/sub/file_1.rs")?;
-    assert_eq!(path.components().collect::<Vec<_>>(), ["dir", "sub", "file_1.rs"]);
+    assert_eq!(
+        path.components().collect::<Vec<_>>(),
+        ["dir", "sub", "file_1.rs"]
+    );
     assert_eq!(path.file_name(), "file_1.rs");
     assert_eq!(path.depth(), 3);
     let single = RelPath::from_str("a")?;
@@ -122,7 +158,14 @@ fn serde_runs_the_same_validator() -> TestResult {
     let path: RelPath = serde_json::from_str("\"src/parse.rs\"")?;
     assert_eq!(path.as_str(), "src/parse.rs");
     assert_eq!(serde_json::to_string(&path)?, "\"src/parse.rs\"");
-    for bad in ["\"../x\"", "\"/abs\"", "\"\"", "\"a//b\"", "\"a\\\\b\"", "1"] {
+    for bad in [
+        "\"../x\"",
+        "\"/abs\"",
+        "\"\"",
+        "\"a//b\"",
+        "\"a\\\\b\"",
+        "1",
+    ] {
         assert!(serde_json::from_str::<RelPath>(bad).is_err());
     }
     Ok(())
