@@ -17,6 +17,10 @@
 //!    starts that follow from the old-side starts.
 //! 5. Line accounting: diffy's reading must account for every input line, so nothing it skipped can hide in the
 //!    text.
+//! 6. The canonical form (see [`Diff::as_str`]): sections sorted by path, explicit hunk lengths, no `index` line,
+//!    no function context, and no timestamps. Everything a model wrote outside the lines being changed is dropped,
+//!    so the bytes [`ExperimentId::of`](crate::id::ExperimentId::of) hashes are ours.
+//! 7. A round-trip check: stages 1 to 5 run again on the canonical text and must give back the same files.
 //!
 //! A `/dev/null` side (create or delete), a rename, a copy, a mode change, a symlink or gitlink mode, and a binary
 //! patch are all rejected (D-02: a diff may only modify an existing writable file), so an experiment that edits the
@@ -234,6 +238,10 @@ pub enum DiffError {
         /// 1-based hunk number within the section.
         hunk: usize,
     },
+    /// The canonical form did not read back to the same files. This is a defect in the serializer, never a
+    /// property of the input; the diff is still rejected, never accepted.
+    #[error("the canonical form did not re-parse to the same diff")]
+    CanonicalRoundTrip,
     /// diffy's reading of the text does not account for every line, so it skipped something.
     #[error("the parsed diff accounts for {expected} lines but the text has {found}")]
     LineAccounting {
@@ -406,11 +414,15 @@ impl fmt::Debug for FileDiff {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Diff {
     files: Vec<FileDiff>,
+    canonical: String,
 }
 
 impl fmt::Debug for Diff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Diff").field("files", &self.files).finish()
+        f.debug_struct("Diff")
+            .field("files", &self.files)
+            .field("bytes", &self.canonical.len())
+            .finish()
     }
 }
 
@@ -428,12 +440,48 @@ impl Diff {
         writable: &BTreeSet<RelPath>,
         limits: &Limits,
     ) -> Result<Self, DiffError> {
-        let found = check_bytes(text, limits)?;
-        let shapes = check_grammar(text, limits)?;
-        let mut files = read_sections(text, &shapes, writable)?;
-        check_accounting(&shapes, &files, found)?;
+        let mut files = read(text, writable, limits)?;
         files.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(Self { files })
+        let canonical = serialize(&files);
+        // Stage 7: the canonical bytes must read back to the same files under the same caps, so any consumer that
+        // re-parses them (the report, a resumed run) sees exactly this diff. A canonical form over the byte cap is
+        // `TooLarge`; any other failure is a defect in the serializer, still rejected.
+        let again = read(&canonical, writable, limits).map_err(|error| match error {
+            DiffError::TooLarge { .. } => error,
+            _ => DiffError::CanonicalRoundTrip,
+        })?;
+        if again != files {
+            return Err(DiffError::CanonicalRoundTrip);
+        }
+        Ok(Self { files, canonical })
+    }
+
+    /// The canonical text: sections sorted by path, each `diff --git a/P b/P`, `--- a/P`, `+++ b/P`, then hunks
+    /// as `@@ -a,b +c,d @@` with both lengths and no function context, LF only, and `\ No newline at end of file`
+    /// after a line that lacks its newline. No `index` line and no timestamps. Accepted by `git apply` and
+    /// `patch -p1`, and `Diff::parse` of it gives this diff back.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.canonical
+    }
+
+    /// The canonical text as bytes: what [`ExperimentId::of`](crate::id::ExperimentId::of) hashes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.canonical.as_bytes()
+    }
+
+    /// Length of the canonical text, in bytes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.canonical.len()
+    }
+
+    /// Always false: a parsed diff changes at least one line (03-CONTEXT D-03, D-04). The baseline, which has no
+    /// diff, is `ExperimentId::baseline`.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.canonical.is_empty()
     }
 
     /// The modified files, sorted by path.
@@ -981,6 +1029,19 @@ fn read_sections(
     Ok(files)
 }
 
+/// Stages 1 to 5 over one text: the files in input order.
+fn read(
+    text: &str,
+    writable: &BTreeSet<RelPath>,
+    limits: &Limits,
+) -> Result<Vec<FileDiff>, DiffError> {
+    let found = check_bytes(text, limits)?;
+    let shapes = check_grammar(text, limits)?;
+    let files = read_sections(text, &shapes, writable)?;
+    check_accounting(&shapes, &files, found)?;
+    Ok(files)
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Stage 5: line accounting
 // ---------------------------------------------------------------------------------------------------------------
@@ -1009,4 +1070,55 @@ fn check_accounting(shapes: &[Shape], files: &[FileDiff], found: usize) -> Resul
     } else {
         Err(DiffError::LineAccounting { expected, found })
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Stage 6: the canonical form
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Writes `files` (already sorted by path) in the canonical form described at [`Diff::as_str`].
+fn serialize(files: &[FileDiff]) -> String {
+    let mut out = String::new();
+    for file in files {
+        let path = file.path.as_str();
+        for piece in [
+            "diff --git a/",
+            path,
+            " b/",
+            path,
+            "\n--- a/",
+            path,
+            "\n+++ b/",
+            path,
+            "\n",
+        ] {
+            out.push_str(piece);
+        }
+        for hunk in &file.hunks {
+            for (part, number) in [
+                ("@@ -", hunk.old_start),
+                (",", hunk.old_len),
+                (" +", hunk.new_start),
+                (",", hunk.new_len),
+            ] {
+                out.push_str(part);
+                out.push_str(&number.to_string());
+            }
+            out.push_str(" @@\n");
+            for line in &hunk.lines {
+                out.push(match line {
+                    HunkLine::Context(_) => ' ',
+                    HunkLine::Delete(_) => '-',
+                    HunkLine::Insert(_) => '+',
+                });
+                out.push_str(line.raw());
+                if !line.has_newline() {
+                    out.push('\n');
+                    out.push_str(NO_NEWLINE_MARKER);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
 }

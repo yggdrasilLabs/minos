@@ -18,6 +18,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::diff::Diff;
 use crate::limits::{MAX_MODEL_ID_BYTES, MAX_NAME_BYTES};
 
 /// Domain of [`ExperimentId`].
@@ -277,6 +278,16 @@ impl ExperimentId {
     #[must_use]
     pub fn baseline(base: &TreeId) -> Self {
         Self::hash(base, &[])
+    }
+
+    /// An experiment: the base tree and its diff, cumulative from the run's base tree (03-CONTEXT D-04
+    /// amendment, 2026-10-14).
+    ///
+    /// It hashes the diff's canonical bytes, never the text a model wrote, so two texts that canonicalize
+    /// identically get the same ID.
+    #[must_use]
+    pub fn of(base: &TreeId, diff: &Diff) -> Self {
+        Self::hash(base, diff.as_bytes())
     }
 }
 
