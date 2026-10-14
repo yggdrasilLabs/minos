@@ -63,6 +63,25 @@ pub enum FoldError {
         /// The shared key.
         key: EventKey,
     },
+    /// One experiment is proposed twice with different fields (another generation, parent, tier, rationale, or
+    /// origin). `Proposed` is keyed by experiment alone, so the loop must check [`RunState::proposal`] is `None`
+    /// before appending a proposal; a repeat is dropped at admission, never recorded.
+    #[error("experiment {exp} is proposed more than once; a repeat must be dropped at admission")]
+    DuplicateProposal {
+        /// The experiment proposed twice.
+        exp: ExperimentId,
+    },
+    /// Two different notes share one ordinal of one generation. `Steered` is keyed by generation and ordinal, so
+    /// `minos steer` must read [`RunState::next_note_ordinal`] and append under the ledger lock.
+    #[error(
+        "generation {generation} has two different notes at ordinal {ordinal}; steer under the ledger lock"
+    )]
+    NoteConflict {
+        /// The generation.
+        generation: u32,
+        /// The shared ordinal.
+        ordinal: u32,
+    },
     /// A record refers to an experiment that is neither the baseline nor proposed.
     #[error("a record refers to unknown experiment {exp}")]
     UnknownExperiment {
@@ -282,8 +301,9 @@ pub struct RunState {
 /// # Errors
 ///
 /// A [`FoldError`] when the ledger is corrupt: empty, not starting with a single consistent `RunStarted`, a key
-/// shared by two different events, or a dangling or inconsistent cross-reference. Corruption is an infrastructure
-/// fault, never an [`Outcome`].
+/// shared by two different events (a second proposal of one experiment is [`FoldError::DuplicateProposal`], two
+/// notes at one ordinal [`FoldError::NoteConflict`], anything else [`FoldError::KeyConflict`]), or a dangling or
+/// inconsistent cross-reference. Corruption is an infrastructure fault, never an [`Outcome`].
 pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunState, FoldError> {
     let mut records = records.into_iter();
     let first = records.next().ok_or(FoldError::Empty)?.event();
@@ -322,10 +342,23 @@ pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunStat
                 keyed.insert(key, event);
             }
             Some(existing) if *existing == event => {}
-            Some(_) if matches!(event, Event::RunStarted { .. }) => {
-                return Err(FoldError::DuplicateRunStarted);
+            Some(_) => {
+                // A shared key with different content is a rewritten record, except where the key table leaves
+                // a field out of the key by design: those cases get an error that names the obligation.
+                return Err(match event {
+                    Event::RunStarted { .. } => FoldError::DuplicateRunStarted,
+                    Event::Proposed { exp, .. } => FoldError::DuplicateProposal { exp: *exp },
+                    Event::Steered {
+                        generation,
+                        ordinal,
+                        ..
+                    } => FoldError::NoteConflict {
+                        generation: *generation,
+                        ordinal: *ordinal,
+                    },
+                    _ => FoldError::KeyConflict { key },
+                });
             }
-            Some(_) => return Err(FoldError::KeyConflict { key }),
         }
     }
 

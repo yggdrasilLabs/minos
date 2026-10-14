@@ -15,11 +15,11 @@
 //! |---|---|---|---|
 //! | `RunStarted` | 1 | nothing | One per run; the run digest is already hashed |
 //! | `ManifestChanged` | 2 | `digest(manifest)`, `u64(from_generation)` | `from_generation`, so a change A to B to A is three records, not one |
-//! | `Proposed` | 3 | `digest(exp)` | A re-proposal of the same experiment is the same record |
+//! | `Proposed` | 3 | `digest(exp)` | A re-proposal of the same experiment is the same record. The other fields are not in the key, so the loop must check `RunState::proposal(&exp).is_none()` before appending and drop a repeat at admission; a second proposal with different fields fails the fold with `FoldError::DuplicateProposal` |
 //! | `Judged` | 4 | `digest(exp)`, `digest(judge)`, `u64(trial)` | `trial`, so repeated noise-floor measurements never collapse; `judge`, so re-scoring appends |
 //! | `Selected` | 5 | `u64(generation)` | One decision per generation |
 //! | `Spent` | 6 | `digest(SpendId)` | Through [`SpendId`], so a resumed model call with a new index is neither double-counted nor dropped |
-//! | `Steered` | 7 | `u64(generation)`, `u64(ordinal)` | `ordinal`, so identical notes for one generation stay distinct |
+//! | `Steered` | 7 | `u64(generation)`, `u64(ordinal)` | `ordinal`, so identical notes for one generation stay distinct. The note is not in the key, so `minos steer` must read `RunState::next_note_ordinal` and append under the ledger lock; two different notes at one ordinal fail the fold with `FoldError::NoteConflict` |
 //! | `StopRequested` | 8 | `u64(generation)`, `u64(reason tag)` | `generation`, so a repeated stop is a no-op but a resumed run can stop again later |
 //! | `ReviewRequested` | 9 | `digest(request)` | Its own tag, so a request and its answer never share a key |
 //! | `Reviewed` | 10 | `digest(request)` | Its own tag, distinct from `ReviewRequested` |

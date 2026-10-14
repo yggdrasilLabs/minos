@@ -521,6 +521,39 @@ fn the_same_key_with_different_content_conflicts() -> TestResult {
 }
 
 #[test]
+fn a_second_proposal_of_one_experiment_is_a_duplicate_proposal() -> TestResult {
+    // `Proposed` is keyed by experiment alone: the same experiment proposed again in a later generation, from
+    // another parent, is the loop's admission failure, named as such rather than as a rewritten record.
+    let e1 = exp(1)?;
+    let records = with(proposed(e1, baseline(), 2, Tier::SingleShot)?)?;
+    assert_eq!(
+        fold_err(&records)?,
+        FoldError::DuplicateProposal { exp: e1 }
+    );
+    // An identical re-proposal is the same record and folds.
+    let records = with(proposed(e1, baseline(), 1, Tier::SingleShot)?)?;
+    assert!(fold(&records).is_ok());
+    Ok(())
+}
+
+#[test]
+fn two_different_notes_at_one_ordinal_are_a_note_conflict() -> TestResult {
+    let records = with(Event::Steered {
+        generation: 2,
+        ordinal: 0,
+        note: BlobId::of(b"another note zero"),
+    })?;
+    assert_eq!(
+        fold_err(&records)?,
+        FoldError::NoteConflict {
+            generation: 2,
+            ordinal: 0
+        }
+    );
+    Ok(())
+}
+
+#[test]
 fn judged_for_an_unknown_experiment_is_refused() -> TestResult {
     let records = with(judged(exp(9)?, 0, scored(1.0)?)?)?;
     assert!(matches!(
