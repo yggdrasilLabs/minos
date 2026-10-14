@@ -20,6 +20,7 @@ use minos_core::metric::{Metric, Scorecard};
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::state::{FoldError, RunState, fold};
 use minos_core::usage::Usage;
+use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -747,4 +748,322 @@ fn an_exact_duplicate_is_ignored() -> TestResult {
     records.extend(valid_ledger()?);
     assert_eq!(fold(&records)?, folded()?);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Properties over generated valid ledgers
+// ---------------------------------------------------------------------------------------------------------------
+
+/// One generated proposal: a parent choice among the baseline and every earlier experiment, whether it is a
+/// sweep proposal, and one outcome choice per trial.
+type ProposalPlan = (usize, bool, Vec<u8>);
+
+/// One generated generation.
+#[derive(Clone, Debug)]
+struct GenerationPlan {
+    proposals: Vec<ProposalPlan>,
+    /// 0 to 2 picks `Improved`, `Kept`, or `NoValidCandidates`; 3 records no decision, as for a generation in progress.
+    decision: u8,
+    winner: usize,
+    model_calls: u32,
+    notes: u32,
+}
+
+/// One generated ledger.
+#[derive(Clone, Debug)]
+struct LedgerPlan {
+    baseline_trials: Vec<u8>,
+    generations: Vec<GenerationPlan>,
+    /// Distinct numbers for candidate experiment IDs, in random order.
+    ids: Vec<u64>,
+    manifest_change: bool,
+    review: Option<bool>,
+    stop: bool,
+    acknowledge: bool,
+}
+
+/// Every generated ledger has at most 4 generations of at most 4 proposals.
+const MAX_EXPERIMENTS: usize = 16;
+
+fn generation_plan() -> impl Strategy<Value = GenerationPlan> {
+    (
+        prop::collection::vec(
+            (
+                any::<usize>(),
+                any::<bool>(),
+                prop::collection::vec(any::<u8>(), 1..=3),
+            ),
+            1..=4,
+        ),
+        0_u8..=3,
+        any::<usize>(),
+        0_u32..=2,
+        0_u32..=2,
+    )
+        .prop_map(
+            |(proposals, decision, winner, model_calls, notes)| GenerationPlan {
+                proposals,
+                decision,
+                winner,
+                model_calls,
+                notes,
+            },
+        )
+}
+
+fn ledger_plan() -> impl Strategy<Value = LedgerPlan> {
+    (
+        prop::collection::vec(any::<u8>(), 1..=3),
+        prop::collection::vec(generation_plan(), 1..=4),
+        prop::collection::btree_set(any::<u64>(), MAX_EXPERIMENTS)
+            .prop_map(|ids| ids.into_iter().collect::<Vec<u64>>())
+            .prop_shuffle(),
+        any::<bool>(),
+        proptest::option::of(any::<bool>()),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(baseline_trials, generations, ids, manifest_change, review, stop, acknowledge)| {
+                LedgerPlan {
+                    baseline_trials,
+                    generations,
+                    ids,
+                    manifest_change,
+                    review,
+                    stop,
+                    acknowledge,
+                }
+            },
+        )
+}
+
+/// A trial outcome from a small fixed set. No generated outcome uses `Stage::Build`, which the tamper property
+/// relies on.
+fn outcome_of(choice: u8) -> Result<Outcome, Box<dyn Error>> {
+    Ok(match choice % 6 {
+        0 => scored(1.0)?,
+        1 => scored(2.5)?,
+        2 => scored(100.0)?,
+        3 => Outcome::Crashed { stage: Stage::Run },
+        4 => Outcome::TimedOut {
+            stage: Stage::Judge,
+        },
+        _ => Outcome::Rejected(Reason::BuildFailed),
+    })
+}
+
+fn pick<T: Copy>(items: &[T], choice: usize) -> Result<T, Box<dyn Error>> {
+    choice
+        .checked_rem(items.len())
+        .and_then(|index| items.get(index))
+        .copied()
+        .ok_or_else(|| "nothing to pick from".into())
+}
+
+/// Appends the Judged and Spent records of `exp`'s trials.
+fn push_trials(
+    records: &mut Vec<Record>,
+    exp: ExperimentId,
+    generation: u32,
+    outcomes: &[u8],
+) -> Result<(), Box<dyn Error>> {
+    for (trial, choice) in (0_u32..).zip(outcomes) {
+        records.push(rec(judged(exp, trial, outcome_of(*choice)?)?));
+        let source = if exp == baseline() {
+            SpendSource::Judge { exp, trial }
+        } else {
+            SpendSource::Candidate { exp, trial }
+        };
+        records.push(rec(Event::Spent {
+            generation,
+            source,
+            usage: Usage::compute(u64::from(trial) + 1, u64::from(*choice) + 1),
+        }));
+    }
+    Ok(())
+}
+
+/// Builds a valid ledger from `plan`, in append order: parents are always from an earlier generation, tiers
+/// and origins agree, and every decision is consistent with the generation's proposals and incumbent.
+fn build(plan: &LedgerPlan) -> Result<Vec<Record>, Box<dyn Error>> {
+    let mut records = vec![rec(run_started())];
+    push_trials(&mut records, baseline(), 0, &plan.baseline_trials)?;
+
+    let mut ids = plan.ids.iter();
+    let mut earlier = vec![baseline()];
+    let mut incumbent = baseline();
+    for (generation, gen_plan) in (1_u32..).zip(&plan.generations) {
+        let mut this_generation = Vec::new();
+        for (parent_choice, sweep, outcomes) in &gen_plan.proposals {
+            let id = exp(*ids.next().ok_or("ran out of experiment IDs")?)?;
+            let parent = pick(&earlier, *parent_choice)?;
+            let tier = if *sweep {
+                Tier::Sweep
+            } else {
+                Tier::SingleShot
+            };
+            records.push(rec(proposed(id, parent, generation, tier)?));
+            push_trials(&mut records, id, generation, outcomes)?;
+            this_generation.push(id);
+        }
+        for call in 0..gen_plan.model_calls {
+            records.push(rec(Event::Spent {
+                generation,
+                source: SpendSource::ModelCall {
+                    call,
+                    model: haiku()?,
+                },
+                usage: Usage::tokens(u64::from(call) + 10, 5, 1, 2),
+            }));
+        }
+        for ordinal in 0..gen_plan.notes {
+            records.push(rec(Event::Steered {
+                generation,
+                ordinal,
+                note: BlobId::of(format!("note {generation} {ordinal}").as_bytes()),
+            }));
+        }
+        let proposed_count = u32::try_from(this_generation.len())?;
+        let kind = match gen_plan.decision {
+            0 => Some(DecisionKind::Improved {
+                winner: pick(&this_generation, gen_plan.winner)?,
+            }),
+            1 => Some(DecisionKind::Kept { incumbent }),
+            2 => Some(DecisionKind::NoValidCandidates),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            if let DecisionKind::Improved { winner } = kind {
+                incumbent = winner;
+            }
+            records.push(rec(selected(generation, kind, proposed_count)));
+        }
+        earlier.extend(this_generation);
+    }
+
+    if plan.manifest_change {
+        records.push(rec(Event::ManifestChanged {
+            manifest: ManifestId::of(b"m2"),
+            from_generation: 1,
+        }));
+    }
+    if let Some(answered) = plan.review {
+        let request = review_id(ReviewKind::Params);
+        records.push(rec(Event::ReviewRequested {
+            request,
+            kind: ReviewKind::Params,
+        }));
+        if answered {
+            records.push(rec(Event::Reviewed {
+                request,
+                answer: ReviewAnswer::Declined,
+            }));
+        }
+    }
+    if plan.stop {
+        records.push(rec(Event::StopRequested {
+            generation: u32::try_from(plan.generations.len())?,
+            reason: StopReason::UserStop,
+        }));
+    }
+    if plan.acknowledge {
+        records.push(rec(Event::ReportAcknowledged {
+            exp: incumbent,
+            report: ReportHash::of(b"report"),
+        }));
+    }
+    Ok(records)
+}
+
+/// A generated ledger, the records after `RunStarted` shuffled, and a mask choosing records to duplicate.
+fn shuffled_ledger() -> impl Strategy<Value = (Result<Vec<Record>, String>, Vec<Record>, Vec<bool>)>
+{
+    ledger_plan().prop_flat_map(|plan| {
+        let built = build(&plan).map_err(|error| error.to_string());
+        let rest: Vec<Record> = built
+            .as_ref()
+            .map(|records| records.iter().skip(1).cloned().collect())
+            .unwrap_or_default();
+        let len = rest.len();
+        (
+            Just(built),
+            Just(rest).prop_shuffle(),
+            prop::collection::vec(any::<bool>(), len),
+        )
+    })
+}
+
+/// The `RunStarted` record of a built ledger.
+fn head(records: &[Record]) -> Result<&Record, TestCaseError> {
+    records
+        .first()
+        .ok_or_else(|| TestCaseError::fail("a built ledger starts with RunStarted"))
+}
+
+proptest! {
+    #[test]
+    fn generated_ledgers_fold((built, _rest, _mask) in shuffled_ledger()) {
+        let records = built.map_err(TestCaseError::fail)?;
+        let state = fold(&records)?;
+        prop_assert_eq!(state.baseline(), &baseline());
+        let judge = judge().map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let baseline_trials = state.trials(&baseline(), &judge).count();
+        prop_assert!(baseline_trials >= 1, "the baseline has {} trials", baseline_trials);
+    }
+
+    #[test]
+    fn fold_is_permutation_invariant((built, rest, _mask) in shuffled_ledger()) {
+        let records = built.map_err(TestCaseError::fail)?;
+        let expected = fold(&records)?;
+        let shuffled = fold(std::iter::once(head(&records)?).chain(&rest))?;
+        prop_assert_eq!(shuffled, expected);
+    }
+
+    #[test]
+    fn duplicate_replay_is_idempotent((built, rest, mask) in shuffled_ledger()) {
+        let records = built.map_err(TestCaseError::fail)?;
+        let expected = fold(&records)?;
+
+        // A copy of a chosen subset, appended after the ledger.
+        let chosen = records
+            .iter()
+            .skip(1)
+            .zip(&mask)
+            .filter(|(_, keep)| **keep)
+            .map(|(record, _)| record);
+        prop_assert_eq!(&fold(records.iter().chain(chosen))?, &expected);
+
+        // A copy of every record, RunStarted included.
+        prop_assert_eq!(&fold(records.iter().chain(&records))?, &expected);
+
+        // A shuffled copy interleaved after RunStarted.
+        let replayed = std::iter::once(head(&records)?)
+            .chain(&rest)
+            .chain(records.iter().skip(1));
+        prop_assert_eq!(&fold(replayed)?, &expected);
+    }
+
+    #[test]
+    fn tampered_record_conflicts(
+        (built, _rest, _mask) in shuffled_ledger(),
+        choice in any::<usize>(),
+    ) {
+        let records = built.map_err(TestCaseError::fail)?;
+        let judged_records: Vec<&Record> = records
+            .iter()
+            .filter(|record| matches!(record.event(), Event::Judged { .. }))
+            .collect();
+        let target = pick(&judged_records, choice).map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let Event::Judged { exp, judge, trial, outcome, backend } = target.event().clone() else {
+            return Err(TestCaseError::fail("the filter keeps Judged records only"));
+        };
+        let replacement = Outcome::Crashed { stage: Stage::Build };
+        prop_assert_ne!(&outcome, &replacement);
+        let tampered = rec(Event::Judged { exp, judge, trial, outcome: replacement, backend });
+
+        let result = fold(records.iter().chain(std::iter::once(&tampered)));
+        let conflicts = matches!(result, Err(FoldError::KeyConflict { .. }));
+        prop_assert!(conflicts, "a tampered Judged record must be a KeyConflict");
+    }
 }
