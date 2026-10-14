@@ -10,6 +10,8 @@ use std::str::FromStr;
 use minos_core::id::MetricName;
 use minos_core::limits::{Limits, MAX_METRICS, MAX_SCORECARD_BYTES};
 use minos_core::metric::{JsonCategory, Metric, MetricError, Scorecard, ScorecardError};
+use minos_core::outcome::{Outcome, Reason, Stage};
+use minos_core::path::RelPath;
 use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -411,5 +413,167 @@ fn from_entries_validates_like_parse() -> TestResult {
         Scorecard::from_entries(many),
         Err(ScorecardError::TooMany { max: MAX_METRICS })
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Outcome, Reason, Stage
+// ---------------------------------------------------------------------------------------------------------------
+
+fn round_trips(outcome: &Outcome, expected: &str) -> TestResult {
+    assert_eq!(serde_json::to_string(outcome)?, expected);
+    let back: Outcome = serde_json::from_str(expected)?;
+    assert_eq!(&back, outcome);
+    Ok(())
+}
+
+#[test]
+fn scored_outcome_round_trips() -> TestResult {
+    let outcome = Outcome::Scored(parsed(VALID)?);
+    round_trips(
+        &outcome,
+        r#"{"scored":{"v":1,"metrics":[{"name":"throughput_mb_s","value":12.5,"held_out":false}]}}"#,
+    )
+}
+
+#[test]
+fn rejected_outcomes_round_trip() -> TestResult {
+    let path = RelPath::from_str("src/parse.rs")?;
+    let cases = [
+        (
+            Reason::GateFailed {
+                gate: name("identical_output")?,
+            },
+            r#"{"rejected":{"gate_failed":{"gate":"identical_output"}}}"#,
+        ),
+        (
+            Reason::MissingMetric {
+                metric: name("throughput_mb_s")?,
+            },
+            r#"{"rejected":{"missing_metric":{"metric":"throughput_mb_s"}}}"#,
+        ),
+        (
+            Reason::UndeclaredMetric { metric: name("x")? },
+            r#"{"rejected":{"undeclared_metric":{"metric":"x"}}}"#,
+        ),
+        (
+            Reason::HeldOutMismatch { metric: name("x")? },
+            r#"{"rejected":{"held_out_mismatch":{"metric":"x"}}}"#,
+        ),
+        (
+            Reason::ScorecardInvalid,
+            r#"{"rejected":"scorecard_invalid"}"#,
+        ),
+        (
+            Reason::ApplyFailed { path, hunk: 2 },
+            r#"{"rejected":{"apply_failed":{"path":"src/parse.rs","hunk":2}}}"#,
+        ),
+        (Reason::BuildFailed, r#"{"rejected":"build_failed"}"#),
+        (Reason::RunFailed, r#"{"rejected":"run_failed"}"#),
+        (Reason::OutputInvalid, r#"{"rejected":"output_invalid"}"#),
+        (Reason::OutputTooLarge, r#"{"rejected":"output_too_large"}"#),
+        (Reason::ChunkProtocol, r#"{"rejected":"chunk_protocol"}"#),
+    ];
+    for (reason, expected) in cases {
+        round_trips(&Outcome::Rejected(reason), expected)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn crashed_and_timed_out_outcomes_round_trip() -> TestResult {
+    round_trips(
+        &Outcome::Crashed { stage: Stage::Run },
+        r#"{"crashed":{"stage":"run"}}"#,
+    )?;
+    round_trips(
+        &Outcome::TimedOut {
+            stage: Stage::Build,
+        },
+        r#"{"timed_out":{"stage":"build"}}"#,
+    )?;
+    round_trips(
+        &Outcome::Crashed {
+            stage: Stage::Judge,
+        },
+        r#"{"crashed":{"stage":"judge"}}"#,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn outcome_rejects_unknown_variants_and_fields() {
+    for json in [
+        r#"{"exploded":{"stage":"run"}}"#,
+        r#""crashed""#,
+        r#"{"crashed":{}}"#,
+        r#"{"crashed":{"stage":"run","extra":1}}"#,
+        r#"{"crashed":{"stage":"boot"}}"#,
+        r#"{"timed_out":{"stage":"Run"}}"#,
+        r#"{"rejected":"exploded"}"#,
+        r#"{"rejected":{"gate_failed":{"gate":"identical_output","extra":1}}}"#,
+        r#"{"rejected":{"gate_failed":{"gate":"Bad Name"}}}"#,
+        r#"{"rejected":{"apply_failed":{"path":"../judge/j.py","hunk":1}}}"#,
+        r#"{"rejected":{"apply_failed":{"path":"src/parse.rs"}}}"#,
+        r#"{"rejected":{"apply_failed":{"path":"src/parse.rs","hunk":-1}}}"#,
+        r#"{"scored":{"v":1,"metrics":[]}}"#,
+        r#"{"crashed":{"stage":"run"},"timed_out":{"stage":"run"}}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<Outcome>(json).is_err(),
+            "{json} parsed as an outcome"
+        );
+    }
+}
+
+#[test]
+fn outcome_scorecard_accessors() -> TestResult {
+    let card = parsed(VALID)?;
+    let scored = Outcome::Scored(card.clone());
+    assert!(scored.is_scored());
+    assert_eq!(scored.scorecard(), Some(&card));
+    for other in [
+        Outcome::Rejected(Reason::ScorecardInvalid),
+        Outcome::Crashed { stage: Stage::Run },
+        Outcome::TimedOut {
+            stage: Stage::Judge,
+        },
+    ] {
+        assert!(!other.is_scored());
+        assert_eq!(other.scorecard(), None);
+    }
+    Ok(())
+}
+
+#[test]
+fn reason_display_names_only_validated_payloads() -> TestResult {
+    let gate = Reason::GateFailed {
+        gate: name("identical_output")?,
+    };
+    assert_eq!(gate.to_string(), "gate identical_output failed");
+    let apply = Reason::ApplyFailed {
+        path: RelPath::from_str("src/parse.rs")?,
+        hunk: 3,
+    };
+    assert_eq!(apply.to_string(), "hunk 3 of src/parse.rs does not apply");
+    let missing = Reason::ApplyFailed {
+        path: RelPath::from_str("src/parse.rs")?,
+        hunk: 0,
+    };
+    assert_eq!(missing.to_string(), "src/parse.rs is not in the base tree");
+    assert_eq!(
+        Reason::ChunkProtocol.to_string(),
+        "the output stream broke the chunk protocol"
+    );
+    Ok(())
+}
+
+#[test]
+fn stage_serializes_snake_case_and_orders() -> TestResult {
+    assert_eq!(serde_json::to_string(&Stage::Build)?, r#""build""#);
+    assert_eq!(serde_json::to_string(&Stage::Run)?, r#""run""#);
+    assert_eq!(serde_json::to_string(&Stage::Judge)?, r#""judge""#);
+    assert!(Stage::Build < Stage::Run && Stage::Run < Stage::Judge);
+    assert_eq!(Stage::Judge.to_string(), "judge");
     Ok(())
 }
