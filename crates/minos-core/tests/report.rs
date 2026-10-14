@@ -814,6 +814,25 @@ fn flags_are_sorted() -> TestResult {
 // ---------------------------------------------------------------------------------------------------------------
 
 #[test]
+fn a_report_survives_a_later_manifest_change() -> TestResult {
+    // The report takes the manifest in effect at the target's proposal generation (`RunState::manifest_at`);
+    // a `ManifestChanged` recorded for a later generation changes neither the report nor its hash.
+    let mut fixture = one_step("    input.as_bytes().len()", &[(109.0, 54.5)])?;
+    let before = fixture.report()?;
+    fixture.records.push(rec(Event::ManifestChanged {
+        manifest: ManifestId::of(b"a later manifest"),
+        from_generation: 2,
+    }));
+    let state = fixture.state()?;
+    assert_eq!(*state.manifest_at(1), manifest_id());
+    assert_eq!(*state.manifest_at(2), ManifestId::of(b"a later manifest"));
+    let after = fixture.report()?;
+    assert_eq!(after.text(), before.text());
+    assert_eq!(after.hash(), before.hash());
+    Ok(())
+}
+
+#[test]
 fn summary_has_one_row_per_objective_gate_and_held_out_metric() -> TestResult {
     let rows = clean()?.summary()?;
     assert_eq!(rows.len(), 3);

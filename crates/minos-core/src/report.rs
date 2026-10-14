@@ -142,9 +142,14 @@ pub struct ReportInput<'a> {
 impl<'a> ReportInput<'a> {
     /// The report inputs for `target` under `judge`.
     ///
-    /// `manifest` is the manifest in effect for the run. `blobs` must hold the target's diff blob and the rationale
-    /// blob of every proposal in its lineage, keyed by [`BlobId::of`] their bytes. `surface` holds the base tree's
-    /// `[surface]` files (readable and writable), which the literal-match flag searches (D-15).
+    /// `manifest` must be the manifest in effect at the generation `target` was proposed in, the one
+    /// [`RunState::manifest_at`] names for `state.proposal(target).generation()`: the target's diff is re-parsed
+    /// against its `writable` set, so a later `ManifestChanged` that drops a path would otherwise make a valid
+    /// earlier winner [`ReportError::InvalidDiff`], and unreviewable. The report takes one `Manifest` because the
+    /// caller owns manifest storage; the ledger holds only [`ManifestId`](crate::id::ManifestId)s. `blobs` must
+    /// hold the target's diff blob and the rationale blob of every proposal in its lineage, keyed by
+    /// [`BlobId::of`] their bytes. `surface` holds the base tree's `[surface]` files (readable and writable),
+    /// which the literal-match flag searches (D-15).
     #[must_use]
     pub const fn new(
         state: &'a RunState,
