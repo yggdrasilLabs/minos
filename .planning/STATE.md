@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-10-14T14:09:44.281Z"
+last_updated: "2026-10-14T14:19:26.007Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 21
+  completed_plans: 22
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 6 of 13
+Plan: 7 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -77,6 +77,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P03 | 4 min | 2 tasks | 3 files |
 | Phase 03 P04 | 6 min | 3 tasks | 5 files |
 | Phase 03 P05 | 15 min | 2 tasks | 3 files |
+| Phase 03 P06 | 9 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-05: Judge paths also refuse . and .., ./, and an option without = containing a path (JudgeArgPath)
 - [Phase 03]: 03-05: One proposer per tier, stored in tier order; spend_usd may be 0; judge label 1 to MAX_JUDGE_LABEL
 - [Phase 03]: 03-05: JudgeVersion golden vector 3a2f24af...bc12 over TreeId::of(b"judge") and the CLAUDE.md example judge spec
+- [Phase 03]: 03-06: The applier returns OutOfRange when a hunk appends after a base line lacking its newline or ends the new side without a newline before the base ends; only a file's last line can lack a newline
+- [Phase 03]: 03-06: diff_trees renders sections from diffy's parsed Patch structure, not its Display, then validates with Diff::parse, so equal candidate trees give byte-identical cumulative diffs
 
 ### Pending Todos
 
@@ -166,6 +169,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T14:09:44.277Z
+Last session: 2026-10-14T14:19:02.723Z
 Stopped at: Completed 03-05-PLAN.md
 Resume file: None
