@@ -6,12 +6,12 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 
+use minos_core::diff::DiffError;
 use minos_core::diff::apply::{ApplyError, Tree, apply};
 use minos_core::diff::compose::{ComposeError, compose, diff_trees};
-use minos_core::diff::DiffError;
+use minos_core::diff::{Diff, FileDiff, HunkLine};
 use minos_core::experiment::Experiment;
 use minos_core::id::{ExperimentId, TreeId};
-use minos_core::diff::{Diff, FileDiff, HunkLine};
 use minos_core::limits::Limits;
 use minos_core::outcome::Reason;
 use minos_core::path::{PathError, RelPath};
@@ -474,7 +474,12 @@ fn compose_of(base: &Tree, parent: Option<&Diff>, proposal: &Diff) -> Result<Dif
 }
 
 fn diff_trees_of(base: &Tree, candidate: &Tree) -> Result<Diff, Box<dyn Error>> {
-    Ok(diff_trees(base, candidate, &writable()?, &Limits::standard())?)
+    Ok(diff_trees(
+        base,
+        candidate,
+        &writable()?,
+        &Limits::standard(),
+    )?)
 }
 
 fn diff_trees_err(base: &Tree, candidate: &Tree) -> Result<ComposeError, Box<dyn Error>> {
@@ -533,9 +538,7 @@ fn diff_trees_rejects_a_changed_path_set() -> TestResult {
     renamed.insert(rel("src/parse2.rs")?, b"a\n".to_vec());
     assert_eq!(
         diff_trees_err(&base, &renamed)?,
-        ComposeError::PathSetChanged {
-            path: rel(SRC)?
-        }
+        ComposeError::PathSetChanged { path: rel(SRC)? }
     );
     Ok(())
 }
@@ -609,7 +612,10 @@ fn compose_is_cumulative_from_the_base() -> TestResult {
     let child = compose_of(&base, Some(&parent), &diff_of(&first, &second)?)?;
     // The child's diff carries both changes and applies to the base, not to the parent's tree.
     assert_eq!(src_of(&apply(&base, &child)?)?, second.as_bytes());
-    assert_eq!(child.files().first().map(|file| file.hunks().len()), Some(2));
+    assert_eq!(
+        child.files().first().map(|file| file.hunks().len()),
+        Some(2)
+    );
     Ok(())
 }
 
