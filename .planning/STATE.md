@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: core-types-and-pure-logic
 status: executing
 stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-10-14T15:13:36.361Z"
+last_updated: "2026-10-14T15:27:26.337Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 29
-  completed_plans: 27
+  completed_plans: 28
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 03 (core-types-and-pure-logic) — EXECUTING
-Plan: 12 of 13
+Plan: 13 of 13
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 03 execution started
 
@@ -83,6 +83,7 @@ Progress: [█████░░░░░] 55% (16 of 29 plans)
 | Phase 03 P09 | 5 min | 2 tasks | 26 files |
 | Phase 03 P10 | 7 min | 2 tasks | 3 files |
 | Phase 03 P11 | 8 min | 3 tasks | 6 files |
+| Phase 03 P12 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -166,6 +167,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-11: conclude re-checks every recorded Scored trial with check_scorecard; a failing trial invalidates the experiment
 - [Phase 03]: 03-11: circuit_breaker checks the empty-generation streak before the infra streak; the loop supplies the infra streak in memory
 - [Phase 03]: 03-11: PolicyError::GenerationZero; generation 0 is calibration and is never concluded
+- [Phase 03]: 03-12: build_report refuses a target whose diff blob does not hash to its ExperimentId, and any blob that does not match its BlobId
+- [Phase 03]: 03-12: summary clears_noise is the delta magnitude above NOISE_WARN_MULTIPLE x spread; a zero spread counts as no noise floor, so the anomaly flag falls back to the largest earlier lineage step
+- [Phase 03]: 03-12: provenance lists every EXPECTED_KRUN_LAYERS member missing from any lineage trial as reduced hardening; only weak isolation raises a flag
 
 ### Pending Todos
 
@@ -190,6 +194,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T15:13:22.119Z
+Last session: 2026-10-14T15:27:17.609Z
 Stopped at: Completed 03-09-PLAN.md
 Resume file: None
