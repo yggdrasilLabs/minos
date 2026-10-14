@@ -9,10 +9,12 @@ use std::error::Error;
 use std::fmt::Write as _;
 
 use minos_core::diff::{Diff, DiffError, ForbiddenHeader, HunkLine};
+use minos_core::id::{ExperimentId, TreeId};
 use minos_core::limits::{
     Limits, MAX_DIFF_BYTES, MAX_DIFF_FILES, MAX_DIFF_LINES, MAX_HUNKS_PER_FILE,
 };
 use minos_core::path::{PathError, RelPath};
+use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -770,5 +772,251 @@ fn errors_carry_no_input_text() -> TestResult {
         assert!(!error.to_string().contains("IGNORE"), "got: {error}");
         assert!(!format!("{error:?}").contains("IGNORE"));
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Stages 6 and 7: the canonical form and ExperimentId::of
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Every accepted input above, for the re-parse identity check.
+fn accepted_inputs() -> Result<Vec<String>, Box<dyn Error>> {
+    Ok(vec![
+        VALID.to_owned(),
+        edit(
+            VALID,
+            DIFF_GIT,
+            &format!("{DIFF_GIT}index abc1234..def5678 100644\n"),
+        )?,
+        edit(VALID, HUNK_HEADER, "@@ -1,3 +1,3 @@ fn main\n")?,
+        format!("{DIFF_GIT}{HEADERS}@@ -2 +2 @@\n-    old();\n+    new();\n"),
+        format!("{DIFF_GIT}{HEADERS}@@ -1,2 +1,2 @@\n a\n-b\n+b\n\\ No newline at end of file\n"),
+        format!("{DIFF_GIT}{HEADERS}@@ -1,2 +1,1 @@\n keep\n--- a/src/parse.rs\n"),
+        format!("{DIFF_GIT}{HEADERS}@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n"),
+    ])
+}
+
+/// A diff text from `diffy::create_patch` with its two header lines replaced by the canonical three.
+fn create_patch_text(base: &str, modified: &str) -> Option<String> {
+    let patch = diffy::create_patch(base, modified).to_string();
+    let (_, rest) = patch.split_once('\n')?;
+    let (_, hunks) = rest.split_once('\n')?;
+    Some(format!("{DIFF_GIT}{HEADERS}{hunks}"))
+}
+
+/// File contents over a small line alphabet that includes lines resembling headers and markers.
+fn file_text() -> impl Strategy<Value = String> {
+    let line = prop::sample::select(vec![
+        "a",
+        "b",
+        "c",
+        "",
+        " d",
+        "-- a/src/parse.rs",
+        "++ b/src/parse.rs",
+        "@@ -1 +1 @@",
+        "\\ No newline at end of file",
+        "diff --git a/x b/x",
+    ]);
+    (prop::collection::vec(line, 0..12), any::<bool>()).prop_map(|(lines, final_newline)| {
+        let mut text = lines.join("\n");
+        if final_newline && !lines.is_empty() {
+            text.push('\n');
+        }
+        text
+    })
+}
+
+/// Diff-shaped hostile text: lines drawn from header, hunk, and body fragments.
+fn diff_like_text() -> impl Strategy<Value = String> {
+    let line = prop::sample::select(vec![
+        "diff --git a/src/parse.rs b/src/parse.rs",
+        "diff --git a/src/parse.rs b/src/lib.rs",
+        "index abc1234..def5678 100644",
+        "--- a/src/parse.rs",
+        "+++ b/src/parse.rs",
+        "--- /dev/null",
+        "@@ -1,3 +1,3 @@",
+        "@@ -1 +1 @@",
+        "@@ -0,0 +1,2 @@",
+        "@@ -4294967295,1 +1 @@",
+        " a",
+        "-a",
+        "+b",
+        "",
+        "\\ No newline at end of file",
+        "rename from x",
+    ]);
+    prop::collection::vec(line, 0..24).prop_map(|lines| {
+        let mut text = lines.join("\n");
+        text.push('\n');
+        text
+    })
+}
+
+proptest! {
+    #[test]
+    fn canonical_round_trip(base in file_text(), modified in file_text()) {
+        prop_assume!(base != modified);
+        let text = create_patch_text(&base, &modified).ok_or_else(|| TestCaseError::fail("patch shape"))?;
+        let writable = writable(&[SRC]).map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let limits = Limits::standard();
+        let diff = Diff::parse(&text, &writable, &limits)
+            .map_err(|error| TestCaseError::fail(format!("rejected: {error}")))?;
+        let again = Diff::parse(diff.as_str(), &writable, &limits)
+            .map_err(|error| TestCaseError::fail(format!("canonical rejected: {error}")))?;
+        prop_assert_eq!(again.as_str(), diff.as_str());
+        prop_assert!(again == diff);
+        prop_assert_eq!(ExperimentId::of(&TreeId::of(b""), &again), ExperimentId::of(&TreeId::of(b""), &diff));
+    }
+
+    #[test]
+    fn parse_never_panics(text in ".{0,512}") {
+        let writable = writable(&[SRC]).map_err(|error| TestCaseError::fail(error.to_string()))?;
+        if let Ok(diff) = Diff::parse(&text, &writable, &Limits::standard()) {
+            prop_assert!(Diff::parse(diff.as_str(), &writable, &Limits::standard()).is_ok());
+        }
+    }
+
+    #[test]
+    fn parse_never_panics_on_diff_like_text(text in diff_like_text()) {
+        let writable = writable(&[SRC, "src/lib.rs"]).map_err(|error| TestCaseError::fail(error.to_string()))?;
+        if let Ok(diff) = Diff::parse(&text, &writable, &Limits::standard()) {
+            let again = Diff::parse(diff.as_str(), &writable, &Limits::standard())
+                .map_err(|error| TestCaseError::fail(format!("canonical rejected: {error}")))?;
+            prop_assert!(again == diff);
+        }
+    }
+}
+
+#[test]
+fn canonical_reparse_is_identity_for_every_accepted_input() -> TestResult {
+    for text in accepted_inputs()? {
+        let diff = accepted(&text)?;
+        let again = accepted(diff.as_str())?;
+        assert_eq!(again, diff);
+        assert_eq!(again.as_str(), diff.as_str());
+        assert_eq!(diff.as_bytes(), diff.as_str().as_bytes());
+        assert_eq!(diff.len(), diff.as_bytes().len());
+        assert!(!diff.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn canonical_drops_index_line_and_function_context() -> TestResult {
+    let text = edit(
+        &edit(
+            VALID,
+            DIFF_GIT,
+            &format!("{DIFF_GIT}index abc1234..def5678 100755\n"),
+        )?,
+        HUNK_HEADER,
+        "@@ -1,3 +1,3 @@ fn main() {\n",
+    )?;
+    let diff = accepted(&text)?;
+    assert_eq!(diff.as_str(), VALID);
+    assert!(!diff.as_str().contains("index"));
+    assert!(!diff.as_str().contains("fn main"));
+    Ok(())
+}
+
+#[test]
+fn canonical_writes_both_lengths() -> TestResult {
+    let diff = accepted(&format!(
+        "{DIFF_GIT}{HEADERS}@@ -2 +2 @@\n-    old();\n+    new();\n"
+    ))?;
+    assert_eq!(
+        diff.as_str(),
+        format!("{DIFF_GIT}{HEADERS}@@ -2,1 +2,1 @@\n-    old();\n+    new();\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn canonical_writes_blank_context_with_a_space_and_keeps_the_marker() -> TestResult {
+    let diff = accepted(&format!(
+        "{DIFF_GIT}{HEADERS}@@ -1,3 +1,3 @@\n a\n\n-b\n+b\n\\ No newline at end of file\n"
+    ))?;
+    assert_eq!(
+        diff.as_str(),
+        format!(
+            "{DIFF_GIT}{HEADERS}@@ -1,3 +1,3 @@\n a\n \n-b\n+b\n\\ No newline at end of file\n"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn canonical_sorts_sections_by_path() -> TestResult {
+    let lib = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,1 +1,1 @@\n-x\n+y\n";
+    let parse = format!("{DIFF_GIT}{HEADERS}@@ -1,1 +1,1 @@\n-a\n+b\n");
+    let paths = writable(&[SRC, "src/lib.rs"])?;
+    let reversed = Diff::parse(&format!("{parse}{lib}"), &paths, &Limits::standard())?;
+    let sorted = Diff::parse(&format!("{lib}{parse}"), &paths, &Limits::standard())?;
+    assert_eq!(reversed.as_str(), format!("{lib}{parse}"));
+    assert_eq!(reversed, sorted);
+    Ok(())
+}
+
+#[test]
+fn experiment_id_of_golden_vector() -> TestResult {
+    // The canonical text of VALID is VALID itself: 136 bytes (0x88).
+    // EMPTY=$(printf '' | shasum -a 256 | cut -d' ' -f1)
+    // { printf 'minos/experiment/v1\0'; printf '%s' "$EMPTY" | xxd -r -p; printf '%016x' 136 | xxd -r -p;
+    //   printf 'diff --git a/src/parse.rs b/src/parse.rs\n--- a/src/parse.rs\n+++ b/src/parse.rs\n@@ -1,3 +1,3 @@\n fn parse() {\n-    old();\n+    new();\n }\n'; } | shasum -a 256
+    let diff = accepted(VALID)?;
+    assert_eq!(diff.as_str(), VALID);
+    assert_eq!(diff.len(), 136);
+    let tree = TreeId::of(b"");
+    assert_eq!(
+        ExperimentId::of(&tree, &diff).to_hex(),
+        "b58d3c2e7829fc7a79daf3e292980c236a225083c2e051d1210ba78f067ff7e6"
+    );
+    assert_ne!(
+        ExperimentId::of(&tree, &diff),
+        ExperimentId::baseline(&tree)
+    );
+    assert_ne!(
+        ExperimentId::of(&tree, &diff),
+        ExperimentId::of(&TreeId::of(b"t"), &diff)
+    );
+    Ok(())
+}
+
+#[test]
+fn texts_with_the_same_canonical_form_share_an_experiment_id() -> TestResult {
+    let decorated = edit(
+        &edit(
+            VALID,
+            DIFF_GIT,
+            &format!("{DIFF_GIT}index abc1234..def5678\n"),
+        )?,
+        HUNK_HEADER,
+        "@@ -1,3 +1,3 @@ fn main\n",
+    )?;
+    let tree = TreeId::of(b"t");
+    assert_eq!(
+        ExperimentId::of(&tree, &accepted(&decorated)?),
+        ExperimentId::of(&tree, &accepted(VALID)?)
+    );
+    Ok(())
+}
+
+#[test]
+fn debug_output_omits_content() -> TestResult {
+    let diff = accepted(VALID)?;
+    let debug = format!("{diff:?}");
+    assert!(debug.contains(SRC), "got: {debug}");
+    for content in ["old();", "new();", "fn parse", "@@"] {
+        assert!(!debug.contains(content), "got: {debug}");
+    }
+    let hunk = diff
+        .files()
+        .first()
+        .and_then(|file| file.hunks().first())
+        .ok_or("expected a hunk")?;
+    assert!(!format!("{hunk:?}").contains("old();"));
+    assert!(!format!("{:?}", hunk.lines()).contains("old();"));
     Ok(())
 }
