@@ -17,14 +17,25 @@
 //!   no float formatting is involved.
 //!
 //! [`sample`] does not deduplicate: admission (Phase 7) drops a proposal already tried.
+//!
+//! [`render`] turns a sample into a proposal: in each param's writable file it replaces the rest of the one base
+//! line that starts with the param's anchor, then derives the canonical cumulative diff with
+//! [`diff_trees`], so a sweep proposal passes the same [`Diff::parse`] validation, writable set included, as a
+//! model's.
 
-use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::{Rng, SeedableRng};
 
+use crate::diff::Diff;
+use crate::diff::apply::Tree;
+use crate::diff::compose::{ComposeError, diff_trees};
 use crate::id::{IdHasher, RunId};
+use crate::limits::Limits;
 use crate::manifest::{ParamDomain, ParamName, SweepParam};
+use crate::path::RelPath;
 
 /// Domain of [`seed`].
 const SWEEP_DOMAIN: &str = "minos/sweep/v1";
@@ -105,20 +116,71 @@ impl Sample {
     }
 }
 
-/// Why a sweep could not produce a sample. Every variant is a reason to drop the sample, never an
+/// Why a sweep could not produce or render a sample. Every variant is a reason to drop the sample, never an
 /// infrastructure error, and none is retried.
+///
+/// Variants carry validated names and paths, never file content.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SweepError {
     /// The manifest declares no params, so there is nothing to sweep.
     #[error("sweep needs at least one [[param]]")]
     NoParams,
-    /// A drawn index had no value in the param's domain. Validated params never produce this.
-    #[error("param {name} has no value at the drawn index")]
+    /// A drawn index, or a value handed to [`render`], is outside the param's domain. Validated params, and samples
+    /// drawn from them, never produce this.
+    #[error("param {name} has a value outside its domain")]
     Domain {
         /// The param.
         name: ParamName,
     },
+    /// The sample has no value for a declared param.
+    #[error("the sample assigns no value to param {name}")]
+    Unassigned {
+        /// The param.
+        name: ParamName,
+    },
+    /// The sample has a value for a name that is not a declared param.
+    #[error("the sample assigns {name}, which is not a declared param")]
+    Undeclared {
+        /// The undeclared name.
+        name: ParamName,
+    },
+    /// No line of the param's base file starts with its anchor.
+    #[error("no line starts with the anchor of param {name}")]
+    AnchorMissing {
+        /// The param.
+        name: ParamName,
+    },
+    /// More than one line of the param's base file starts with its anchor.
+    #[error("more than one line starts with the anchor of param {name}")]
+    AnchorAmbiguous {
+        /// The param.
+        name: ParamName,
+    },
+    /// The param's anchor line is already claimed by a param declared earlier.
+    #[error("param {name} anchors a line an earlier param already anchors")]
+    AnchorConflict {
+        /// The later param.
+        name: ParamName,
+    },
+    /// The param's file is not in the base tree.
+    #[error("{path} is not in the base tree")]
+    FileMissing {
+        /// The param's file.
+        path: RelPath,
+    },
+    /// The param's file is not UTF-8 text.
+    #[error("{path} is not UTF-8 text")]
+    NotText {
+        /// The param's file.
+        path: RelPath,
+    },
+    /// Every rendered value equals the base text, so the sample is the baseline (03-CONTEXT D-03).
+    #[error("the sample renders to the base tree")]
+    NoChange,
+    /// The rendered tree did not become a valid cumulative diff, for example a cap or a non-writable path.
+    #[error(transparent)]
+    Compose(ComposeError),
 }
 
 /// `batch` samples for generation `generation` of `run`, drawn from one `ChaCha8` stream seeded by [`seed`].
@@ -166,6 +228,133 @@ fn draw(rng: &mut ChaCha8Rng, param: &SweepParam) -> Result<ParamValue, SweepErr
                 .map(|choice| ParamValue::Choice(choice.to_owned()))
                 .ok_or_else(missing)
         }
+    }
+}
+
+/// The canonical cumulative diff that sets every param of `sample` in `base`.
+///
+/// For each param, in declaration order, the param's file must be UTF-8 text in `base`, and exactly one of its
+/// base lines must start with the anchor. Everything after the anchor up to the line's newline is replaced by the
+/// value's [`ParamValue::render_text`]; the newline, or its absence on a last line, is kept. Anchors are matched
+/// against the base text, never against an earlier param's edit, so the result does not depend on the order of
+/// edits. The edited tree then goes through [`diff_trees`] with `writable` and `limits`.
+///
+/// # Errors
+///
+/// Returns [`SweepError::Undeclared`] or [`SweepError::Unassigned`] if the sample's names are not exactly the
+/// params, [`SweepError::Domain`] for a value outside its param's domain, [`SweepError::FileMissing`],
+/// [`SweepError::NotText`], [`SweepError::AnchorMissing`], [`SweepError::AnchorAmbiguous`], or
+/// [`SweepError::AnchorConflict`] for a param that cannot be located, [`SweepError::NoChange`] if the result
+/// equals the base, and [`SweepError::Compose`] if the diff fails validation.
+pub fn render(
+    base: &Tree,
+    params: &[SweepParam],
+    sample: &Sample,
+    writable: &BTreeSet<RelPath>,
+    limits: &Limits,
+) -> Result<Diff, SweepError> {
+    if let Some(name) = sample
+        .values
+        .keys()
+        .find(|name| !params.iter().any(|param| param.name() == *name))
+    {
+        return Err(SweepError::Undeclared { name: name.clone() });
+    }
+    let mut edits: BTreeMap<&RelPath, FileEdit<'_>> = BTreeMap::new();
+    for param in params {
+        let name = param.name();
+        let value = sample
+            .get(name)
+            .ok_or_else(|| SweepError::Unassigned { name: name.clone() })?;
+        if !in_domain(param.domain(), value) {
+            return Err(SweepError::Domain { name: name.clone() });
+        }
+        let path = param.file();
+        let edit = match edits.entry(path) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(FileEdit::of(base, path)?),
+        };
+        edit.set(param, value)?;
+    }
+    let mut candidate = base.clone();
+    for (path, edit) in edits {
+        candidate.insert(path.clone(), edit.text().into_bytes());
+    }
+    diff_trees(base, &candidate, writable, limits).map_err(|error| match error {
+        ComposeError::NoChange => SweepError::NoChange,
+        other => SweepError::Compose(other),
+    })
+}
+
+/// Whether `value` is a value of `domain`.
+fn in_domain(domain: &ParamDomain, value: &ParamValue) -> bool {
+    match (domain, value) {
+        (ParamDomain::Int(range), ParamValue::Int(value)) => {
+            let offset = i128::from(*value) - i128::from(range.min());
+            *value >= range.min() && *value <= range.max() && offset % i128::from(range.step()) == 0
+        }
+        (ParamDomain::Choices(choices), ParamValue::Choice(value)) => {
+            choices.as_slice().iter().any(|choice| choice == value)
+        }
+        (ParamDomain::Int(_), ParamValue::Choice(_))
+        | (ParamDomain::Choices(_), ParamValue::Int(_)) => false,
+    }
+}
+
+/// The pending edits to one base file: its base lines, each keeping its `\n`, and the replaced lines by index.
+struct FileEdit<'a> {
+    lines: Vec<&'a str>,
+    replaced: BTreeMap<usize, String>,
+}
+
+impl<'a> FileEdit<'a> {
+    /// The base lines of `path`.
+    fn of(base: &'a Tree, path: &RelPath) -> Result<Self, SweepError> {
+        let bytes = base
+            .get(path)
+            .ok_or_else(|| SweepError::FileMissing { path: path.clone() })?;
+        let text =
+            std::str::from_utf8(bytes).map_err(|_| SweepError::NotText { path: path.clone() })?;
+        Ok(Self {
+            lines: text.split_inclusive('\n').collect(),
+            replaced: BTreeMap::new(),
+        })
+    }
+
+    /// Replaces the rest of `param`'s anchored base line with `value`.
+    fn set(&mut self, param: &SweepParam, value: &ParamValue) -> Result<(), SweepError> {
+        let name = || param.name().clone();
+        let anchor = param.anchor();
+        let matches: Vec<(usize, &str)> = self
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with(anchor))
+            .map(|(index, line)| (index, *line))
+            .collect();
+        let (index, line) = match matches.as_slice() {
+            [] => return Err(SweepError::AnchorMissing { name: name() }),
+            [one] => *one,
+            [_, _, ..] => return Err(SweepError::AnchorAmbiguous { name: name() }),
+        };
+        let ending = if line.ends_with('\n') { "\n" } else { "" };
+        let replacement = format!("{anchor}{}{ending}", value.render_text());
+        match self.replaced.entry(index) {
+            Entry::Occupied(_) => Err(SweepError::AnchorConflict { name: name() }),
+            Entry::Vacant(entry) => {
+                entry.insert(replacement);
+                Ok(())
+            }
+        }
+    }
+
+    /// The edited file text.
+    fn text(&self) -> String {
+        self.lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| self.replaced.get(&index).map_or(*line, String::as_str))
+            .collect()
     }
 }
 
