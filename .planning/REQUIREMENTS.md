@@ -33,7 +33,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 - [x] **CORE-01**: `ExperimentId`, `BlobId`, `ManifestId`, `TreeId`, `PricesId`, `JudgeVersion` are distinct SHA-256 newtypes; composite IDs use a domain-separation prefix and length-prefixed fields; golden vectors guard every hash
 - [x] **CORE-02**: `RelPath` rejects `..`, absolute paths, empty strings, and non-normal components, and is property-tested
-- [ ] **CORE-03**: `Manifest::try_from(RawManifest)` enforces: `writable` non-empty and disjoint from `readable` and judge paths, policy matches objective count, budgets within `limits.rs`, at least one eligible proposer tier; `RawManifest` uses `deny_unknown_fields`. Images are digests: `ImageRef` and `image::base_images` reject any Dockerfile `FROM` line that is not digest-pinned (amended 2026-10-14, user decision: the v1 manifest names a Dockerfile rather than an image, so the check runs on the Dockerfile text and `Manifest::try_from` stays pure)
+- [x] **CORE-03**: `Manifest::try_from(RawManifest)` enforces: `writable` non-empty and disjoint from `readable` and judge paths, policy matches objective count, budgets within `limits.rs`, at least one eligible proposer tier; `RawManifest` uses `deny_unknown_fields`. Images are digests: `ImageRef` and `image::base_images` reject any Dockerfile `FROM` line that is not digest-pinned (amended 2026-10-14, user decision: the v1 manifest names a Dockerfile rather than an image, so the check runs on the Dockerfile text and `Manifest::try_from` stays pure)
 - [x] **CORE-04**: `Diff::parse(text, &manifest)` enforces a size cap, requires every touched path in `writable`, rejects renames, mode changes, symlinks, and binary patches, and re-serializes to canonical bytes that are what `ExperimentId` hashes
 - [ ] **CORE-05**: A strict exact-position patch applier in core applies a canonical `Diff` to an in-memory tree and fails on any context mismatch; the guest and `adopt` use this same applier
 - [x] **CORE-06**: `Metric` rejects NaN and infinities, normalizes `-0.0`, and implements `Ord` via `total_cmp`; a scorecard metric can be marked `held_out`
@@ -41,7 +41,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **CORE-08**: The `Event` set is frozen before golden files and includes `RunStarted`, `ManifestChanged`, `Proposed` (with parent, tier, rationale blob, model ID, prompt hash), `Judged` (with judge version, trial index, backend info), `Selected`, `Spent`, `Steered`, `StopRequested`, `ReviewRequested`, `Reviewed`, `ReportAcknowledged`; every event has a documented content-derived `EventKey`
 - [ ] **CORE-09**: Run state is only ever rebuilt by folding events; the fold is property-tested for determinism and golden-file tested for `Record::V1`
 - [ ] **CORE-10**: `select_greedy` applies `min_improvement`, breaks ties on `ExperimentId`, and is property-tested as permutation-invariant
-- [ ] **CORE-11**: Routing is a pure function of manifest and ledger that moves one tier up after `STALL_STEP` generations without improvement; `ProposerSpec::eligible` reports a reason for every ineligible tier
+- [x] **CORE-11**: Routing is a pure function of manifest and ledger that moves one tier up after `STALL_STEP` generations without improvement; `ProposerSpec::eligible` reports a reason for every ineligible tier
 - [ ] **CORE-12**: The sweep sampler is seeded, uses its own range mapping, and yields identical samples for identical seeds across runs
 - [ ] **CORE-13**: `JobRequest` and `JobResult` are defined in core as the loop-to-runner contract
 - [x] **CORE-14**: Money is pico-dollar `u128` rates parsed from strings and integer micro-dollar totals; no float touches a dollar value
@@ -209,7 +209,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPIKE-08 | Phase 2 | Complete |
 | CORE-01 | Phase 3 | Complete |
 | CORE-02 | Phase 3 | Complete |
-| CORE-03 | Phase 3 | Pending |
+| CORE-03 | Phase 3 | Complete |
 | CORE-04 | Phase 3 | Complete |
 | CORE-05 | Phase 3 | Pending |
 | CORE-06 | Phase 3 | Complete |
@@ -217,7 +217,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-08 | Phase 3 | Pending |
 | CORE-09 | Phase 3 | Pending |
 | CORE-10 | Phase 3 | Pending |
-| CORE-11 | Phase 3 | Pending |
+| CORE-11 | Phase 3 | Complete |
 | CORE-12 | Phase 3 | Pending |
 | CORE-13 | Phase 3 | Pending |
 | CORE-14 | Phase 3 | Complete |
