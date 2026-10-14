@@ -186,4 +186,218 @@ exit status: 101
 
 ## Final gate
 
-<!-- final-gate -->
+Run on 2026-10-14 at `ec1eba6` (the commit after Task 2), in the order plan 03-13 Task 3 lists, from the repository root. Each command's output and exit status were captured to files and are copied here. Every check passed, so `cargo clean` ran afterwards as the last action of the phase; its output is recorded in 03-13-SUMMARY.md, not here, so the working tree stays clean after this commit.
+
+| # | Check | Exit status | Result |
+|---|---|---|---|
+| 1 | `cargo fmt --all --check` | 0 | no output |
+| 2 | `cargo clippy --workspace --all-targets -- -D warnings` | 0 | no warning |
+| 3 | `cargo test --workspace` | 0 | 40 test binaries, 713 passed, 0 failed, 25 ignored, all `#[ignore]` by design: the 24 VM spike tests and the `minos-backend-krun` initramfs cpio cross-check, which need a signed `minos-vmm` and environment variables |
+| 4 | `cargo deny check` | 0 | `advisories ok, bans ok, licenses ok, sources ok`; warnings only (duplicate versions, and the existing unused-wrapper entries for crates that do not link core or sandbox yet) |
+| 5 | `cargo doc --workspace --no-deps` | 0 | no warning |
+| 6 | C-01 `[lints] workspace = true` in every crate | 0 | 10 `ok` lines, no `MISSING` |
+| 7 | C-02 `grep -rnE '#!?\[allow\(' crates --include='*.rs'` | 1 | no output (grep exits 1 when nothing matches, which is the pass) |
+| 8 | `cargo check -p minos-core --target aarch64-unknown-linux-musl` | 0 | core builds for the guest's target |
+| 8b | `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings` | 0 | no warning (the sixth CLAUDE.md gate command, Phase 2 onward) |
+| 9 | `git log --oneline cf607f2..HEAD -- crates/minos-core/clippy.toml` | 0 | no output: core's clippy.toml was not changed in the phase |
+| 10 | `.snap.new` count and `git status --porcelain crates/minos-core` | 0 | `0`, and no uncommitted file under crates/minos-core |
+
+### 1. Format
+
+```
+$ cargo fmt --all --check
+(no output)
+exit status: 0
+```
+
+### 2. Clippy
+
+```
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Checking minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)
+    Checking minos-store v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-store)
+    Checking minos-propose v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-propose)
+    Checking minos-sandbox v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-sandbox)
+    Checking minos-runner v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-runner)
+    Checking minos-loop v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-loop)
+    Checking minos-cli v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.68s
+exit status: 0
+```
+
+### 3. Tests
+
+One line per test binary: the `Running` or `Doc-tests` line (dependency hash removed) and its `test result` line (timing removed). The full 986-line output passed with no `FAILED` or `panicked` line.
+
+```
+$ cargo test --workspace
+Running unittests src/lib.rs [minos_backend_krun]  ->  test result: ok. 74 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out
+Running tests/spike_boot.rs [spike_boot]  ->  test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out
+Running tests/spike_exits.rs [spike_exits]  ->  test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out
+Running tests/spike_net.rs [spike_net]  ->  test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out
+Running tests/spike_rootimg.rs [spike_rootimg]  ->  test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out
+Running tests/spike_seatbelt.rs [spike_seatbelt]  ->  test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out
+Running unittests src/main.rs [minos]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_core]  ->  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/breaker.rs [breaker]  ->  test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/golden_ids.rs [golden_ids]  ->  test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/golden_wire.rs [golden_wire]  ->  test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/manifest.rs [manifest]  ->  test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/money.rs [money]  ->  test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_apply.rs [prop_apply]  ->  test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_diff.rs [prop_diff]  ->  test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_fold.rs [prop_fold]  ->  test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_keys.rs [prop_keys]  ->  test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_metric.rs [prop_metric]  ->  test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_path.rs [prop_path]  ->  test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/prop_policy.rs [prop_policy]  ->  test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/render.rs [render]  ->  test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/report.rs [report]  ->  test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/route.rs [route]  ->  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running tests/sweep.rs [sweep]  ->  test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_guest]  ->  test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/main.rs [minos_guest]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_loop]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_propose]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_runner]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_sandbox]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/lib.rs [minos_store]  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Running unittests src/main.rs [minos_vmm]  ->  test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_backend_krun  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_core  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_guest  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_loop  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_propose  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_runner  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_sandbox  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+Doc-tests minos_store  ->  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+exit status: 0
+```
+
+### 4. cargo-deny
+
+Each warning's headline and location, then the final summary line; the dependency trees under each duplicate are omitted.
+
+```
+$ cargo deny check
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'   at Cargo.lock:16:1
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'   at Cargo.lock:52:1
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'   at Cargo.lock:74:1
+warning[duplicate]: found 2 duplicate entries for crate 'nix'   at Cargo.lock:98:1
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'   at Cargo.lock:114:1
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'   at Cargo.lock:116:1
+warning[duplicate]: found 2 duplicate entries for crate 'syn'   at Cargo.lock:140:1
+warning[unused-wrapper]: wrapper for banned crate was not encountered   at deny.toml:65:72
+warning[unused-wrapper]: wrapper for banned crate was not encountered   at deny.toml:65:94
+warning[unused-wrapper]: wrapper for banned crate was not encountered   at deny.toml:67:43
+advisories ok, bans ok, licenses ok, sources ok
+exit status: 0
+```
+
+### 5. Docs
+
+```
+$ cargo doc --workspace --no-deps
+    Checking minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)
+ Documenting minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)
+    Checking minos-store v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-store)
+    Checking minos-propose v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-propose)
+    Checking minos-sandbox v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-sandbox)
+ Documenting minos-store v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-store)
+ Documenting minos-sandbox v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-sandbox)
+ Documenting minos-propose v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-propose)
+    Checking minos-runner v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-runner)
+ Documenting minos-runner v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-runner)
+    Checking minos-loop v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-loop)
+ Documenting minos-loop v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-loop)
+ Documenting minos-cli v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.88s
+   Generated /Users/seanmcauliffe/Repos/minos/target/doc/minos_backend_krun/index.html and 9 other files
+exit status: 0
+```
+
+### 6. C-01
+
+```
+$ for f in crates/*/Cargo.toml; do grep -A1 -xF '[lints]' "$f" | grep -qxF 'workspace = true' && echo "ok $f" || echo "MISSING $f"; done
+ok crates/minos-backend-krun/Cargo.toml
+ok crates/minos-cli/Cargo.toml
+ok crates/minos-core/Cargo.toml
+ok crates/minos-guest/Cargo.toml
+ok crates/minos-loop/Cargo.toml
+ok crates/minos-propose/Cargo.toml
+ok crates/minos-runner/Cargo.toml
+ok crates/minos-sandbox/Cargo.toml
+ok crates/minos-store/Cargo.toml
+ok crates/minos-vmm/Cargo.toml
+exit status: 0
+```
+
+### 7. C-02
+
+```
+$ grep -rnE '#!?\[allow\(' crates --include='*.rs'
+(no output)
+exit status: 1
+```
+
+### 8. minos-core for the guest's target
+
+```
+$ cargo check -p minos-core --target aarch64-unknown-linux-musl
+   Compiling serde_core v1.0.229
+    Checking typenum v1.20.1
+   Compiling zerocopy v0.8.62
+   Compiling libc v0.2.190
+    Checking winnow v1.0.4
+    Checking const-oid v0.10.2
+    Checking foldhash v0.2.0
+    Checking toml_writer v1.1.3+spec-1.1.0
+    Checking rand_core v0.10.1
+    Checking base16ct v1.0.0
+    Checking hashbrown v0.17.1
+    Checking toml_parser v1.1.5+spec-1.1.0
+    Checking diffy v0.5.2
+    Checking hybrid-array v0.4.15
+    Checking block-buffer v0.12.1
+    Checking crypto-common v0.2.2
+    Checking cpufeatures v0.3.1
+    Checking digest v0.11.3
+    Checking serde_spanned v1.1.2
+    Checking toml_datetime v1.1.2+spec-1.1.0
+    Checking serde_json v1.0.151
+    Checking serde v1.0.229
+    Checking sha2 v0.11.0
+    Checking toml v1.1.8+spec-1.1.0
+    Checking ppv-lite86 v0.2.21
+    Checking rand_chacha v0.10.0
+    Checking minos-core v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.60s
+exit status: 0
+```
+
+### 8b. Guest clippy for its target
+
+```
+$ cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+exit status: 0
+```
+
+### 9. Core clippy.toml unchanged
+
+```
+$ git log --oneline cf607f2..HEAD -- crates/minos-core/clippy.toml
+(no output)
+exit status: 0
+```
+
+### 10. No pending snapshots or regressions
+
+Run under `/bin/sh`. The first run under zsh printed the same `0` plus zsh's `no matches found` message for the unmatched glob, which is a shell difference, not a finding.
+
+```
+$ ls crates/minos-core/tests/snapshots/*.snap.new 2>/dev/null | wc -l; git status --porcelain crates/minos-core
+0
+exit status: 0
+```
