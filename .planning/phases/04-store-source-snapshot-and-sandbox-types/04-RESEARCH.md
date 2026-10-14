@@ -706,35 +706,42 @@ contract!(duplicate_append_is_a_no_op);
 | A4 | 16 MiB output, 64 MiB snapshot, 10 000 files are adequate for v1 projects | Patterns 5 and 6 | Low: constants with reasons; a real project over a cap fails loudly and the constant is revisited |
 | A5 | Phase 5's guest will write only ustar headers (no PAX/GNU) for output | Pattern 5 | Medium: if the guest's tar writer needs long names, output names over 255 bytes would be refused; Phase 5 must use `Builder::append` with ustar headers as this phase's packer does |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`RunningVm::wait` needs a place for host-observed termination.**
    - What we know: D-17 fixes `wait(self) -> Result<Untrusted<GuestOutput<R>>, InfraError>`. The K7 classification (02-SPIKE-EVIDENCE.md) has three non-infrastructure results the host observes itself: guest decided, `Crashed` (no valid frame, or console cap), and `TimedOut`. None of the latter two is an `InfraError`, and putting them inside `Untrusted` would hide trusted host facts behind hostile-data exits.
    - Recommendation: define `wait(self) -> Result<Finished<R>, InfraError>` with `pub struct Finished<R> { ended: Ended, output: Untrusted<GuestOutput<R>> }` and `pub enum Ended { Exited, Crashed(CrashCause), TimedOut }`. It keeps D-17's intent (hostile output wrapped, infrastructure separate) and avoids changing a published trait in Phase 5. The planner should record this as a refinement of D-17, or keep the literal signature and accept a trait change in Phase 5.
+   - RESOLVED: adopted as a refinement of D-17. 04-06 defines `Finished<R>` (host-observed `Ended`, the launch key, the hostile stream; built only from a `&Cleared<R>`), and 04-08's `RunningVm::wait(self)` returns `Result<Finished<R>, InfraError>`.
 
 2. **Who may mint `InputDisk` and `JudgeData`?**
    - What we know: SBX-01 is satisfied by API shape. Provenance of the `BlobId` inside each is the runner's job (Pitfall 10).
    - Recommendation: Phase 4 gives both a public `new(BlobId)` with docs naming the provenance rule, plus the preflight inequality check. Phase 5, which owns the input-disk format, can make `InputDisk` constructible only by the writer that builds the disk image.
+   - RESOLVED: 04-03 gives `InputDisk` and `JudgeData` a public `new(BlobId)` whose docs name the provenance rule, and `preflight` refuses a Judge plan whose judge data blob equals its input blob (`Refusal::JudgeDataIsInput`); restricting `InputDisk` is left to Phase 5.
 
 3. **Streaming blobs for large root images.**
    - What we know: core exposes `BlobId::of(&[u8])` only; `from_digest` is private to `id.rs`, so a store cannot build a `BlobId` from an incremental digest without a core change (or by round-tripping hex through `FromStr`, which works but is a disguised constructor).
    - Recommendation: in-memory `put`/`get` for Phase 4 (the snapshot is capped at 64 MiB). If Phase 5 stores root images as blobs, add a core constructor such as `BlobId::from_sha256_stream(impl Read)` that hashes inside core, so no caller supplies a digest.
+   - RESOLVED: 04-02 keeps `Blobs::put` and `get` in-memory byte slices for Phase 4; the streaming constructor is a Phase 5 question, listed in CLAUDE.md Open questions by 04-09.
 
 4. **`id_*` in the hard denylist (D-07).**
    - What we know: it catches `id_rsa`, `id_ed25519`, and also ordinary files like `id_map.rs`.
    - Recommendation: ask the user whether to narrow it to `id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, `id_ecdsa_sk*`, `id_ed25519_sk*`. Either way, report every denylist drop in `PackReport`. Also ask whether `.netrc`, `.npmrc`, `.pypirc`, `*.key`, `*.p12` belong on the list; D-07 locks the current list, so they are not added without the user.
+   - RESOLVED: 04-04 implements `id_*` exactly as D-07 locks it and every drop is reported in `PackReport` (04-07); 04-09 surfaces the narrowing and the extra entries to the user as a CLAUDE.md Open questions bullet.
 
 5. **Strict union for `.minosignore` negations.**
    - What we know: `!pattern` in `.minosignore` re-includes a gitignored file (Pitfall 2).
    - Recommendation: document it (default). Rejecting `!` lines would need our own parse of `.minosignore`; only do it if the user wants the literal union.
+   - RESOLVED: 04-07 refuses any `.minosignore` line starting with `!` (`SnapshotError::MinosignoreNegation`, naming the file and line), because a negation there would break D-04's union.
 
 6. **Judge-data hash check at pack time (Pitfall 28 suggestion).**
    - What we know: judge data is stored as a tarball blob, so its `BlobId` is the tarball's hash, not any file's. A per-file check needs per-file digests recorded by `minos judge push` (Phase 7).
    - Recommendation: not cheap now; defer to Phase 7 and record the requirement there (judge push records per-file SHA-256s; the packer takes a `&BTreeSet<BlobId>` of forbidden file digests).
+   - RESOLVED: deferred to Phase 7 (JUDGE-01, when `minos judge push` records per-file digests); 04-07 records the deferral in `snapshot`'s doc and in CLAUDE.md's Source paragraph.
 
 7. **Backends reading blobs.**
    - What we know: D-17 says backends read blobs by ID, but `deny.toml` lets only `minos-runner`, `minos-loop`, and `minos-cli` depend on `minos-store`, so `minos-backend-krun` cannot call `Blobs`.
    - Recommendation: a Phase 5 decision (the runner hands bytes or paths to the backend, or `deny.toml` gains a wrapper). Phase 4's `Backend` trait should not take a `Blobs` parameter.
+   - RESOLVED: 04-08's `Backend` takes no store; how a backend receives blob bytes or paths is a Phase 5 decision, listed in CLAUDE.md Open questions by 04-09.
 
 ## Environment Availability
 
