@@ -51,7 +51,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 ### Store (STORE)
 
-- [ ] **STORE-01**: `Ledger` and `Blobs` are synchronous traits with in-memory implementations used by all tests above the store
+- [x] **STORE-01**: `Ledger` and `Blobs` are synchronous traits with in-memory implementations used by all tests above the store
 - [ ] **STORE-02**: The file ledger is append-only JSONL under an exclusive file lock, tolerates a torn final line, refuses unknown `v` tags, and never rewrites a record
 - [ ] **STORE-03**: Appending an event with an already-recorded `EventKey` is a no-op, so steps are idempotent on resume
 - [ ] **STORE-04**: The file blob store is content-addressed by SHA-256, writes temp-then-rename, and verifies the hash on read
@@ -224,7 +224,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORE-15 | Phase 3 | Complete |
 | CORE-16 | Phase 3 | Complete |
 | CORE-17 | Phase 3 | Complete |
-| STORE-01 | Phase 4 | Pending |
+| STORE-01 | Phase 4 | Complete |
 | STORE-02 | Phase 4 | Pending |
 | STORE-03 | Phase 4 | Pending |
 | STORE-04 | Phase 4 | Pending |

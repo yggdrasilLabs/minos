@@ -210,7 +210,7 @@ Plans:
   4. Packing the same working tree twice yields byte-identical tarballs and the same `TreeId` (sorted paths, zeroed metadata, regular files only), honoring `.gitignore`, `.minosignore`, and the hard denylist. A planted secret blocks the pack, and a dirty tree is refused unless `--allow-dirty` is given (CLI-11)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 1/9 plans executed
+**Plans**: 2/9 plans executed
 Plans:
 **Wave 1**
 
@@ -218,7 +218,7 @@ Plans:
 
 **Wave 2** *(blocked on 04-01)*
 
-- [ ] 04-02-PLAN.md — `Ledger` and `Blobs` sync traits, `Appended`, `StoreError`, `MemoryStore`, shared contract tests (wave 2)
+- [x] 04-02-PLAN.md — `Ledger` and `Blobs` sync traits, `Appended`, `StoreError`, `MemoryStore`, shared contract tests (wave 2)
 - [ ] 04-03-PLAN.md — Sealed roles, `LaunchKey` with golden vectors, `SandboxSpec`, `seal`, `LaunchPlan`, `Capabilities`, `Refusal`, `Cleared`, `preflight` (wave 2)
 - [ ] 04-04-PLAN.md — Hard denylist, nine-pattern secret scanner, read-only git clean check, CLAUDE.md git carve-out (wave 2)
 
@@ -322,7 +322,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
-| 4. Store, Source Snapshot, and Sandbox Types | 1/9 | In Progress|  |
+| 4. Store, Source Snapshot, and Sandbox Types | 2/9 | In Progress|  |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |
 | 6. Proposers | 0/TBD | Not started | - |
 | 7. Runner and Loop | 0/TBD | Not started | - |

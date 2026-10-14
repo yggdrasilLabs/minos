@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: store-source-snapshot-and-sandbox-types
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-10-14T18:37:24.131Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-10-14T20:23:26.891Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 38
-  completed_plans: 30
+  completed_plans: 31
   percent: 38
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 04 (store-source-snapshot-and-sandbox-types) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 04 execution started
 
@@ -87,6 +87,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 03 P12 | 8min | 2 tasks | 4 files |
 | Phase 03 P13 | 6 min | 3 tasks | 4 files |
 | Phase 04 P01 | 5min | 3 tasks | 13 files |
+| Phase 04 P02 | 5min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -178,6 +179,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-01: packer, denylist, secret scan, and git clean check live in new library crate minos-source; only minos-cli links it (deny.toml wrapper; a minos-loop edge is refused)
 - [Phase 04]: 04-01: crate clippy bans for tar and ignore use public re-export paths (tar::Builder, tar::Entry, ignore::WalkBuilder); all 24 entries fire once
 - [Phase 04]: 04-01: CLI-11, SBX-05, STORE-02 checkboxes left open; 04-05, 04-06, and 04-07 deliver them
+- [Phase 04]: 04-02: Appended is must_use and not non_exhaustive; a same-key different-record append returns Conflict and writes nothing (first write wins)
+- [Phase 04]: 04-02: LedgerRead::new is pub(crate); a store in another crate (AWS milestone) would need a public constructor
+- [Phase 04]: 04-02: only STORE-01 marked complete; STORE-03 and STORE-04 close with the file store in 04-05
 
 ### Pending Todos
 
@@ -202,6 +206,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-14T18:36:54.931Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-10-14T20:23:26.887Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
