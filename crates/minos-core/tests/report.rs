@@ -1119,7 +1119,7 @@ fn golden_report_bytes_pinned() -> TestResult {
 
 /// See `golden_report_bytes_pinned`.
 const GOLDEN_REPORT_SHA256: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+    "b63aba37e89d86681aabd3a19660ee6003a3e188b9089f5bcc426ffb36c63a4c";
 
 proptest! {
     #[test]

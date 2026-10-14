@@ -6,6 +6,13 @@
 //! never an input, so nothing the judge keeps private can reach the report. Nothing here reads a clock, draws a
 //! random number, or depends on the order records were appended in: every collection is ordered by key.
 //!
+//! [`build_report`] renders the review artifact as text and hashes exactly those bytes with [`ReportHash::of`]:
+//! the user acknowledges what they read, and `minos adopt` (Phase 8) rebuilds the report from the same ledger and
+//! blobs and refuses unless the hash matches the acknowledged one. The text has a fixed section order (header,
+//! summary, flags, provenance, lineage, diff), LF line endings, and every string that originated in a sandbox or a
+//! model (rationales, diff lines, literals) passed through [`SafeText`]. Numbers are printed by this module's own
+//! formatter, never by a serializer, so a dependency upgrade cannot change a report's bytes.
+//!
 //! The summary has one [`SummaryRow`] per objective, gate, and held-out metric (D-17). The flags are pure functions
 //! of those rows, the ledger, the target's diff, and the surface tree. Flags direct attention; they are not
 //! verdicts. A report with no flag is not a claim that the change is safe, and a flag is not a claim that it is
@@ -16,17 +23,17 @@ use std::fmt;
 
 use crate::diff::apply::Tree;
 use crate::diff::{Diff, HunkLine};
-use crate::id::{BlobId, ExperimentId, MetricName};
-use crate::ledger::Isolation;
+use crate::id::{BlobId, ExperimentId, ImageDigest, MetricName, PromptHash, ReportHash};
+use crate::ledger::{BackendKind, ConfinementLayer, EXPECTED_KRUN_LAYERS, Isolation, Origin};
 use crate::limits::{
     ANOMALY_MULTIPLE, ENCODED_RUN_MIN, LITERAL_MIN_BYTES, Limits, MIN_NOISE_TRIALS,
-    NOISE_WARN_MULTIPLE,
+    NOISE_WARN_MULTIPLE, RATIONALE_EXCERPT_BYTES,
 };
-use crate::manifest::{JudgeVersion, Manifest, Objective};
+use crate::manifest::{Arch, JudgeVersion, Manifest, Objective};
 use crate::metric::Metric;
 use crate::path::RelPath;
 use crate::policy::{NoiseFloor, ReducedScore, improves, noise_floor, reduce_trials};
-use crate::state::RunState;
+use crate::state::{Proposal, RunState};
 use crate::text::{SafeText, is_invisible_format};
 
 /// File names of dependency manifests and lockfiles. A diff that touches a file with one of these names, matched
@@ -135,8 +142,8 @@ pub struct ReportInput<'a> {
 impl<'a> ReportInput<'a> {
     /// The report inputs for `target` under `judge`.
     ///
-    /// `manifest` is the manifest in effect for the run. `blobs` must hold the diff and rationale blob of every
-    /// proposal in the target's lineage, keyed by [`BlobId::of`] their bytes. `surface` holds the base tree's
+    /// `manifest` is the manifest in effect for the run. `blobs` must hold the target's diff blob and the rationale
+    /// blob of every proposal in its lineage, keyed by [`BlobId::of`] their bytes. `surface` holds the base tree's
     /// `[surface]` files (readable and writable), which the literal-match flag searches (D-15).
     #[must_use]
     pub const fn new(
@@ -732,6 +739,8 @@ fn weakest_isolation(input: &ReportInput<'_>, lineage: &[ExperimentId]) -> Optio
 
 /// What the flags and the rendering share: computed once per report.
 struct Analysis {
+    lineage: Vec<ExperimentId>,
+    diff: Diff,
     rows: Vec<SummaryRow>,
     flags: Vec<Flag>,
 }
@@ -805,6 +814,8 @@ fn analyze(input: &ReportInput<'_>) -> Result<Analysis, ReportError> {
     }
 
     Ok(Analysis {
+        lineage,
+        diff,
         rows,
         flags: flags.into_iter().collect(),
     })
@@ -828,4 +839,377 @@ pub fn flags(input: &ReportInput<'_>) -> Result<Vec<Flag>, ReportError> {
 /// As for [`flags`].
 pub fn summary(input: &ReportInput<'_>) -> Result<Vec<SummaryRow>, ReportError> {
     analyze(input).map(|analysis| analysis.rows)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The review artifact: its text, the hash of exactly that text, and the flags and summary it shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Report {
+    text: String,
+    hash: ReportHash,
+    flags: Vec<Flag>,
+    summary: Vec<SummaryRow>,
+}
+
+impl Report {
+    /// The rendered text: what the user reads, LF only, ending with a newline.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// [`ReportHash::of`] the text's bytes: what the user acknowledges and `minos adopt` requires.
+    #[must_use]
+    pub const fn hash(&self) -> &ReportHash {
+        &self.hash
+    }
+
+    /// The flags, sorted.
+    #[must_use]
+    pub fn flags(&self) -> &[Flag] {
+        &self.flags
+    }
+
+    /// The summary rows, in report order.
+    #[must_use]
+    pub fn summary(&self) -> &[SummaryRow] {
+        &self.summary
+    }
+}
+
+/// A metric value as the report prints it: `0` for zero, Rust's shortest round-trip `{}` form for magnitudes in
+/// `[1e-4, 1e15)`, and its `{:e}` form otherwise. Both forms are defined by std and independent of the platform,
+/// so a value always prints the same bytes.
+fn format_metric(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    if (1e-4..1e15).contains(&value.abs()) {
+        format!("{value}")
+    } else {
+        format!("{value:e}")
+    }
+}
+
+/// A signed delta: a leading `+` when positive, then [`format_metric`] and `suffix`; `n/a` when absent.
+fn format_delta(delta: Option<f64>, suffix: &str) -> String {
+    match delta {
+        Some(delta) if delta > 0.0 => format!("+{}{suffix}", format_metric(delta)),
+        Some(delta) => format!("{}{suffix}", format_metric(delta)),
+        None => "n/a".to_owned(),
+    }
+}
+
+/// `yes`, `no`, or `n/a`.
+const fn format_bool(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "n/a",
+    }
+}
+
+/// `items` joined with `, `, or `none`.
+fn join_or_none(items: impl IntoIterator<Item = String>) -> String {
+    let items: Vec<String> = items.into_iter().collect();
+    if items.is_empty() {
+        "none".to_owned()
+    } else {
+        items.join(", ")
+    }
+}
+
+const fn backend_text(backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::Krun => "krun",
+    }
+}
+
+const fn arch_text(arch: Arch) -> &'static str {
+    match arch {
+        Arch::Arm64 => "arm64",
+        Arch::X86_64 => "x86_64",
+    }
+}
+
+const fn layer_text(layer: ConfinementLayer) -> &'static str {
+    match layer {
+        ConfinementLayer::Seatbelt => "seatbelt",
+        ConfinementLayer::DedicatedUser => "dedicated_user",
+        ConfinementLayer::Rlimits => "rlimits",
+    }
+}
+
+/// The confinement layers a backend is expected to have.
+const fn expected_layers(backend: BackendKind) -> &'static [ConfinementLayer] {
+    match backend {
+        BackendKind::Krun => &EXPECTED_KRUN_LAYERS,
+    }
+}
+
+/// `text` cut to at most `max` bytes at a char boundary, and whether anything was cut.
+fn excerpt(text: &str, max: usize) -> (&str, bool) {
+    if text.len() <= max {
+        return (text, false);
+    }
+    let end = (0..=max)
+        .rev()
+        .find(|index| text.is_char_boundary(*index))
+        .unwrap_or(0);
+    (text.get(..end).unwrap_or_default(), true)
+}
+
+/// Appends one formatted line and its LF.
+fn put(out: &mut String, line: fmt::Arguments<'_>) -> Result<(), ReportError> {
+    fmt::Write::write_fmt(out, line).map_err(|_| ReportError::Format)?;
+    out.push('\n');
+    Ok(())
+}
+
+/// The summary section (D-17).
+fn render_summary(
+    out: &mut String,
+    input: &ReportInput<'_>,
+    rows: &[SummaryRow],
+) -> Result<(), ReportError> {
+    put(out, format_args!("summary"))?;
+    let objectives = input.manifest.judge().objectives();
+    for row in rows {
+        let threshold = match objectives
+            .iter()
+            .find(|objective| objective.metric() == row.metric())
+            .filter(|_| row.role() == MetricRole::Objective)
+        {
+            Some(objective) => format!(
+                ", clears min_improvement {}: {}",
+                objective.min_improvement(),
+                format_bool(row.clears_threshold())
+            ),
+            None => String::new(),
+        };
+        put(
+            out,
+            format_args!(
+                "  {} {}: baseline {} ({} to {}, {} trials), winner {} ({} trials), delta {} ({}){threshold}, \
+                 clears noise: {}",
+                row.role(),
+                row.metric(),
+                format_metric(row.baseline_median().value()),
+                format_metric(row.baseline_min().value()),
+                format_metric(row.baseline_max().value()),
+                row.baseline_trials(),
+                format_metric(row.winner_median().value()),
+                row.winner_trials(),
+                format_delta(row.delta_abs(), ""),
+                format_delta(row.delta_pct(), "%"),
+                format_bool(row.clears_noise()),
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+/// The provenance section (D-18): isolation and reduced hardening across the lineage, the judge, the backends
+/// and images, and the models and prompts.
+fn render_provenance(
+    out: &mut String,
+    input: &ReportInput<'_>,
+    lineage: &[ExperimentId],
+) -> Result<(), ReportError> {
+    let state = input.state;
+    let mut backends: BTreeSet<(BackendKind, Arch)> = BTreeSet::new();
+    let mut roots: BTreeSet<ImageDigest> = BTreeSet::new();
+    let mut kernels: BTreeSet<ImageDigest> = BTreeSet::new();
+    let mut missing: BTreeSet<ConfinementLayer> = BTreeSet::new();
+    for exp in lineage {
+        for (_, judgment) in state.trials(exp, input.judge) {
+            let backend = judgment.backend();
+            backends.insert((backend.backend(), backend.arch()));
+            roots.insert(*backend.root_image());
+            kernels.extend(backend.kernel().copied());
+            missing.extend(
+                expected_layers(backend.backend())
+                    .iter()
+                    .filter(|layer| !backend.layers().contains(layer))
+                    .copied(),
+            );
+        }
+    }
+    let mut models: BTreeSet<String> = BTreeSet::new();
+    let mut prompts: BTreeSet<PromptHash> = BTreeSet::new();
+    for exp in lineage {
+        match state.proposal(exp).map(Proposal::origin) {
+            Some(Origin::Sweep) => {
+                models.insert("sweep".to_owned());
+            }
+            Some(Origin::Model { model, prompt }) => {
+                models.insert(SafeText::inline(model.as_str()).as_str().to_owned());
+                prompts.insert(*prompt);
+            }
+            None => {}
+        }
+    }
+    let isolation = weakest_isolation(input, lineage).map_or("none recorded", isolation_text);
+    put(out, format_args!("provenance"))?;
+    put(out, format_args!("  isolation: {isolation}"))?;
+    put(
+        out,
+        format_args!(
+            "  reduced hardening: {}",
+            join_or_none(missing.iter().map(|layer| layer_text(*layer).to_owned()))
+        ),
+    )?;
+    put(out, format_args!("  judge: {}", input.judge))?;
+    put(
+        out,
+        format_args!(
+            "  backends: {}",
+            join_or_none(backends.iter().map(|(backend, arch)| format!(
+                "{} {}",
+                backend_text(*backend),
+                arch_text(*arch)
+            )))
+        ),
+    )?;
+    put(
+        out,
+        format_args!(
+            "  root images: {}",
+            join_or_none(roots.iter().map(ToString::to_string))
+        ),
+    )?;
+    put(
+        out,
+        format_args!(
+            "  kernels: {}",
+            join_or_none(kernels.iter().map(ToString::to_string))
+        ),
+    )?;
+    put(out, format_args!("  models: {}", join_or_none(models)))?;
+    put(
+        out,
+        format_args!(
+            "  prompts: {}",
+            join_or_none(prompts.iter().map(ToString::to_string))
+        ),
+    )?;
+    Ok(())
+}
+
+/// The lineage section: the baseline, then each proposal with its generation, tier, ID, and rationale excerpt.
+fn render_lineage(
+    out: &mut String,
+    input: &ReportInput<'_>,
+    lineage: &[ExperimentId],
+) -> Result<(), ReportError> {
+    put(out, format_args!("lineage"))?;
+    for exp in lineage {
+        let Some(proposal) = input.state.proposal(exp) else {
+            put(out, format_args!("  baseline {exp}"))?;
+            continue;
+        };
+        let rationale = text_blob(input, proposal.rationale())?;
+        let (shown, truncated) = excerpt(rationale, RATIONALE_EXCERPT_BYTES);
+        put(
+            out,
+            format_args!(
+                "  generation {} {} {exp}: {}{}",
+                proposal.generation(),
+                proposal.tier(),
+                SafeText::inline(shown),
+                if truncated { " [truncated]" } else { "" },
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+/// Builds the review artifact for `input` (CORE-16).
+///
+/// The text is, in order: the header (report format, run, experiment, judge version, base tree); the summary
+/// rows (D-17); the flags, or `none`; the provenance (D-18); the lineage from the baseline to the target; and the
+/// target's cumulative canonical diff from the base, re-parsed with [`Diff::parse`] against the manifest's
+/// writable set and checked to hash to the target. Sections are separated by one empty line. The result is a pure
+/// function of `input`: the same ledger, in any record order, and the same blobs give the same bytes and the same
+/// [`ReportHash`].
+///
+/// # Errors
+///
+/// A [`ReportError`] when the target is the baseline or unknown, a blob is missing, tampered, or not text, the
+/// diff is invalid for the run, or the target or baseline has no complete score under the judge.
+pub fn build_report(input: &ReportInput<'_>) -> Result<Report, ReportError> {
+    let analysis = analyze(input)?;
+    let state = input.state;
+    let mut out = String::new();
+
+    put(&mut out, format_args!("minos report v1"))?;
+    put(&mut out, format_args!("  run: {}", state.run()))?;
+    put(&mut out, format_args!("  experiment: {}", input.target))?;
+    put(&mut out, format_args!("  judge: {}", input.judge))?;
+    put(&mut out, format_args!("  base: {}", state.base()))?;
+    out.push('\n');
+
+    render_summary(&mut out, input, &analysis.rows)?;
+    out.push('\n');
+
+    put(&mut out, format_args!("flags"))?;
+    if analysis.flags.is_empty() {
+        put(&mut out, format_args!("  none"))?;
+    }
+    for flag in &analysis.flags {
+        put(
+            &mut out,
+            format_args!("  {}", SafeText::inline(&flag.to_string())),
+        )?;
+    }
+    out.push('\n');
+
+    render_provenance(&mut out, input, &analysis.lineage)?;
+    out.push('\n');
+
+    render_lineage(&mut out, input, &analysis.lineage)?;
+    out.push('\n');
+
+    put(&mut out, format_args!("diff"))?;
+    for line in analysis.diff.as_str().split_terminator('\n') {
+        put(&mut out, format_args!("{}", SafeText::new(line)))?;
+    }
+
+    let hash = ReportHash::of(out.as_bytes());
+    Ok(Report {
+        text: out,
+        hash,
+        flags: analysis.flags,
+        summary: analysis.rows,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_metric;
+
+    #[test]
+    fn format_metric_uses_plain_form_in_range() {
+        assert_eq!(format_metric(0.5), "0.5");
+        assert_eq!(format_metric(12.25), "12.25");
+        assert_eq!(format_metric(-120.0), "-120");
+        assert_eq!(format_metric(1e-4), "0.0001");
+    }
+
+    #[test]
+    fn format_metric_uses_exponent_form_outside_range() {
+        assert_eq!(format_metric(1e-7), "1e-7");
+        assert_eq!(format_metric(2e20), "2e20");
+        assert_eq!(format_metric(1e15), "1e15");
+        assert_eq!(format_metric(-3.5e-9), "-3.5e-9");
+    }
+
+    #[test]
+    fn format_metric_prints_zero_as_zero() {
+        assert_eq!(format_metric(0.0), "0");
+        assert_eq!(format_metric(-0.0), "0");
+    }
 }

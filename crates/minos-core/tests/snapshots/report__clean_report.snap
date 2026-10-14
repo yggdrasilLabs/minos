@@ -1,0 +1,40 @@
+---
+source: crates/minos-core/tests/report.rs
+expression: clean()?.report()?.text()
+---
+minos report v1
+  run: 6a65b71b41e24c3b7d21e317e6a8fc29a41fcd29085ec93bbe13aa9b464c56cb
+  experiment: 7e6b5684b7767761c868546dfd40fb92820144ed29d2e17612f85d9611a43eda
+  judge: abababababababababababababababababababababababababababababababab
+  base: e3b98a4da31a127d4bde6e43033f66ba274cab0eb7eb1c70ec41402bf6273dd8
+
+summary
+  objective throughput_mb_s: baseline 100 (99 to 101, 3 trials), winner 120 (3 trials), delta +20 (+20%), clears min_improvement 5%: yes, clears noise: yes
+  gate identical_output: baseline 1 (1 to 1, 3 trials), winner 1 (3 trials), delta 0 (0%), clears noise: n/a
+  held-out holdout_mb_s: baseline 50 (49 to 51, 3 trials), winner 60 (3 trials), delta +10 (+20%), clears noise: yes
+
+flags
+  none
+
+provenance
+  isolation: hardware virtualization
+  reduced hardening: none
+  judge: abababababababababababababababababababababababababababababababab
+  backends: krun arm64
+  root images: 4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2
+  kernels: 6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c
+  models: mid
+  prompts: 8aa42cf3c3c77eac20d1824832b92be230bd7c528eba12a459efe60ad9039456, bf2fc3db42cacb89b5e56f8040cd9d4a1e276041de59000109e5a7974ec6be8f
+
+lineage
+  baseline 6fd8be380eff4cb315d50a3f594a1baa7241164600eb22e68978748be04a75cb
+  generation 1 single_shot 4e0b7da70671e448efc11a929f3c40d391948a13a0fdf2fdf9a9609ae9fe210a: Trim before counting.
+  generation 2 single_shot 7e6b5684b7767761c868546dfd40fb92820144ed29d2e17612f85d9611a43eda: Count bytes directly.
+
+diff
+diff --git a/src/parse.rs b/src/parse.rs
+--- a/src/parse.rs
++++ b/src/parse.rs
+@@ -2,1 +2,1 @@
+-    input.len()
++    input.as_bytes().len()
