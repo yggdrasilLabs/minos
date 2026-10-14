@@ -121,14 +121,54 @@ fn ordinary_unicode_is_kept() {
 #[test]
 fn invisible_table_edges() {
     for c in [
-        '\u{ad}', '\u{34f}', '\u{61c}', '\u{115f}', '\u{1160}', '\u{180e}', '\u{200b}', '\u{200f}', '\u{2028}',
-        '\u{2029}', '\u{202a}', '\u{202e}', '\u{2060}', '\u{2064}', '\u{2066}', '\u{2069}', '\u{3164}', '\u{fe00}',
-        '\u{fe0f}', '\u{feff}', '\u{ffa0}', '\u{e0000}', '\u{e007f}', '\u{e0100}', '\u{e01ef}',
+        '\u{ad}',
+        '\u{34f}',
+        '\u{61c}',
+        '\u{115f}',
+        '\u{1160}',
+        '\u{180e}',
+        '\u{200b}',
+        '\u{200f}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{202a}',
+        '\u{202e}',
+        '\u{2060}',
+        '\u{2064}',
+        '\u{2066}',
+        '\u{2069}',
+        '\u{3164}',
+        '\u{fe00}',
+        '\u{fe0f}',
+        '\u{feff}',
+        '\u{ffa0}',
+        '\u{e0000}',
+        '\u{e007f}',
+        '\u{e0100}',
+        '\u{e01ef}',
     ] {
-        assert!(is_invisible_format(c), "U+{:04X} should be invisible", u32::from(c));
+        assert!(
+            is_invisible_format(c),
+            "U+{:04X} should be invisible",
+            u32::from(c)
+        );
     }
-    for c in ['a', ' ', '\u{ac}', '\u{200a}', '\u{2030}', '\u{2065}', '\u{fdff}', '\u{e0080}', '\u{e01f0}'] {
-        assert!(!is_invisible_format(c), "U+{:04X} should be visible", u32::from(c));
+    for c in [
+        'a',
+        ' ',
+        '\u{ac}',
+        '\u{200a}',
+        '\u{2030}',
+        '\u{2065}',
+        '\u{fdff}',
+        '\u{e0080}',
+        '\u{e01f0}',
+    ] {
+        assert!(
+            !is_invisible_format(c),
+            "U+{:04X} should be visible",
+            u32::from(c)
+        );
     }
 }
 
