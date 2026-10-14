@@ -1,4 +1,4 @@
-//! The seeded sweep (CORE-12): the seed, the raw ChaCha8 stream against a published known-answer vector, golden
+//! The seeded sweep (CORE-12): the seed, the raw `ChaCha8` stream against a published known-answer vector, golden
 //! samples, determinism, and the range of every drawn value.
 //!
 //! Params are built by parsing a manifest through `Manifest::parse_toml`, so every param here is one a user could
@@ -100,9 +100,7 @@ fn in_domain(param: &SweepParam, value: &ParamValue) -> bool {
     match (param.domain(), value) {
         (ParamDomain::Int(range), ParamValue::Int(value)) => {
             let offset = i128::from(*value) - i128::from(range.min());
-            *value >= range.min()
-                && *value <= range.max()
-                && offset % i128::from(range.step()) == 0
+            *value >= range.min() && *value <= range.max() && offset % i128::from(range.step()) == 0
         }
         (ParamDomain::Choices(choices), ParamValue::Choice(value)) => {
             choices.as_slice().iter().any(|choice| choice == value)
@@ -125,10 +123,10 @@ fn well_formed(params: &[SweepParam], sample: &Sample) -> bool {
 // The raw stream
 // ---------------------------------------------------------------------------------------------------------------
 
-/// The ChaCha8 stream the sweep draws from is the published cipher, checked against a vector that does not come
+/// The `ChaCha8` stream the sweep draws from is the published cipher, checked against a vector that does not come
 /// from the code under test.
 ///
-/// Source: https://www.ietf.org/archive/id/draft-strombergson-chacha-test-vectors-01.txt, test case TC1
+/// Source: <https://www.ietf.org/archive/id/draft-strombergson-chacha-test-vectors-01.txt>, test case TC1
 /// (all-zero 256-bit key, all-zero IV), "Rounds: 8". Its first 32 keystream bytes are
 ///
 /// ```text
@@ -141,7 +139,12 @@ fn well_formed(params: &[SweepParam], sample: &Sample) -> bool {
 #[test]
 fn chacha8_known_answer() {
     let mut rng = ChaCha8Rng::from_seed([0_u8; 32]);
-    let words = [rng.next_u64(), rng.next_u64(), rng.next_u64(), rng.next_u64()];
+    let words = [
+        rng.next_u64(),
+        rng.next_u64(),
+        rng.next_u64(),
+        rng.next_u64(),
+    ];
     assert_eq!(
         words,
         [
@@ -186,9 +189,10 @@ fn seed_differs_by_generation_and_run() {
 fn seed_golden_vector() {
     // RUN=6a65b71b41e24c3b7d21e317e6a8fc29a41fcd29085ec93bbe13aa9b464c56cb (run_id_golden_vector)
     // { printf 'minos/sweep/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 1 | xxd -r -p; } | shasum -a 256
-    let digest = seed(&golden_run(), 1);
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    assert_eq!(hex, SEED_GOLDEN_HEX);
+    assert_eq!(
+        base16ct::lower::encode_string(&seed(&golden_run(), 1)),
+        SEED_GOLDEN_HEX
+    );
 }
 
 /// Recorded with the shell command in [`seed_golden_vector`], independently of the code under test.
@@ -200,8 +204,10 @@ const SEED_GOLDEN_HEX: &str = "5ccbb1c0dc095fb5daf738cbd9936ab5e3cf51e466779df9d
 
 /// Pins the sweep's value stream: the run of `golden_ids.rs`, generation 1, the golden params, batch 4.
 ///
-/// These literals were recorded from the first run of this test. They rest on [`chacha8_known_answer`] and
-/// [`seed_golden_vector`], and they change only with a deliberate decision, such as a new seed domain.
+/// These literals were recorded from the first run of this test, and reproduced by a separate 40-line Python
+/// `ChaCha8` and rejection sampler written from the cipher's specification (2026-10-14). They rest on
+/// [`chacha8_known_answer`] and [`seed_golden_vector`], and they change only with a deliberate decision, such as a
+/// new seed domain.
 #[test]
 fn sweep_golden_samples() -> TestResult {
     let manifest = manifest(GOLDEN_PARAMS)?;
@@ -212,7 +218,7 @@ fn sweep_golden_samples() -> TestResult {
 }
 
 /// The golden batch, in draw order.
-const GOLDEN_SAMPLES: [&str; 4] = ["GOLDEN", "GOLDEN", "GOLDEN", "GOLDEN"];
+const GOLDEN_SAMPLES: [&str; 4] = ["a=60, b=z", "a=20, b=x", "a=90, b=x", "a=70, b=z"];
 
 #[test]
 fn sample_values_are_typed() -> TestResult {
@@ -239,7 +245,11 @@ fn sample_returns_the_batch_size() -> TestResult {
     for batch in [0, 1, 7] {
         let samples = sample(&golden_run(), 3, manifest.params(), batch)?;
         assert_eq!(samples.len(), usize::try_from(batch)?);
-        assert!(samples.iter().all(|item| well_formed(manifest.params(), item)));
+        assert!(
+            samples
+                .iter()
+                .all(|item| well_formed(manifest.params(), item))
+        );
     }
     Ok(())
 }
