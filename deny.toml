@@ -62,9 +62,10 @@ deny = [
   # minos-loop -> minos-runner -> minos-sandbox passed), so every internal library crate needs its own entry.
   # The binaries (minos-vmm, minos-guest, minos-cli) need none: nothing depends on them.
   # Dev-dependency edges are in the checked graph too.
-  { crate = "minos-core", wrappers = ["minos-store", "minos-sandbox", "minos-backend-krun", "minos-guest", "minos-propose", "minos-runner", "minos-loop", "minos-cli"], reason = "core depends on no internal crate" },
+  { crate = "minos-core", wrappers = ["minos-store", "minos-sandbox", "minos-backend-krun", "minos-guest", "minos-propose", "minos-runner", "minos-loop", "minos-source", "minos-cli"], reason = "core depends on no internal crate" },
   { crate = "minos-store", wrappers = ["minos-runner", "minos-loop", "minos-cli"], reason = "layering" },
   { crate = "minos-sandbox", wrappers = ["minos-backend-krun", "minos-runner", "minos-cli"], reason = "core and loop never see sandbox types" },
+  { crate = "minos-source", wrappers = ["minos-cli"], reason = "layering: only the CLI packs a source tree (CLI-11); it execs git read-only for the clean check (04-CONTEXT D-02)" },
   { crate = "minos-backend-krun", wrappers = ["minos-cli"], reason = "only the CLI picks a concrete backend" },
   { crate = "minos-propose", wrappers = ["minos-loop", "minos-cli"], reason = "layering" },
   { crate = "minos-runner", wrappers = ["minos-cli"], reason = "loop defines JobRunner; the CLI adapts minos-runner to it, so neither depends on the other" },

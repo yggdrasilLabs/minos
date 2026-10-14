@@ -6,6 +6,7 @@ members = [
   "crates/minos-core",
   "crates/minos-store",
   "crates/minos-sandbox",
+  "crates/minos-source",
   "crates/minos-backend-krun",
   "crates/minos-propose",
   "crates/minos-runner",
@@ -71,6 +72,7 @@ broken_intra_doc_links = "deny"   # enforced by `cargo doc --workspace --no-deps
 minos-core         = { path = "crates/minos-core", version = "=0.1.0" }
 minos-store        = { path = "crates/minos-store", version = "=0.1.0" }
 minos-sandbox      = { path = "crates/minos-sandbox", version = "=0.1.0" }
+minos-source       = { path = "crates/minos-source", version = "=0.1.0" }
 minos-backend-krun = { path = "crates/minos-backend-krun", version = "=0.1.0" }
 minos-propose      = { path = "crates/minos-propose", version = "=0.1.0" }
 minos-runner       = { path = "crates/minos-runner", version = "=0.1.0" }

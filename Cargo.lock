@@ -754,15 +754,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "ignore",
  "minos-backend-krun",
  "minos-core",
  "minos-loop",
  "minos-propose",
  "minos-runner",
  "minos-sandbox",
+ "minos-source",
  "minos-store",
- "regex",
  "serde",
  "sha2",
  "tar",
@@ -834,10 +833,25 @@ dependencies = [
 name = "minos-sandbox"
 version = "0.1.0"
 dependencies = [
+ "base16ct",
  "minos-core",
+ "proptest",
  "tar",
  "thiserror",
  "trybuild",
+]
+
+[[package]]
+name = "minos-source"
+version = "0.1.0"
+dependencies = [
+ "ignore",
+ "minos-core",
+ "proptest",
+ "regex",
+ "tar",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

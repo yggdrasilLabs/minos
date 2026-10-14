@@ -1,0 +1,22 @@
+[package]
+name = "minos-source"
+description = "Deterministic, secret-scanned snapshot of a project's source tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+minos-core.workspace = true
+tar.workspace = true
+ignore.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest.workspace = true
