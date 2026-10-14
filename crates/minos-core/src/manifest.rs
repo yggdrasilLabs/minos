@@ -1,21 +1,61 @@
 //! `RawManifest` (the mirror of `minos.toml`) and the validated `Manifest` built from it.
 //!
-//! This module holds the manifest's leaf types. Each has private fields and one validating constructor, which
-//! serde reaches through `try_from`, so a value that exists is valid.
+//! Every raw table refuses unknown keys (toml reports the line and column), absent optional fields stay `None`
+//! in the raw structs, and [`Manifest::try_from`] is the only constructor of [`Manifest`]: serde reaches it
+//! through `try_from`, and [`Manifest::parse_toml`] calls it directly. It applies, in order:
+//!
+//! 1. Leaf validation, with dotted field paths: commands are argv arrays, budgets lie within `limits`, counts are
+//!    capped, and absent optional fields take their defaults (`stall_step`, `max_empty_generations`, and
+//!    `max_infra_failures` have minimums of 1, so the circuit breaker cannot be disabled; 03-CONTEXT D-13, D-14).
+//! 2. The surface (03-CONTEXT D-01): `writable` holds 1 to 64 exact files with no duplicates, `readable` has no
+//!    duplicates, and the two are disjoint as exact path sets.
+//! 3. Judge integrity: `writable` contains no judge path, and neither `program` nor the Dockerfile.
+//! 4. No `writable` or `readable` path lies under a `[source] exclude` entry (compared case-insensitively).
+//! 5. No two distinct paths among `writable`, `readable`, `program`, the Dockerfile, and the judge paths are equal
+//!    under ASCII case folding, which fails closed on a case-insensitive filesystem.
+//! 6. The policy is greedy (pareto and review are not in this release) with exactly one objective.
+//! 7. No metric name is shared among gates, objectives, and held-out metrics.
+//! 8. Params have unique names and live in writable files.
+//! 9. Proposers have one entry per tier, and at least one is eligible on manifest facts alone.
+//!
+//! **Judge paths** are the `[source] exclude` entries (rule 4) plus every judge argv entry that names a
+//! project-relative path: the program and every later argument, or the text after the first `=` of an option. An
+//! absolute path (`/out/score.json`, a path inside the VM image) contributes nothing; one leading `./` is
+//! stripped; what remains is a judge path if it is a valid [`RelPath`]. An entry that looks like a path (it has a
+//! `/` or `\`, or is `.` or `..`) but is not a valid [`RelPath`], and an option without `=` that has a `/` or
+//! `\`, is refused rather than ignored. So `["python3", "judge/score.py"]` makes `judge/score.py` a judge path,
+//! and it cannot be writable. Only the judge command is read this way, never build, run, or check.
+//!
+//! **The `[judge] version` integer** is a local label naming which pushed judge data the project uses. The
+//! recorded identity is [`JudgeVersion`]: the hash of that data's tree and the canonical judge spec. Judge data
+//! never lives in the project; it is pushed separately and never mounted for an agent or a candidate.
+//!
+//! **Images are digests** is enforced by `crate::image`, because the manifest names a Dockerfile and this
+//! module reads no file.
 
-use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::ModelId;
+use crate::id::{IdHasher, MetricName, ModelId, TreeId};
 use crate::limits::{
-    BATCH_MAX, BATCH_MIN, MAX_ANCHOR_BYTES, MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_CHOICE_BYTES,
-    MAX_CHOICES, MAX_MIN_IMPROVEMENT_PERCENT, MAX_NAME_BYTES, MAX_PARAM_POINTS, MAX_STAGE_MS,
-    MIN_STAGE_MS,
+    BATCH_MAX, BATCH_MIN, DEFAULT_JUDGE_MS, EMPTY_GENERATIONS_DEFAULT, EMPTY_GENERATIONS_MAX,
+    EMPTY_GENERATIONS_MIN, INFRA_FAILURES_DEFAULT, INFRA_FAILURES_MAX, INFRA_FAILURES_MIN,
+    MAX_ANCHOR_BYTES, MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_CHOICE_BYTES, MAX_CHOICES, MAX_EXCLUDES,
+    MAX_GATES, MAX_JUDGE_LABEL, MAX_MIN_IMPROVEMENT_PERCENT, MAX_NAME_BYTES, MAX_OBJECTIVES,
+    MAX_PARAM_POINTS, MAX_PARAMS, MAX_PROPOSERS, MAX_READABLE, MAX_SPEND_USD, MAX_STAGE_MS,
+    MAX_WRITABLE, MIN_STAGE_MS, STALL_STEP_DEFAULT, STALL_STEP_MAX, STALL_STEP_MIN,
+    TOKEN_CAP_DEFAULT, TOKEN_CAP_MAX, TOKEN_CAP_MIN, WIDTH_MAX, WIDTH_MIN,
 };
 use crate::path::RelPath;
+
+/// Domain of [`JudgeVersion`].
+const JUDGE_DOMAIN: &str = "minos/judge/v1";
+/// Micro-dollars per whole dollar, for the spend cap.
+const MICRO_PER_DOLLAR: u128 = 1_000_000;
 
 /// Longest project name, in bytes: it names directories and appears in reports.
 const MAX_PROJECT_NAME_BYTES: usize = 64;
@@ -62,6 +102,11 @@ impl InvalidField {
     /// An invalid field with its dotted path and the allowed range in words.
     const fn new(field: &'static str, limit: &'static str) -> Self {
         Self { field, limit }
+    }
+
+    /// A [`ValueError`] attributed to the dotted field path `field`.
+    const fn at(field: &'static str, error: ValueError) -> Self {
+        Self::new(field, error.limit)
     }
 
     /// Dotted path of the offending field, such as `budget.build`.
@@ -270,6 +315,11 @@ impl TryFrom<Vec<String>> for CommandArgv {
 pub struct DurationMs(u64);
 
 impl DurationMs {
+    /// A duration the core itself chose, such as a default. It must lie within the stage bounds.
+    const fn from_const(ms: u64) -> Self {
+        Self(ms)
+    }
+
     /// Parses `90s`, `2m`, or `1h`.
     ///
     /// # Errors
@@ -555,7 +605,7 @@ impl ProposerSpec {
     /// Eligibility from manifest facts alone: a sweep needs a param, single-shot needs a model, and planned and
     /// agentic are not in this release. Routing adds the checks that need file sizes.
     #[must_use]
-    pub const fn declared_eligibility(&self, params: &[SweepParam]) -> Eligibility {
+    pub fn declared_eligibility(&self, params: &[SweepParam]) -> Eligibility {
         match self.tier {
             Tier::Sweep if params.is_empty() => Eligibility::Ineligible(IneligibleReason::NoParams),
             Tier::SingleShot if self.model.is_none() => {
@@ -844,5 +894,1086 @@ impl fmt::Display for SourceExclude {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.path.as_str())?;
         if self.dir { f.write_str("/") } else { Ok(()) }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Raw manifest: minos.toml as written
+// ---------------------------------------------------------------------------------------------------------------
+
+/// `minos.toml` as written. Every table refuses unknown keys; absent optional tables and fields stay `None`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawManifest {
+    project: RawProject,
+    surface: RawSurface,
+    source: Option<RawSource>,
+    environment: RawEnvironment,
+    commands: RawCommands,
+    budget: RawBudget,
+    judge: RawJudge,
+    policy: RawPolicy,
+    proposer: Vec<RawProposer>,
+    param: Option<Vec<RawParam>>,
+}
+
+/// `[project]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawProject {
+    name: ProjectName,
+    kind: ProjectKind,
+    program: RelPath,
+}
+
+/// `[surface]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawSurface {
+    writable: Vec<RelPath>,
+    readable: Option<Vec<RelPath>>,
+}
+
+/// `[source]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawSource {
+    exclude: Option<Vec<String>>,
+}
+
+/// `[environment]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawEnvironment {
+    dockerfile: RelPath,
+    requires: RawRequires,
+}
+
+/// `[environment] requires` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawRequires {
+    arch: Arch,
+}
+
+/// `[commands]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawCommands {
+    build: Vec<String>,
+    run: Vec<String>,
+    check: Option<Vec<String>>,
+}
+
+/// `[budget]` as written. `spend_usd` is a whole-dollar integer, so a float literal is a toml type error.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBudget {
+    build: String,
+    run: String,
+    judge: Option<String>,
+    spend_usd: u64,
+    max_tokens: Option<u64>,
+    max_empty_generations: Option<u32>,
+    max_infra_failures: Option<u32>,
+}
+
+/// `[judge]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawJudge {
+    version: u32,
+    command: Vec<String>,
+    gate: Option<Vec<RawGate>>,
+    objective: Vec<RawObjective>,
+}
+
+/// `[[judge.gate]]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawGate {
+    metric: MetricName,
+}
+
+/// `[[judge.objective]]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawObjective {
+    metric: MetricName,
+    goal: Goal,
+    min_improvement: String,
+    held_out: Option<MetricName>,
+}
+
+/// `[policy]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawPolicy {
+    kind: RawPolicyKind,
+    width: u32,
+    stall_step: Option<u32>,
+}
+
+/// `[policy] kind` as written. Only greedy is available in this release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RawPolicyKind {
+    /// Keep the best candidate that beats the incumbent by `min_improvement`.
+    Greedy,
+    /// Keep the Pareto front. Not in this release.
+    Pareto,
+    /// Ask the user each generation. Not in this release.
+    Review,
+}
+
+/// `[[proposer]]` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawProposer {
+    kind: Tier,
+    model: Option<ModelId>,
+    batch: u32,
+}
+
+/// `[[param]]` as written: either integer `min`, `max`, and `step`, or `choices`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawParam {
+    name: ParamName,
+    file: RelPath,
+    anchor: String,
+    min: Option<i64>,
+    max: Option<i64>,
+    step: Option<i64>,
+    choices: Option<Vec<String>>,
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Validated manifest
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Stage budgets, spend, and circuit-breaker limits, all within `limits`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budget {
+    build: DurationMs,
+    run: DurationMs,
+    judge: DurationMs,
+    spend_usd: u64,
+    max_tokens: u64,
+    max_empty_generations: u32,
+    max_infra_failures: u32,
+}
+
+impl Budget {
+    /// The build stage budget, in milliseconds.
+    #[must_use]
+    pub const fn build_ms(&self) -> u64 {
+        self.build.as_ms()
+    }
+
+    /// The run stage budget, in milliseconds.
+    #[must_use]
+    pub const fn run_ms(&self) -> u64 {
+        self.run.as_ms()
+    }
+
+    /// The judge stage budget, in milliseconds.
+    #[must_use]
+    pub const fn judge_ms(&self) -> u64 {
+        self.judge.as_ms()
+    }
+
+    /// The run's spend cap, in whole US dollars.
+    #[must_use]
+    pub const fn spend_usd(&self) -> u64 {
+        self.spend_usd
+    }
+
+    /// The run's spend cap, in micro-dollars, for comparison against metered spend.
+    #[must_use]
+    pub const fn spend_cap_micro(&self) -> u128 {
+        self.spend_usd as u128 * MICRO_PER_DOLLAR
+    }
+
+    /// The run's token cap.
+    #[must_use]
+    pub const fn max_tokens(&self) -> u64 {
+        self.max_tokens
+    }
+
+    /// Consecutive generations with no valid candidate before the breaker stops the run.
+    #[must_use]
+    pub const fn max_empty_generations(&self) -> u32 {
+        self.max_empty_generations
+    }
+
+    /// Consecutive infrastructure failures before the breaker stops the run.
+    #[must_use]
+    pub const fn max_infra_failures(&self) -> u32 {
+        self.max_infra_failures
+    }
+}
+
+/// The selection policy: greedy, with its width and routing stall step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicySpec {
+    width: u32,
+    stall_step: u32,
+}
+
+impl PolicySpec {
+    /// Candidates per generation.
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Generations without improvement before routing moves up one tier.
+    #[must_use]
+    pub const fn stall_step(&self) -> u32 {
+        self.stall_step
+    }
+}
+
+/// One objective: a metric, its direction, its threshold, and an optional held-out metric paired with it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Objective {
+    metric: MetricName,
+    goal: Goal,
+    min_improvement: MinImprovement,
+    held_out: Option<MetricName>,
+}
+
+impl Objective {
+    /// The metric the judge reports.
+    #[must_use]
+    pub const fn metric(&self) -> &MetricName {
+        &self.metric
+    }
+
+    /// Which direction is better.
+    #[must_use]
+    pub const fn goal(&self) -> Goal {
+        self.goal
+    }
+
+    /// The smallest improvement that counts.
+    #[must_use]
+    pub const fn min_improvement(&self) -> &MinImprovement {
+        &self.min_improvement
+    }
+
+    /// The held-out metric paired with this objective, if any.
+    #[must_use]
+    pub const fn held_out(&self) -> Option<&MetricName> {
+        self.held_out.as_ref()
+    }
+}
+
+/// The judge: its local label, its argv, the project paths that argv names, its gates, and its objectives.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JudgeSpec {
+    label: u32,
+    command: CommandArgv,
+    paths: BTreeSet<RelPath>,
+    gates: BTreeSet<MetricName>,
+    objectives: Vec<Objective>,
+}
+
+impl JudgeSpec {
+    /// The `[judge] version` label: which pushed judge data the project uses. Not part of [`JudgeVersion`].
+    #[must_use]
+    pub const fn label(&self) -> u32 {
+        self.label
+    }
+
+    /// The judge's argv.
+    #[must_use]
+    pub const fn command(&self) -> &CommandArgv {
+        &self.command
+    }
+
+    /// The project-relative path the judge's first entry names, if any.
+    #[must_use]
+    pub const fn program(&self) -> Option<&RelPath> {
+        self.command.program()
+    }
+
+    /// Every project-relative path the judge command names, the program included.
+    #[must_use]
+    pub const fn paths(&self) -> &BTreeSet<RelPath> {
+        &self.paths
+    }
+
+    /// The gate metrics, each of which must pass.
+    #[must_use]
+    pub const fn gates(&self) -> &BTreeSet<MetricName> {
+        &self.gates
+    }
+
+    /// The objectives, sorted by metric.
+    #[must_use]
+    pub fn objectives(&self) -> &[Objective] {
+        &self.objectives
+    }
+
+    /// The held-out metrics paired with objectives.
+    #[must_use]
+    pub fn held_out_metrics(&self) -> BTreeSet<MetricName> {
+        self.objectives
+            .iter()
+            .filter_map(|objective| objective.held_out.clone())
+            .collect()
+    }
+
+    /// Every metric the judge declares: gates, objectives, and held-out metrics.
+    #[must_use]
+    pub fn declared_metrics(&self) -> BTreeSet<MetricName> {
+        let mut metrics = self.gates.clone();
+        metrics.extend(
+            self.objectives
+                .iter()
+                .map(|objective| objective.metric.clone()),
+        );
+        metrics.extend(self.held_out_metrics());
+        metrics
+    }
+}
+
+/// The build environment: the project's Dockerfile and the guest architecture it targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Environment {
+    dockerfile: RelPath,
+    arch: Arch,
+}
+
+impl Environment {
+    /// The Dockerfile, relative to the project.
+    #[must_use]
+    pub const fn dockerfile(&self) -> &RelPath {
+        &self.dockerfile
+    }
+
+    /// The guest architecture.
+    #[must_use]
+    pub const fn arch(&self) -> Arch {
+        self.arch
+    }
+}
+
+/// The project's commands, each an argv array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commands {
+    build: CommandArgv,
+    run: CommandArgv,
+    check: Option<CommandArgv>,
+}
+
+impl Commands {
+    /// The build command.
+    #[must_use]
+    pub const fn build(&self) -> &CommandArgv {
+        &self.build
+    }
+
+    /// The run command.
+    #[must_use]
+    pub const fn run(&self) -> &CommandArgv {
+        &self.run
+    }
+
+    /// The optional quick check command.
+    #[must_use]
+    pub const fn check(&self) -> Option<&CommandArgv> {
+        self.check.as_ref()
+    }
+}
+
+/// A validated `minos.toml`. If a value exists, every rule in the [module docs](self) holds.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "RawManifest")]
+pub struct Manifest {
+    name: ProjectName,
+    kind: ProjectKind,
+    program: RelPath,
+    writable: BTreeSet<RelPath>,
+    readable: BTreeSet<RelPath>,
+    excludes: Vec<SourceExclude>,
+    environment: Environment,
+    commands: Commands,
+    budget: Budget,
+    judge: JudgeSpec,
+    objective: Objective,
+    policy: PolicySpec,
+    proposers: Vec<ProposerSpec>,
+    params: Vec<SweepParam>,
+}
+
+impl Manifest {
+    /// Parses and validates the text of a `minos.toml` file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManifestError::Toml`] for a syntax error, a wrong type, a missing field, an unknown key, or a
+    /// leaf value that fails its own grammar, and any other [`ManifestError`] for a rule in the
+    /// [module docs](self).
+    pub fn parse_toml(text: &str) -> Result<Self, ManifestError> {
+        let raw: RawManifest = toml::from_str(text).map_err(ManifestError::Toml)?;
+        Self::try_from(raw)
+    }
+
+    /// The project name.
+    #[must_use]
+    pub const fn name(&self) -> &ProjectName {
+        &self.name
+    }
+
+    /// The project kind.
+    #[must_use]
+    pub const fn kind(&self) -> ProjectKind {
+        self.kind
+    }
+
+    /// The user's instructions to the proposer, relative to the project.
+    #[must_use]
+    pub const fn program(&self) -> &RelPath {
+        &self.program
+    }
+
+    /// The files a proposal may change: exact paths, never prefixes.
+    #[must_use]
+    pub const fn writable(&self) -> &BTreeSet<RelPath> {
+        &self.writable
+    }
+
+    /// The files a proposer may read but not change.
+    #[must_use]
+    pub const fn readable(&self) -> &BTreeSet<RelPath> {
+        &self.readable
+    }
+
+    /// Every surface file: writable and readable together.
+    #[must_use]
+    pub fn surface(&self) -> BTreeSet<RelPath> {
+        self.writable.union(&self.readable).cloned().collect()
+    }
+
+    /// The `[source] exclude` entries, sorted and without duplicates.
+    #[must_use]
+    pub fn excludes(&self) -> &[SourceExclude] {
+        &self.excludes
+    }
+
+    /// The build environment.
+    #[must_use]
+    pub const fn environment(&self) -> &Environment {
+        &self.environment
+    }
+
+    /// The project's commands.
+    #[must_use]
+    pub const fn commands(&self) -> &Commands {
+        &self.commands
+    }
+
+    /// Budgets and breaker limits.
+    #[must_use]
+    pub const fn budget(&self) -> &Budget {
+        &self.budget
+    }
+
+    /// The judge.
+    #[must_use]
+    pub const fn judge(&self) -> &JudgeSpec {
+        &self.judge
+    }
+
+    /// The single objective the greedy policy optimizes.
+    #[must_use]
+    pub const fn objective(&self) -> &Objective {
+        &self.objective
+    }
+
+    /// The selection policy.
+    #[must_use]
+    pub const fn policy(&self) -> &PolicySpec {
+        &self.policy
+    }
+
+    /// The declared proposers, one per tier, in tier order.
+    #[must_use]
+    pub fn proposers(&self) -> &[ProposerSpec] {
+        &self.proposers
+    }
+
+    /// The declared sweep params, in declaration order.
+    #[must_use]
+    pub fn params(&self) -> &[SweepParam] {
+        &self.params
+    }
+}
+
+/// Why a manifest was refused. Variants carry field paths, counts, and validated values, never raw text.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestError {
+    /// The text is not a well-formed manifest: syntax, a type, a missing field, an unknown key, or a leaf
+    /// grammar. `minos.toml` is the user's own file, so toml's located message is kept whole.
+    #[error("minos.toml: {0}")]
+    Toml(#[source] toml::de::Error),
+    /// A field is outside its allowed range.
+    #[error(transparent)]
+    Field(#[from] InvalidField),
+    /// A path list names the same path twice.
+    #[error("{field} lists {path} twice")]
+    DuplicatePath {
+        /// Dotted path of the list.
+        field: &'static str,
+        /// The repeated path.
+        path: RelPath,
+    },
+    /// A writable path is also readable, a judge path, the program, or the Dockerfile.
+    #[error("{path} is writable, so it cannot also be in {with}")]
+    Overlap {
+        /// The writable path.
+        path: RelPath,
+        /// Dotted path of the field it collides with.
+        with: &'static str,
+    },
+    /// Two distinct paths are equal under ASCII case folding.
+    #[error(
+        "{first} and {second} differ only in ASCII case, so they collide on a case-insensitive filesystem"
+    )]
+    CaseFoldCollision {
+        /// The path that sorts first.
+        first: RelPath,
+        /// The path that sorts second.
+        second: RelPath,
+    },
+    /// A surface path lies under a `[source] exclude` entry.
+    #[error("{field} lists {path}, which a [source] exclude entry covers")]
+    Excluded {
+        /// Dotted path of the surface list.
+        field: &'static str,
+        /// The excluded path.
+        path: RelPath,
+    },
+    /// The policy kind is not available in this release.
+    #[error("policy kind {kind} is not available in this release; use greedy")]
+    PolicyNotAvailable {
+        /// The kind as written.
+        kind: &'static str,
+    },
+    /// The greedy policy needs exactly one objective.
+    #[error("the greedy policy needs exactly one [[judge.objective]], found {objectives}")]
+    PolicyObjectiveMismatch {
+        /// How many objectives the manifest declares.
+        objectives: usize,
+    },
+    /// A metric name is declared more than once among gates, objectives, and held-out metrics.
+    #[error(
+        "metric {metric} is declared more than once among gates, objectives, and held-out metrics"
+    )]
+    DuplicateMetric {
+        /// The repeated metric.
+        metric: MetricName,
+    },
+    /// Two params share a name.
+    #[error("param {name} is declared more than once")]
+    DuplicateParam {
+        /// The repeated name.
+        name: ParamName,
+    },
+    /// A param lives in a file that is not writable.
+    #[error("param {name} lives in a file that is not in surface.writable")]
+    ParamFileNotWritable {
+        /// The param's name.
+        name: ParamName,
+    },
+    /// No declared proposer is eligible on manifest facts alone.
+    #[error("no declared proposer is eligible; minos check prints the reason for each tier")]
+    NoEligibleTier,
+    /// A judge argv entry looks like a path but is not a valid relative path.
+    #[error("judge.command entry {index} looks like a path but is not a valid relative path")]
+    JudgeArgPath {
+        /// Zero-based argv index of the entry.
+        index: usize,
+    },
+}
+
+/// A command field, with a [`ValueError`] attributed to `field`.
+fn argv_at(field: &'static str, argv: Vec<String>) -> Result<CommandArgv, InvalidField> {
+    CommandArgv::try_from(argv).map_err(|error| InvalidField::at(field, error))
+}
+
+/// A duration field, with a [`ValueError`] attributed to `field`.
+fn duration_at(field: &'static str, text: &str) -> Result<DurationMs, InvalidField> {
+    DurationMs::parse(text).map_err(|error| InvalidField::at(field, error))
+}
+
+/// An optional bounded integer: the default when absent, else the value if it lies within `min..=max`.
+fn bounded<T: PartialOrd + Copy>(
+    field: &'static str,
+    value: Option<T>,
+    (min, max, default): (T, T, T),
+    limit: &'static str,
+) -> Result<T, InvalidField> {
+    let value = value.unwrap_or(default);
+    if min <= value && value <= max {
+        Ok(value)
+    } else {
+        Err(InvalidField::new(field, limit))
+    }
+}
+
+/// Checks a list's length against `min..=max`.
+const fn count(
+    field: &'static str,
+    len: usize,
+    min: usize,
+    max: usize,
+    limit: &'static str,
+) -> Result<(), InvalidField> {
+    if min <= len && len <= max {
+        Ok(())
+    } else {
+        Err(InvalidField::new(field, limit))
+    }
+}
+
+/// A path list as a set, refusing a duplicate.
+fn path_set(field: &'static str, paths: Vec<RelPath>) -> Result<BTreeSet<RelPath>, ManifestError> {
+    let mut set = BTreeSet::new();
+    for path in paths {
+        if set.contains(&path) {
+            return Err(ManifestError::DuplicatePath { field, path });
+        }
+        set.insert(path);
+    }
+    Ok(set)
+}
+
+fn budget_from(raw: RawBudget) -> Result<Budget, InvalidField> {
+    let build = duration_at("budget.build", &raw.build)?;
+    let run = duration_at("budget.run", &raw.run)?;
+    let judge = match raw.judge {
+        Some(text) => duration_at("budget.judge", &text)?,
+        None => DurationMs::from_const(DEFAULT_JUDGE_MS),
+    };
+    if raw.spend_usd > MAX_SPEND_USD {
+        return Err(InvalidField::new(
+            "budget.spend_usd",
+            "at most 10000 whole US dollars",
+        ));
+    }
+    Ok(Budget {
+        build,
+        run,
+        judge,
+        spend_usd: raw.spend_usd,
+        max_tokens: bounded(
+            "budget.max_tokens",
+            raw.max_tokens,
+            (TOKEN_CAP_MIN, TOKEN_CAP_MAX, TOKEN_CAP_DEFAULT),
+            "1000 to 1000000000",
+        )?,
+        max_empty_generations: bounded(
+            "budget.max_empty_generations",
+            raw.max_empty_generations,
+            (
+                EMPTY_GENERATIONS_MIN,
+                EMPTY_GENERATIONS_MAX,
+                EMPTY_GENERATIONS_DEFAULT,
+            ),
+            "1 to 20",
+        )?,
+        max_infra_failures: bounded(
+            "budget.max_infra_failures",
+            raw.max_infra_failures,
+            (
+                INFRA_FAILURES_MIN,
+                INFRA_FAILURES_MAX,
+                INFRA_FAILURES_DEFAULT,
+            ),
+            "1 to 20",
+        )?,
+    })
+}
+
+fn objective_from(raw: RawObjective) -> Result<Objective, InvalidField> {
+    let min_improvement = MinImprovement::parse(&raw.min_improvement)
+        .map_err(|error| InvalidField::at("judge.objective.min_improvement", error))?;
+    Ok(Objective {
+        metric: raw.metric,
+        goal: raw.goal,
+        min_improvement,
+        held_out: raw.held_out,
+    })
+}
+
+fn param_from(raw: RawParam) -> Result<SweepParam, InvalidField> {
+    let domain = match (raw.min, raw.max, raw.step, raw.choices) {
+        (Some(min), Some(max), Some(step), None) => {
+            ParamDomain::Int(IntRange::new(min, max, step)?)
+        }
+        (None, None, None, Some(choices)) => ParamDomain::Choices(ChoiceList::new(choices)?),
+        _ => {
+            return Err(InvalidField::new(
+                "param",
+                "either min, max, and step together, or choices",
+            ));
+        }
+    };
+    SweepParam::new(raw.name, raw.file, raw.anchor, domain)
+}
+
+/// Every project-relative path the judge command names (see the [module docs](self)).
+fn judge_paths(command: &CommandArgv) -> Result<BTreeSet<RelPath>, ManifestError> {
+    let path_like = |text: &str| text.contains(['/', '\\']);
+    let mut paths = BTreeSet::new();
+    for (index, entry) in command.as_slice().iter().enumerate() {
+        let candidate = if entry.starts_with('-') {
+            match entry.split_once('=') {
+                Some((_, value)) => value,
+                None if path_like(entry) => return Err(ManifestError::JudgeArgPath { index }),
+                None => continue,
+            }
+        } else {
+            entry.as_str()
+        };
+        if candidate.starts_with('/') {
+            continue;
+        }
+        let stripped = candidate.strip_prefix("./").unwrap_or(candidate);
+        if let Ok(path) = RelPath::try_from(stripped) {
+            paths.insert(path);
+        } else if path_like(candidate) || matches!(stripped, "." | "..") {
+            return Err(ManifestError::JudgeArgPath { index });
+        }
+    }
+    Ok(paths)
+}
+
+/// Refuses two distinct paths that are equal under ASCII case folding.
+fn check_case_fold<'a>(paths: impl IntoIterator<Item = &'a RelPath>) -> Result<(), ManifestError> {
+    let distinct: BTreeSet<&RelPath> = paths.into_iter().collect();
+    let mut seen: BTreeMap<String, &RelPath> = BTreeMap::new();
+    for path in distinct {
+        match seen.entry(path.ascii_case_key()) {
+            Entry::Occupied(entry) => {
+                return Err(ManifestError::CaseFoldCollision {
+                    first: (*entry.get()).clone(),
+                    second: path.clone(),
+                });
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(path);
+            }
+        }
+    }
+    Ok(())
+}
+
+impl TryFrom<RawManifest> for Manifest {
+    type Error = ManifestError;
+
+    fn try_from(raw: RawManifest) -> Result<Self, Self::Error> {
+        let RawManifest {
+            project,
+            surface,
+            source,
+            environment,
+            commands,
+            budget,
+            judge,
+            policy,
+            proposer,
+            param,
+        } = raw;
+
+        // 1. Leaf validation.
+        let commands = Commands {
+            build: argv_at("commands.build", commands.build)?,
+            run: argv_at("commands.run", commands.run)?,
+            check: commands
+                .check
+                .map(|check| argv_at("commands.check", check))
+                .transpose()?,
+        };
+        let budget = budget_from(budget)?;
+        if !(WIDTH_MIN..=WIDTH_MAX).contains(&policy.width) {
+            return Err(InvalidField::new("policy.width", "1 to 16").into());
+        }
+        let policy_spec = PolicySpec {
+            width: policy.width,
+            stall_step: bounded(
+                "policy.stall_step",
+                policy.stall_step,
+                (STALL_STEP_MIN, STALL_STEP_MAX, STALL_STEP_DEFAULT),
+                "1 to 100",
+            )?,
+        };
+        if !(1..=MAX_JUDGE_LABEL).contains(&judge.version) {
+            return Err(InvalidField::new("judge.version", "1 to 1000000").into());
+        }
+        let command = argv_at("judge.command", judge.command)?;
+        let gates = judge.gate.unwrap_or_default();
+        count("judge.gate", gates.len(), 0, MAX_GATES, "at most 16 gates")?;
+        count(
+            "judge.objective",
+            judge.objective.len(),
+            0,
+            MAX_OBJECTIVES,
+            "at most 8 objectives",
+        )?;
+        let objectives = judge
+            .objective
+            .into_iter()
+            .map(objective_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        count(
+            "proposer",
+            proposer.len(),
+            1,
+            MAX_PROPOSERS,
+            "1 to 4 entries",
+        )?;
+        let mut proposers = proposer
+            .into_iter()
+            .map(|raw| ProposerSpec::new(raw.kind, raw.model, raw.batch))
+            .collect::<Result<Vec<_>, _>>()?;
+        let params = param.unwrap_or_default();
+        count("param", params.len(), 0, MAX_PARAMS, "at most 32 params")?;
+        let params = params
+            .into_iter()
+            .map(param_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let excludes = source.and_then(|source| source.exclude).unwrap_or_default();
+        count(
+            "source.exclude",
+            excludes.len(),
+            0,
+            MAX_EXCLUDES,
+            "at most 256 entries",
+        )?;
+        let excludes: BTreeSet<SourceExclude> = excludes
+            .iter()
+            .map(|text| {
+                SourceExclude::parse(text)
+                    .map_err(|error| InvalidField::at("source.exclude", error))
+            })
+            .collect::<Result<_, _>>()?;
+
+        // 2. The surface: exact files, no duplicates, writable and readable disjoint (D-01).
+        count(
+            "surface.writable",
+            surface.writable.len(),
+            1,
+            MAX_WRITABLE,
+            "1 to 64 files",
+        )?;
+        let writable = path_set("surface.writable", surface.writable)?;
+        let readable = surface.readable.unwrap_or_default();
+        count(
+            "surface.readable",
+            readable.len(),
+            0,
+            MAX_READABLE,
+            "at most 256 files",
+        )?;
+        let readable = path_set("surface.readable", readable)?;
+        if let Some(path) = writable.intersection(&readable).next() {
+            return Err(ManifestError::Overlap {
+                path: path.clone(),
+                with: "surface.readable",
+            });
+        }
+
+        // 3. Judge integrity: nothing the judge command names, and neither program nor Dockerfile, is writable.
+        let paths = judge_paths(&command)?;
+        let program = project.program;
+        let dockerfile = environment.dockerfile;
+        let protected = [
+            (paths.iter().collect::<Vec<_>>(), "judge.command"),
+            (vec![&program], "project.program"),
+            (vec![&dockerfile], "environment.dockerfile"),
+        ];
+        for (named, with) in protected {
+            if let Some(path) = named.into_iter().find(|path| writable.contains(*path)) {
+                return Err(ManifestError::Overlap {
+                    path: path.clone(),
+                    with,
+                });
+            }
+        }
+
+        // 4. No surface path under an exclude entry.
+        for (field, set) in [
+            ("surface.writable", &writable),
+            ("surface.readable", &readable),
+        ] {
+            if let Some(path) = set
+                .iter()
+                .find(|path| excludes.iter().any(|exclude| exclude.covers(path)))
+            {
+                return Err(ManifestError::Excluded {
+                    field,
+                    path: path.clone(),
+                });
+            }
+        }
+
+        // 5. Case-fold collisions across every path the project names.
+        check_case_fold(
+            writable
+                .iter()
+                .chain(&readable)
+                .chain([&program, &dockerfile])
+                .chain(&paths),
+        )?;
+
+        // 6. Policy.
+        match policy.kind {
+            RawPolicyKind::Greedy => {}
+            RawPolicyKind::Pareto => {
+                return Err(ManifestError::PolicyNotAvailable { kind: "pareto" });
+            }
+            RawPolicyKind::Review => {
+                return Err(ManifestError::PolicyNotAvailable { kind: "review" });
+            }
+        }
+        let objective = match objectives.as_slice() {
+            [only] => only.clone(),
+            other => {
+                return Err(ManifestError::PolicyObjectiveMismatch {
+                    objectives: other.len(),
+                });
+            }
+        };
+
+        // 7. Metric names are unique across gates, objectives, and held-out metrics.
+        let mut metrics = BTreeSet::new();
+        let declared = gates
+            .iter()
+            .map(|gate| &gate.metric)
+            .chain(objectives.iter().flat_map(|objective| {
+                std::iter::once(&objective.metric).chain(objective.held_out.as_ref())
+            }));
+        for metric in declared {
+            if !metrics.insert(metric) {
+                return Err(ManifestError::DuplicateMetric {
+                    metric: metric.clone(),
+                });
+            }
+        }
+
+        // 8. Params: unique names, each in a writable file.
+        let mut names = BTreeSet::new();
+        for param in &params {
+            if !names.insert(param.name()) {
+                return Err(ManifestError::DuplicateParam {
+                    name: param.name().clone(),
+                });
+            }
+            if !writable.contains(param.file()) {
+                return Err(ManifestError::ParamFileNotWritable {
+                    name: param.name().clone(),
+                });
+            }
+        }
+
+        // 9. Proposers: one per tier, at least one eligible.
+        proposers.sort_by_key(ProposerSpec::tier);
+        if proposers
+            .windows(2)
+            .any(|pair| matches!(pair, [first, second] if first.tier() == second.tier()))
+        {
+            return Err(InvalidField::new("proposer.kind", "one entry per tier").into());
+        }
+        if !proposers
+            .iter()
+            .any(|spec| spec.declared_eligibility(&params) == Eligibility::Eligible)
+        {
+            return Err(ManifestError::NoEligibleTier);
+        }
+
+        let mut objectives = objectives;
+        objectives.sort_by(|left, right| left.metric.cmp(&right.metric));
+        let judge = JudgeSpec {
+            label: judge.version,
+            command,
+            paths,
+            gates: gates.into_iter().map(|gate| gate.metric).collect(),
+            objectives,
+        };
+        Ok(Self {
+            name: project.name,
+            kind: project.kind,
+            program,
+            writable,
+            readable,
+            excludes: excludes.into_iter().collect(),
+            environment: Environment {
+                dockerfile,
+                arch: environment.requires.arch,
+            },
+            commands,
+            budget,
+            judge,
+            objective,
+            policy: policy_spec,
+            proposers,
+            params,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// JudgeVersion
+// ---------------------------------------------------------------------------------------------------------------
+
+crate::id::digest_id! {
+    /// The identity of a judge: the judge data tree plus the canonical judge spec, under the domain
+    /// `minos/judge/v1` (CORE-01; 03-CONTEXT D-10 amendment, user decision 2026-10-14).
+    ///
+    /// The spec is the command argv, the gates in sorted order, and the objectives in metric order with each
+    /// goal and held-out pairing. The `[judge] version` label and `min_improvement` are excluded: they do not
+    /// change what the judge measures. `Judged` events are keyed by it, so re-scoring under another judge
+    /// appends records and never rewrites history.
+    JudgeVersion
+}
+
+impl JudgeVersion {
+    /// The version of `judge` scoring with the pushed judge data `data`.
+    ///
+    /// Fields, in order: the data digest; the argv count and each entry, length-prefixed; the gate count and each
+    /// gate; the objective count and, per objective, its metric, `1` for maximize or `2` for minimize, and `0`
+    /// with no held-out pairing or `1` followed by the held-out metric.
+    #[must_use]
+    pub fn of(data: &TreeId, judge: &JudgeSpec) -> Self {
+        let argv = judge.command.as_slice();
+        let mut hasher = IdHasher::new(JUDGE_DOMAIN)
+            .digest(data.as_bytes())
+            .u64(argv.len() as u64);
+        for entry in argv {
+            hasher = hasher.bytes(entry.as_bytes());
+        }
+        hasher = hasher.u64(judge.gates.len() as u64);
+        for gate in &judge.gates {
+            hasher = hasher.bytes(gate.as_str().as_bytes());
+        }
+        hasher = hasher.u64(judge.objectives.len() as u64);
+        for objective in &judge.objectives {
+            let goal = match objective.goal {
+                Goal::Maximize => 1,
+                Goal::Minimize => 2,
+            };
+            hasher = hasher.bytes(objective.metric.as_str().as_bytes()).u64(goal);
+            hasher = match &objective.held_out {
+                Some(held_out) => hasher.u64(1).bytes(held_out.as_str().as_bytes()),
+                None => hasher.u64(0),
+            };
+        }
+        Self::from_digest(hasher.finish())
     }
 }

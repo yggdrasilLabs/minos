@@ -707,7 +707,11 @@ fn example_with_judge_command(command: &str) -> Result<String, Box<dyn Error>> {
         r#"exclude = ["judge/", "docs/", "target/"]"#,
         r#"exclude = ["docs/", "target/"]"#,
     )?;
-    edit(&text, r#"command = ["./judge"]"#, &format!("command = {command}"))
+    edit(
+        &text,
+        r#"command = ["./judge"]"#,
+        &format!("command = {command}"),
+    )
 }
 
 fn rejected(text: &str) -> Result<ManifestError, Box<dyn Error>> {
@@ -748,13 +752,26 @@ fn claude_example_parses() -> TestResult {
     assert_eq!(strings(manifest.writable()), ["src/parse.rs"]);
     assert_eq!(strings(manifest.readable()), ["src/lib.rs"]);
     assert_eq!(strings(&manifest.surface()), ["src/lib.rs", "src/parse.rs"]);
-    let excludes: Vec<String> = manifest.excludes().iter().map(ToString::to_string).collect();
+    let excludes: Vec<String> = manifest
+        .excludes()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     assert_eq!(excludes, ["docs/", "judge/", "target/"]);
-    assert_eq!(manifest.environment().dockerfile(), &path("minos.Dockerfile")?);
+    assert_eq!(
+        manifest.environment().dockerfile(),
+        &path("minos.Dockerfile")?
+    );
     assert_eq!(manifest.environment().arch(), Arch::Arm64);
     let commands = manifest.commands();
-    assert_eq!(commands.build().as_slice(), argv(&["cargo", "build", "--release"]).as_slice());
-    assert_eq!(commands.run().program(), Some(&path("target/release/bench")?));
+    assert_eq!(
+        commands.build().as_slice(),
+        argv(&["cargo", "build", "--release"]).as_slice()
+    );
+    assert_eq!(
+        commands.run().program(),
+        Some(&path("target/release/bench")?)
+    );
     assert_eq!(
         commands.check().map(CommandArgv::as_slice),
         Some(argv(&["cargo", "check"]).as_slice())
@@ -777,7 +794,11 @@ fn claude_example_parses() -> TestResult {
     assert_eq!(gates, ["identical_output"]);
     assert_eq!(judge.objectives().len(), 1);
     assert!(judge.held_out_metrics().is_empty());
-    let declared: Vec<String> = judge.declared_metrics().iter().map(ToString::to_string).collect();
+    let declared: Vec<String> = judge
+        .declared_metrics()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     assert_eq!(declared, ["identical_output", "throughput_mb_s"]);
     let objective = manifest.objective();
     assert_eq!(objective.metric().as_str(), "throughput_mb_s");
@@ -821,7 +842,11 @@ fn optional_fields_are_read_when_present() -> TestResult {
 #[test]
 fn absent_source_and_readable_are_empty() -> TestResult {
     let text = example("readable = [\"src/lib.rs\"]\n", "")?;
-    let text = edit(&text, "[source]\nexclude = [\"judge/\", \"docs/\", \"target/\"]\n", "")?;
+    let text = edit(
+        &text,
+        "[source]\nexclude = [\"judge/\", \"docs/\", \"target/\"]\n",
+        "",
+    )?;
     let manifest = Manifest::parse_toml(&text)?;
     assert!(manifest.readable().is_empty());
     assert!(manifest.excludes().is_empty());
@@ -961,7 +986,10 @@ fn rejects_writable_under_an_exclude_in_another_case() -> TestResult {
 
 #[test]
 fn rejects_a_case_fold_collision() -> TestResult {
-    let text = example(r#"writable = ["src/parse.rs"]"#, r#"writable = ["src/Parse.rs"]"#)?;
+    let text = example(
+        r#"writable = ["src/parse.rs"]"#,
+        r#"writable = ["src/Parse.rs"]"#,
+    )?;
     let text = edit(
         &text,
         r#"readable = ["src/lib.rs"]"#,
@@ -978,7 +1006,10 @@ fn rejects_a_case_fold_collision() -> TestResult {
 
 #[test]
 fn rejects_budgets_out_of_range() -> TestResult {
-    assert_field(&example(r#"build = "2m""#, r#"build = "0s""#)?, "budget.build")?;
+    assert_field(
+        &example(r#"build = "2m""#, r#"build = "0s""#)?,
+        "budget.build",
+    )?;
     assert_field(&example(r#"run = "5m""#, r#"run = "61m""#)?, "budget.run")?;
     assert_field(
         &example("spend_usd = 40\n", "spend_usd = 40\njudge = \"0s\"\n")?,
@@ -992,7 +1023,10 @@ fn rejects_budgets_out_of_range() -> TestResult {
 
 #[test]
 fn rejects_spend_above_the_cap() -> TestResult {
-    assert_field(&example("spend_usd = 40", "spend_usd = 10001")?, "budget.spend_usd")?;
+    assert_field(
+        &example("spend_usd = 40", "spend_usd = 10001")?,
+        "budget.spend_usd",
+    )?;
     assert!(Manifest::parse_toml(&example("spend_usd = 40", "spend_usd = 10000")?).is_ok());
     Ok(())
 }
@@ -1012,7 +1046,10 @@ fn rejects_greedy_with_two_objectives() -> TestResult {
     )?;
     let error = rejected(&text)?;
     assert!(
-        matches!(error, ManifestError::PolicyObjectiveMismatch { objectives: 2 }),
+        matches!(
+            error,
+            ManifestError::PolicyObjectiveMismatch { objectives: 2 }
+        ),
         "got: {error}"
     );
     Ok(())
@@ -1024,10 +1061,17 @@ fn rejects_greedy_with_no_objective() -> TestResult {
         "[[judge.objective]]\nmetric = \"throughput_mb_s\"\ngoal = \"maximize\"\nmin_improvement = \"5%\"\n",
         "",
     )?;
-    let text = edit(&text, "command = [\"./judge\"]\n", "command = [\"./judge\"]\nobjective = []\n")?;
+    let text = edit(
+        &text,
+        "command = [\"./judge\"]\n",
+        "command = [\"./judge\"]\nobjective = []\n",
+    )?;
     let error = rejected(&text)?;
     assert!(
-        matches!(error, ManifestError::PolicyObjectiveMismatch { objectives: 0 }),
+        matches!(
+            error,
+            ManifestError::PolicyObjectiveMismatch { objectives: 0 }
+        ),
         "got: {error}"
     );
     Ok(())
@@ -1059,7 +1103,10 @@ fn rejects_stall_step_out_of_range() -> TestResult {
 fn rejects_breaker_limits_out_of_range() -> TestResult {
     for key in ["max_empty_generations", "max_infra_failures"] {
         for value in [0, 21] {
-            let text = example("spend_usd = 40\n", &format!("spend_usd = 40\n{key} = {value}\n"))?;
+            let text = example(
+                "spend_usd = 40\n",
+                &format!("spend_usd = 40\n{key} = {value}\n"),
+            )?;
             assert_field(&text, &format!("budget.{key}"))?;
         }
     }
@@ -1081,11 +1128,17 @@ fn rejects_a_judge_label_of_zero() -> TestResult {
 fn rejects_no_eligible_proposer() -> TestResult {
     let agentic = example(r#"kind = "single_shot""#, r#"kind = "agentic""#)?;
     assert!(matches!(rejected(&agentic)?, ManifestError::NoEligibleTier));
-    let sweep = example("kind = \"single_shot\"\nmodel = \"mid\"\n", "kind = \"sweep\"\n")?;
+    let sweep = example(
+        "kind = \"single_shot\"\nmodel = \"mid\"\n",
+        "kind = \"sweep\"\n",
+    )?;
     assert!(matches!(rejected(&sweep)?, ManifestError::NoEligibleTier));
     let manifest = Manifest::parse_toml(&format!("{sweep}{PARAM}"))?;
     assert!(matches!(
-        manifest.proposers().first().map(|spec| spec.declared_eligibility(manifest.params())),
+        manifest
+            .proposers()
+            .first()
+            .map(|spec| spec.declared_eligibility(manifest.params())),
         Some(Eligibility::Eligible)
     ));
     Ok(())
@@ -1093,7 +1146,9 @@ fn rejects_no_eligible_proposer() -> TestResult {
 
 #[test]
 fn rejects_a_second_proposer_of_the_same_tier() -> TestResult {
-    let text = format!("{CLAUDE_EXAMPLE}\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"big\"\nbatch = 1\n");
+    let text = format!(
+        "{CLAUDE_EXAMPLE}\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"big\"\nbatch = 1\n"
+    );
     assert_field(&text, "proposer.kind")
 }
 
@@ -1101,7 +1156,11 @@ fn rejects_a_second_proposer_of_the_same_tier() -> TestResult {
 fn proposers_are_kept_in_tier_order() -> TestResult {
     let text = format!("{CLAUDE_EXAMPLE}\n[[proposer]]\nkind = \"sweep\"\nbatch = 2\n{PARAM}");
     let manifest = Manifest::parse_toml(&text)?;
-    let tiers: Vec<Tier> = manifest.proposers().iter().map(ProposerSpec::tier).collect();
+    let tiers: Vec<Tier> = manifest
+        .proposers()
+        .iter()
+        .map(ProposerSpec::tier)
+        .collect();
     assert_eq!(tiers, [Tier::Sweep, Tier::SingleShot]);
     Ok(())
 }
@@ -1133,14 +1192,21 @@ fn rejects_a_param_with_both_or_neither_domain() -> TestResult {
     assert_field(&format!("{CLAUDE_EXAMPLE}{both}"), "param")?;
     let partial = edit(PARAM, "step = 1\n", "")?;
     assert_field(&format!("{CLAUDE_EXAMPLE}{partial}"), "param")?;
-    let choices = edit(PARAM, "min = 1\nmax = 64\nstep = 1\n", "choices = [\"8\", \"16\"]\n")?;
+    let choices = edit(
+        PARAM,
+        "min = 1\nmax = 64\nstep = 1\n",
+        "choices = [\"8\", \"16\"]\n",
+    )?;
     assert!(Manifest::parse_toml(&format!("{CLAUDE_EXAMPLE}{choices}")).is_ok());
     Ok(())
 }
 
 #[test]
 fn rejects_a_gate_named_like_an_objective() -> TestResult {
-    let text = example(r#"metric = "identical_output""#, r#"metric = "throughput_mb_s""#)?;
+    let text = example(
+        r#"metric = "identical_output""#,
+        r#"metric = "throughput_mb_s""#,
+    )?;
     let error = rejected(&text)?;
     assert!(
         matches!(&error, ManifestError::DuplicateMetric { metric } if metric.as_str() == "throughput_mb_s"),
@@ -1174,7 +1240,12 @@ fn a_held_out_pairing_is_recorded() -> TestResult {
         manifest.objective().held_out().map(MetricName::as_str),
         Some("throughput_held_out")
     );
-    let held: Vec<String> = manifest.judge().held_out_metrics().iter().map(ToString::to_string).collect();
+    let held: Vec<String> = manifest
+        .judge()
+        .held_out_metrics()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     assert_eq!(held, ["throughput_held_out"]);
     Ok(())
 }
@@ -1204,7 +1275,10 @@ fn rejects_writable_judge_option_value() -> TestResult {
 fn rejects_invalid_path_like_judge_argument() -> TestResult {
     let text = example_with_judge_command(r#"["python3", "judge/../src/parse.rs"]"#)?;
     let error = rejected(&text)?;
-    assert!(matches!(error, ManifestError::JudgeArgPath { index: 1 }), "got: {error}");
+    assert!(
+        matches!(error, ManifestError::JudgeArgPath { index: 1 }),
+        "got: {error}"
+    );
     Ok(())
 }
 
@@ -1229,7 +1303,10 @@ fn rejects_dot_and_slashed_flag_judge_arguments() -> TestResult {
 fn rejects_judge_argument_case_fold_collision() -> TestResult {
     let text = example_with_judge_command(r#"["python3", "src/Parse.rs"]"#)?;
     let error = rejected(&text)?;
-    assert!(matches!(error, ManifestError::CaseFoldCollision { .. }), "got: {error}");
+    assert!(
+        matches!(error, ManifestError::CaseFoldCollision { .. }),
+        "got: {error}"
+    );
     Ok(())
 }
 
@@ -1252,7 +1329,10 @@ fn serde_try_from_runs_the_same_rules() -> TestResult {
     let refused = toml::from_str::<Manifest>(&overlap)
         .err()
         .ok_or("serde accepted an overlapping manifest")?;
-    assert!(refused.to_string().contains("src/parse.rs is writable"), "got: {refused}");
+    assert!(
+        refused.to_string().contains("src/parse.rs is writable"),
+        "got: {refused}"
+    );
     Ok(())
 }
 
@@ -1288,9 +1368,18 @@ fn judge_version_golden_vector() -> TestResult {
 fn judge_version_changes_with_what_the_judge_measures() -> TestResult {
     let base = judge_version(CLAUDE_EXAMPLE)?;
     let changed = [
-        example(r#"command = ["./judge"]"#, r#"command = ["./judge", "--strict"]"#)?,
-        example(r#"metric = "identical_output""#, r#"metric = "same_output""#)?,
-        example(r#"metric = "throughput_mb_s""#, r#"metric = "throughput_gb_s""#)?,
+        example(
+            r#"command = ["./judge"]"#,
+            r#"command = ["./judge", "--strict"]"#,
+        )?,
+        example(
+            r#"metric = "identical_output""#,
+            r#"metric = "same_output""#,
+        )?,
+        example(
+            r#"metric = "throughput_mb_s""#,
+            r#"metric = "throughput_gb_s""#,
+        )?,
         example(r#"goal = "maximize""#, r#"goal = "minimize""#)?,
         example(
             "min_improvement = \"5%\"\n",
@@ -1301,16 +1390,25 @@ fn judge_version_changes_with_what_the_judge_measures() -> TestResult {
         assert_ne!(judge_version(text)?, base);
     }
     let manifest = Manifest::parse_toml(CLAUDE_EXAMPLE)?;
-    assert_ne!(JudgeVersion::of(&TreeId::of(b"judge2"), manifest.judge()), base);
+    assert_ne!(
+        JudgeVersion::of(&TreeId::of(b"judge2"), manifest.judge()),
+        base
+    );
     Ok(())
 }
 
 #[test]
 fn judge_version_ignores_the_label_and_min_improvement() -> TestResult {
     let base = judge_version(CLAUDE_EXAMPLE)?;
-    assert_eq!(judge_version(&example("version = 1", "version = 2")?)?, base);
     assert_eq!(
-        judge_version(&example(r#"min_improvement = "5%""#, r#"min_improvement = "7%""#)?)?,
+        judge_version(&example("version = 1", "version = 2")?)?,
+        base
+    );
+    assert_eq!(
+        judge_version(&example(
+            r#"min_improvement = "5%""#,
+            r#"min_improvement = "7%""#
+        )?)?,
         base
     );
     Ok(())
