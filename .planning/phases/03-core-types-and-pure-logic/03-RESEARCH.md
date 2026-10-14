@@ -518,17 +518,19 @@ Dropping ESC alone leaves inert residue such as `[31m`, which is visible evidenc
 - **`RngCore` imports:** deprecated in rand_core 0.10, fails `-D warnings`.
 - **Reading fixtures with `std::fs` in core tests:** banned by core's `clippy.toml`; use `include_str!`/`include_bytes!`.
 
-## Decide before the freeze (CORE-08 gaps)
+## Decide before the freeze (CORE-08 gaps) (RESOLVED)
+
+**Resolved 2026-10-14:** the user approved all seven items before the freeze (03-CONTEXT.md D-09 and D-10 amendments, user decision via orchestrator). Plan 03-07 freezes them; plan 03-05 implements item 6.
 
 The locked field lists in D-05 to D-10 are incomplete in ways the fold cannot work around. Each item is small, but each changes the golden wire format, so all of them must be settled in the plan that freezes the set, before any golden file. Items 1 to 4 follow logically from decisions already made, so the planner can treat them as corollaries. Items 5 to 7 change a locked field list and should go to the user if the planner is unsure.
 
-1. **`RunStarted` needs `base: TreeId`.** D-06 requires the fold to recompute and verify `RunId::of(&ManifestId, &TreeId, started_at)`; `baseline: ExperimentId` is a hash and cannot be inverted to a `TreeId`.
-2. **`Proposed` needs `diff: BlobId`.** `ExperimentId` is a domain-separated hash of (base, diff bytes); the diff's blob ID is the plain digest of the same bytes; neither can be derived from the other. Resume (reuse recorded proposals), `JobRequest.diff`, and `build_report` (lineage diffs) all need it.
-3. **`Proposed` needs `generation: u32`.** Selection, routing stall counts, and the circuit breaker all group experiments by generation. Inferring it from ledger position works only for a strictly sequential writer and is order-sensitive.
-4. **`StopRequested` has no key.** Recommend `StopRequested { generation, reason }` keyed by (generation, reason): a repeated `minos stop` is a no-op, and a run resumed after a raised cap can stop again at a later generation.
-5. **`ManifestChanged` keyed by manifest alone collapses A to B to A.** Recommend adding `from_generation: u32` to the event and the key. v1 may never emit it, but the format freezes now.
-6. **`JudgeVersion` is a SHA-256 type (CORE-01, JUDGE-01) while CLAUDE.md's manifest shows `[judge] version = 1`.** See Open Question 3.
-7. **`Selected.decision` should carry the dropped-proposal count** (PITFALLS Pitfall 34: invalid-diff rate) and an explicit kind (`Improved { winner }`, `Kept`, `NoValidCandidates`), so the breaker and `minos status` read it from the ledger.
+1. **`RunStarted` needs `base: TreeId`.** D-06 requires the fold to recompute and verify `RunId::of(&ManifestId, &TreeId, started_at)`; `baseline: ExperimentId` is a hash and cannot be inverted to a `TreeId`. **RESOLVED:** adopted (D-10 amendment); 03-07.
+2. **`Proposed` needs `diff: BlobId`.** `ExperimentId` is a domain-separated hash of (base, diff bytes); the diff's blob ID is the plain digest of the same bytes; neither can be derived from the other. Resume (reuse recorded proposals), `JobRequest.diff`, and `build_report` (lineage diffs) all need it. **RESOLVED:** adopted (D-10 amendment); 03-07.
+3. **`Proposed` needs `generation: u32`.** Selection, routing stall counts, and the circuit breaker all group experiments by generation. Inferring it from ledger position works only for a strictly sequential writer and is order-sensitive. **RESOLVED:** adopted (D-10 amendment); 03-07.
+4. **`StopRequested` has no key.** Recommend `StopRequested { generation, reason }` keyed by (generation, reason): a repeated `minos stop` is a no-op, and a run resumed after a raised cap can stop again at a later generation. **RESOLVED:** adopted, keyed (generation, reason) (D-10 amendment); 03-07.
+5. **`ManifestChanged` keyed by manifest alone collapses A to B to A.** Recommend adding `from_generation: u32` to the event and the key. v1 may never emit it, but the format freezes now. **RESOLVED:** user-approved 2026-10-14; event and key both carry `from_generation` (D-10 amendment); 03-07.
+6. **`JudgeVersion` is a SHA-256 type (CORE-01, JUDGE-01) while CLAUDE.md's manifest shows `[judge] version = 1`.** See Open Question 3. **RESOLVED:** user-approved 2026-10-14; the hash of the judge-data `TreeId` plus the canonical judge spec, with the manifest integer as a local label (D-10 amendment); 03-05.
+7. **`Selected.decision` should carry the dropped-proposal count** (PITFALLS Pitfall 34: invalid-diff rate) and an explicit kind (`Improved { winner }`, `Kept`, `NoValidCandidates`), so the breaker and `minos status` read it from the ledger. **RESOLVED:** user-approved 2026-10-14; `Decision { kind, proposed, dropped }` (D-10 amendment); 03-07.
 
 ## Don't Hand-Roll
 
@@ -688,20 +690,33 @@ Verified: with this file and no environment variable, a missing snapshot fails t
 | A7 | Renderer also shows tag characters and variation selectors visibly | Pattern 12 | Additive; only more visible output |
 | A8 | `LogExcerpt` and its truncation live in core beside `SafeText` | Architectural map | Phase 4 may prefer it in sandbox; harmless either way |
 
-## Open Questions
+A1 was confirmed by the user on 2026-10-14 (03-CONTEXT.md D-04 amendment). A3 and A4 are recorded in CLAUDE.md's Projects section by plan 03-07.
+
+## Open Questions (RESOLVED)
+
+Every question below was resolved before execution. Questions 1, 3, and 7 and the freeze items were decided by the user on 2026-10-14 (03-CONTEXT.md amendments under D-04, D-09, and D-10); the rest were decided by the planner within the CONTEXT discretion and are recorded in the plan named.
 
 1. **What is an experiment's diff relative to?**
    - What we know: an experiment is "a base tarball hash plus a unified diff, applied inside the guest"; the guest receives one base tarball and one diff; `parent` is lineage; the report shows "the cumulative diff from baseline to winner".
    - What's unclear: whether a child's diff is cumulative from the run's base or relative to its parent. No document says.
    - Recommendation: cumulative from the run's base (Pattern 5 `compose`). The guest then applies exactly one diff to the base, `ExperimentId` depends only on the candidate's content change from base, identical outcomes dedup for free, and `adopt`'s bytes always carry context. Confirm with the user before the event freeze, because `Proposed.diff` and `JobRequest.diff` mean different things under the two answers.
+   - **RESOLVED (user decision 2026-10-14, 03-CONTEXT.md D-04 amendment):** cumulative from the run's base tree. Implemented by 03-02 (`ExperimentId::of` over base plus canonical diff, CLAUDE.md Diff paragraph), 03-06 (`compose`, `diff_trees`), 03-07 (`Proposed.diff`), and 03-09 (`JobRequest.diff`).
 2. **Which diff dialect will Phase 6 ask the model for?** gitdiff mode requires `diff --git` lines. Recommend the prompt's stable prefix shows the exact canonical form (PITFALLS Pitfall 34). Accepting plain unified diffs as well would mean a second parse mode (unidiff), which is only safe behind the stage-2 grammar; not recommended for v1.
+   - **RESOLVED (planner, CONTEXT discretion on the canonical form):** gitdiff only. 03-02's stage-2 grammar rejects a plain unified diff with no `diff --git` line, and the canonical form is the one dialect; showing it in the prompt's stable prefix is Phase 6 work.
 3. **What is `JudgeVersion`?** CORE-01 and JUDGE-01 make it a hash; CLAUDE.md's manifest has `[judge] version = 1` and `minos rejudge --judge <v>`. Recommend `JudgeVersion = H("minos/judge/v1", judge data TreeId, canonical judge spec (command argv, gates, objectives))`, with the manifest integer dropped or kept as a label only, and CLAUDE.md updated in the same change. Needs the user's confirmation.
+   - **RESOLVED (user decision 2026-10-14, 03-CONTEXT.md D-10 amendment):** `JudgeVersion` hashes the judge-data `TreeId` plus the canonical judge spec (argv, gates, objectives with goal and held-out pairing); the `[judge] version` integer stays as a local label and is excluded from the hash. Implemented by 03-05 Task 2; CLAUDE.md updated by 03-07 Task 2.
 4. **What are "judge paths" in the manifest?** CORE-03 and D-01 require `writable` to be disjoint from them, but the schema in CLAUDE.md has only `[judge] command` and `[source] exclude = ["judge/", ...]` (directory prefixes). Recommend checking `writable` and `readable` against `[source] exclude` prefixes and against the judge command's program path when it is relative, and documenting that judge data never lives in the project. Planner decides the exact field.
+   - **RESOLVED (planner, D-01 discretion; widened after the 2026-10-14 plan check):** judge paths are the `[source] exclude` entries plus every judge argv entry that names a project-relative path: the program and every later argument (or the value of a `--name=value` option) that parses as a `RelPath` after stripping one leading `./`. A path-like entry that is not a valid `RelPath` is rejected, never ignored. Implemented by 03-05 Task 2.
 5. **Where are the image digests the manifest must check?** The example manifest names a Dockerfile, not an image. Recommend a validated `ImageRef` type (`name@sha256:<64 hex>`) for any image field and for `minos.lock`, plus a pure `check_dockerfile_from_pins(&str)` in core that Phase 5's `env build` calls, so "images are digests" is enforced by core either way.
+   - **RESOLVED (user decision 2026-10-14):** `ImageRef` plus `image::base_images` on the Dockerfile's `FROM` lines are the enforcement point, and `Manifest::try_from` stays pure; no `Manifest::check_dockerfile` is added. ROADMAP Phase 3 success criterion 1 and REQUIREMENTS CORE-03 were reworded to match. Implemented by 03-05 Task 1 (the recommended `check_dockerfile_from_pins` is named `base_images`).
 6. **Sweep param schema.** Not defined anywhere, yet the manifest freezes now. Recommend `[[param]] name, file (must be writable), anchor (a line prefix that must match exactly one line of the base file), and either { min, max, step } integers or choices = ["...", ...]`. The sweep replaces the remainder of the anchored line and emits a canonical diff via `compose`. Eligibility: at least one param, each `file` writable; the anchor match is checked against base files at plan time.
+   - **RESOLVED (planner, assumption A4):** adopted as recommended, integer ranges and string choices only. Implemented by 03-05 (types and checks) and 03-08 (sampler and render); CLAUDE.md's Projects section records the limit (03-07 Task 2).
 7. **Does `Crashed`/`TimedOut` carry a stage?** Optional; decide before the freeze.
+   - **RESOLVED (user decision 2026-10-14, 03-CONTEXT.md D-10 amendment):** yes, `Crashed { stage }` and `TimedOut { stage }` with `Stage::{Build, Run, Judge}`. Implemented by 03-03; frozen by 03-07.
 8. **Where does the infrastructure-failure streak for the breaker come from?** The frozen event set has no infrastructure-failure event (infra failures are retried, not `Outcome`s). Recommend `circuit_breaker(state, manifest, infra_streak: u32)` with the streak supplied by the loop (in memory; a restart resets it, which is acceptable because a restart is a human action), and the trip recorded as `StopRequested { reason: InfraFailures }`. The alternative, a `Decision` variant for an all-infra generation, puts it in the ledger.
+   - **RESOLVED (planner):** adopted as recommended, `circuit_breaker(state, budget, infra_streak)` with the streak supplied by the loop in memory and reset on restart. Implemented by 03-11; CLAUDE.md records it (03-07 Task 2).
 9. **Ship `generation::{plan, admit, conclude}` and `spend_ok` now or in Phase 7?** CONTEXT leaves it to the planner. Recommend shipping `conclude` (it is `select_greedy` over folded state) and `spend_ok` now, since they are short and fully testable here, and leaving `plan`/`admit` to Phase 7, where their inputs (surface stats, proposal texts) take final shape.
+   - **RESOLVED (planner, CONTEXT discretion):** `conclude` and `spend_ok` ship in 03-11; `plan` and `admit` wait for Phase 7.
 
 ## Environment Availability
 
