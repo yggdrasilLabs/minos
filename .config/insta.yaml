@@ -1,0 +1,4 @@
+# The plain gate (`cargo test --workspace`) never writes or accepts snapshots.
+# Accept new snapshots deliberately with `INSTA_UPDATE=always cargo test -p minos-core --test <name>` and review the `.snap` contents before committing.
+behavior:
+  update: no
