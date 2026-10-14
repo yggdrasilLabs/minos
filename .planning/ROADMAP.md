@@ -156,7 +156,42 @@ Plans:
   4. Money, contracts, and display are safe by construction. `Spent` carries usage only, never dollars. Price rates parse from strings into pico-dollar `u128` with integer micro-dollar totals and no float. `JobRequest` and `JobResult` define the loop-to-runner contract. The renderer strips C0, C1, and ESC sequences and shows bidi and zero-width characters visibly (CORE-13, CORE-14, CORE-15, COST-01)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
+**Plans**: 13 plans
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Foundation: serde_json `float_roundtrip`, `.config/insta.yaml`, the full module skeleton, `limits.rs`, ID hashing with golden vectors, and `RelPath` (wave 1)
+
+**Wave 2** *(blocked on 03-01)*
+
+- [ ] 03-02-PLAN.md — `Diff::parse` seven-stage pipeline, canonical form, `ExperimentId::of`, CLAUDE.md Diff paragraph (wave 2)
+- [ ] 03-03-PLAN.md — `Metric`, `Scorecard`, `Outcome`, `Reason`, `Stage` (wave 2)
+- [ ] 03-04-PLAN.md — `Usage`, pico-dollar `Rate`, `Prices`, `Cost`, `ApproxCost`, and the `SafeText` allowlist renderer (wave 2)
+- [ ] 03-05-PLAN.md — `Manifest::try_from` with every cross-field rule, digest-only `ImageRef`, manifest-level eligibility, `JudgeVersion` (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 03-06-PLAN.md — Strict exact-position applier, cumulative `compose`, `Experiment` (wave 3)
+- [ ] 03-07-PLAN.md — CORE-08 freeze: the eleven-variant `Event` set with a documented `EventKey` per event, `Record::V1`, `Line`, CLAUDE.md ledger and manifest paragraphs (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion; first golden wire files)*
+
+- [ ] 03-08-PLAN.md — Seeded sweep sampler and sample rendering (wave 4)
+- [ ] 03-09-PLAN.md — `JobRequest`/`JobResult` and the golden wire snapshots with a byte pin (wave 4)
+- [ ] 03-10-PLAN.md — The fold to `RunState`, permutation-invariant and tamper-detecting (wave 4)
+
+**Wave 5** *(blocked on 03-10)*
+
+- [ ] 03-11-PLAN.md — Gate check, median reduction, `select_greedy`, `conclude`, `noise_check`, routing with reasons, circuit breaker, `spend_ok` (wave 5)
+
+**Wave 6** *(blocked on 03-11)*
+
+- [ ] 03-12-PLAN.md — `build_report`: summary, flags, provenance, lineage, cumulative diff, `ReportHash`, golden reports (wave 6)
+
+**Wave 7** *(blocked on all prior plans)*
+
+- [ ] 03-13-PLAN.md — Crate-root re-exports, CLAUDE.md, validation map, deliberate-violation evidence, full gate, then `cargo clean` (wave 7)
+
 **Ordering constraint**: CORE-08 (freeze the `Event` set and document every `EventKey`) lands before any golden wire-format file is committed
 **Research**: Standard patterns; skip research-phase
 
