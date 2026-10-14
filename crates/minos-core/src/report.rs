@@ -32,7 +32,7 @@ use crate::limits::{
 use crate::manifest::{Arch, JudgeVersion, Manifest, Objective};
 use crate::metric::Metric;
 use crate::path::RelPath;
-use crate::policy::{NoiseFloor, ReducedScore, improves, noise_floor, reduce_trials};
+use crate::policy::{NoiseFloor, ReducedScore, TrialRule, improves, noise_floor, reduce_trials};
 use crate::state::{Proposal, RunState};
 use crate::text::{SafeText, is_invisible_format};
 
@@ -203,8 +203,9 @@ impl fmt::Display for MetricRole {
 
 /// One metric of the summary: the baseline against the experiment under review (D-17).
 ///
-/// The baseline side is the noise floor of the baseline's trials; the winner side is the lower median of the
-/// target's trials. The delta is `winner - baseline`, in the metric's own direction.
+/// The baseline side is the noise floor of the baseline's scored trials, with the count of trials that did not
+/// score ([`TrialRule::ScoredOnly`]); the winner side is the lower median of the target's trials, all of which
+/// scored ([`TrialRule::AllScored`]). The delta is `winner - baseline`, in the metric's own direction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SummaryRow {
     metric: MetricName,
@@ -213,6 +214,7 @@ pub struct SummaryRow {
     baseline_min: Metric,
     baseline_max: Metric,
     baseline_trials: u32,
+    baseline_skipped: u32,
     winner_median: Metric,
     winner_trials: u32,
     delta_abs: Option<f64>,
@@ -256,6 +258,12 @@ impl SummaryRow {
     #[must_use]
     pub const fn baseline_trials(&self) -> u32 {
         self.baseline_trials
+    }
+
+    /// The number of baseline trials under the judge that did not score and were skipped.
+    #[must_use]
+    pub const fn baseline_skipped(&self) -> u32 {
+        self.baseline_skipped
     }
 
     /// The lower median of the target's trials.
@@ -339,6 +347,7 @@ fn summary_row(
         baseline_min: floor.min(),
         baseline_max: floor.max(),
         baseline_trials: floor.trials(),
+        baseline_skipped: floor.skipped(),
         winner_median,
         winner_trials: winner.trials(),
         delta_abs,
@@ -348,12 +357,20 @@ fn summary_row(
     })
 }
 
-/// The reduced score of `exp` under `judge`, or `None` when it has no complete score.
+/// The reduced score of `exp` under `judge`, or `None` when it has none: the baseline over its scored trials
+/// ([`TrialRule::ScoredOnly`]), every other experiment only when all of its trials scored
+/// ([`TrialRule::AllScored`]), the same rules [`crate::policy::conclude`] applies.
 fn score(state: &RunState, judge: &JudgeVersion, exp: &ExperimentId) -> Option<ReducedScore> {
+    let rule = if exp == state.baseline() {
+        TrialRule::ScoredOnly
+    } else {
+        TrialRule::AllScored
+    };
     reduce_trials(
         state
             .trials(exp, judge)
             .map(|(_, judgment)| judgment.outcome()),
+        rule,
     )
 }
 
@@ -990,17 +1007,24 @@ fn render_summary(
             ),
             None => String::new(),
         };
+        let baseline_trials = match row.baseline_skipped() {
+            0 => format!("{} trials", row.baseline_trials()),
+            skipped => format!(
+                "{} of {} trials scored",
+                row.baseline_trials(),
+                u64::from(row.baseline_trials()) + u64::from(skipped)
+            ),
+        };
         put(
             out,
             format_args!(
-                "  {} {}: baseline {} ({} to {}, {} trials), winner {} ({} trials), delta {} ({}){threshold}, \
-                 clears noise: {}",
+                "  {} {}: baseline {} ({} to {}, {baseline_trials}), winner {} ({} trials), delta {} \
+                 ({}){threshold}, clears noise: {}",
                 row.role(),
                 row.metric(),
                 format_metric(row.baseline_median().value()),
                 format_metric(row.baseline_min().value()),
                 format_metric(row.baseline_max().value()),
-                row.baseline_trials(),
                 format_metric(row.winner_median().value()),
                 row.winner_trials(),
                 format_delta(row.delta_abs(), ""),

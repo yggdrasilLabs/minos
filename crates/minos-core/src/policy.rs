@@ -119,11 +119,28 @@ pub fn lower_median(values: &[Metric]) -> Option<Metric> {
     sorted.get(middle).copied()
 }
 
+/// How a reduction treats a trial that is not [`Outcome::Scored`] (or, in [`conclude`], one whose scorecard
+/// fails [`check_scorecard`]).
+///
+/// A candidate is judged under [`TrialRule::AllScored`]: one failed trial makes it invalid, because a change
+/// that crashes or times out once is not an improvement. The incumbent and the baseline are judged under
+/// [`TrialRule::ScoredOnly`]: they are already accepted code, a trial that did not score measured nothing, and
+/// one busy-host timeout during calibration must not block every later generation. The number of trials skipped
+/// is carried on the result so the report can say "3 of 4 trials scored".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrialRule {
+    /// Every trial must be scored; otherwise the experiment has no score.
+    AllScored,
+    /// Unscored trials are skipped and counted; at least one scored trial is needed.
+    ScoredOnly,
+}
+
 /// One experiment's trials under one judge version, reduced to one value per metric by the lower median.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReducedScore {
     metrics: BTreeMap<MetricName, Metric>,
     trials: u32,
+    skipped: u32,
 }
 
 impl ReducedScore {
@@ -144,25 +161,46 @@ impl ReducedScore {
     pub const fn trials(&self) -> u32 {
         self.trials
     }
+
+    /// The number of unscored trials skipped under [`TrialRule::ScoredOnly`]; always 0 under
+    /// [`TrialRule::AllScored`].
+    #[must_use]
+    pub const fn skipped(&self) -> u32 {
+        self.skipped
+    }
 }
 
 /// Reduces an experiment's trials to one score per metric by the lower median (D-11).
 ///
-/// `None`, meaning the experiment is invalid for selection, when there are no trials, when any trial is not
-/// [`Outcome::Scored`], when a metric is absent from some trial, or when there are more trials than a `u32`
-/// counts. A single trial is its own median. The result does not depend on the order of `outcomes`.
-pub fn reduce_trials<'a>(outcomes: impl IntoIterator<Item = &'a Outcome>) -> Option<ReducedScore> {
-    reduce_cards(outcomes.into_iter().map(Outcome::scorecard))
+/// `None`, meaning the experiment has no score, when there are no scored trials, when a metric is absent from
+/// some scored trial, when there are more trials than a `u32` counts, or, under [`TrialRule::AllScored`], when
+/// any trial is not [`Outcome::Scored`]. Under [`TrialRule::ScoredOnly`] unscored trials are skipped and
+/// counted. A single trial is its own median. The result does not depend on the order of `outcomes`.
+pub fn reduce_trials<'a>(
+    outcomes: impl IntoIterator<Item = &'a Outcome>,
+    rule: TrialRule,
+) -> Option<ReducedScore> {
+    reduce_cards(outcomes.into_iter().map(Outcome::scorecard), rule)
 }
 
 /// [`reduce_trials`] over the trials' scorecards, `None` standing for an unscored trial.
 fn reduce_cards<'a>(
     cards: impl IntoIterator<Item = Option<&'a Scorecard>>,
+    rule: TrialRule,
 ) -> Option<ReducedScore> {
     let mut values: BTreeMap<MetricName, Vec<Metric>> = BTreeMap::new();
     let mut count: usize = 0;
+    let mut skipped: u32 = 0;
     for card in cards {
-        let card = card?;
+        let Some(card) = card else {
+            match rule {
+                TrialRule::AllScored => return None,
+                TrialRule::ScoredOnly => {
+                    skipped = skipped.checked_add(1)?;
+                    continue;
+                }
+            }
+        };
         count = count.checked_add(1)?;
         for (name, scored) in card.iter() {
             values.entry(name.clone()).or_default().push(scored.value());
@@ -176,23 +214,32 @@ fn reduce_cards<'a>(
         }
         metrics.insert(name, lower_median(&list)?);
     }
-    Some(ReducedScore { metrics, trials })
+    Some(ReducedScore {
+        metrics,
+        trials,
+        skipped,
+    })
 }
 
 /// The reduced score of `exp` under `version`, counting only trials whose scorecard passes [`check_scorecard`]
-/// against `spec`. A recorded trial that fails the check makes the experiment invalid, as an unscored one does.
+/// against `spec`. A recorded trial that fails the check is treated as unscored: under
+/// [`TrialRule::AllScored`] it makes the experiment invalid, under [`TrialRule::ScoredOnly`] it is skipped.
 fn valid_score(
     state: &RunState,
     spec: &JudgeSpec,
     version: &JudgeVersion,
     exp: &ExperimentId,
+    rule: TrialRule,
 ) -> Option<ReducedScore> {
-    reduce_cards(state.trials(exp, version).map(|(_, judgment)| {
-        judgment
-            .outcome()
-            .scorecard()
-            .filter(|card| check_scorecard(spec, card).is_ok())
-    }))
+    reduce_cards(
+        state.trials(exp, version).map(|(_, judgment)| {
+            judgment
+                .outcome()
+                .scorecard()
+                .filter(|card| check_scorecard(spec, card).is_ok())
+        }),
+        rule,
+    )
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -271,9 +318,12 @@ pub fn select_greedy(
 /// Concludes a generation: the [`Decision`] its proposals and recorded trials give.
 ///
 /// A candidate is a proposal of `generation` whose trials under `judge` all pass [`check_scorecard`] against the
-/// manifest's judge and reduce, by [`reduce_trials`], to a score that has the objective metric. The incumbent is
-/// [`RunState::incumbent_before`] the generation. No candidate gives [`DecisionKind::NoValidCandidates`];
-/// otherwise [`select_greedy`] gives [`DecisionKind::Improved`] or [`DecisionKind::Kept`] with the incumbent.
+/// manifest's judge ([`TrialRule::AllScored`]) and reduce, by [`reduce_trials`], to a score that has the
+/// objective metric. The incumbent is [`RunState::incumbent_before`] the generation, reduced over its scored
+/// trials alone ([`TrialRule::ScoredOnly`]), so one failed calibration trial of the baseline does not block the
+/// run; the report shows how many of its trials were skipped. No candidate gives
+/// [`DecisionKind::NoValidCandidates`]; otherwise [`select_greedy`] gives [`DecisionKind::Improved`] or
+/// [`DecisionKind::Kept`] with the incumbent.
 /// `proposed` is the number of recorded proposals, and `dropped` the number the caller rejected at parse or
 /// compose, which never became experiments.
 ///
@@ -283,7 +333,7 @@ pub fn select_greedy(
 /// # Errors
 ///
 /// [`PolicyError::GenerationZero`] for generation 0, [`PolicyError::IncumbentUnscored`] when the incumbent has
-/// no valid score with the objective metric, and [`PolicyError::TooManyProposals`] when the count does not fit.
+/// no scored trial with the objective metric, and [`PolicyError::TooManyProposals`] when the count does not fit.
 pub fn conclude(
     state: &RunState,
     manifest: &Manifest,
@@ -297,7 +347,7 @@ pub fn conclude(
     let spec = manifest.judge();
     let objective = manifest.objective();
     let incumbent = state.incumbent_before(generation);
-    let incumbent_value = valid_score(state, spec, judge, &incumbent)
+    let incumbent_value = valid_score(state, spec, judge, &incumbent, TrialRule::ScoredOnly)
         .and_then(|score| score.get(objective.metric()))
         .ok_or(PolicyError::IncumbentUnscored { exp: incumbent })?;
     let mut proposed: usize = 0;
@@ -306,8 +356,8 @@ pub fn conclude(
         proposed = proposed
             .checked_add(1)
             .ok_or(PolicyError::TooManyProposals)?;
-        if let Some(value) =
-            valid_score(state, spec, judge, exp).and_then(|score| score.get(objective.metric()))
+        if let Some(value) = valid_score(state, spec, judge, exp, TrialRule::AllScored)
+            .and_then(|score| score.get(objective.metric()))
         {
             candidates.push((*exp, value));
         }
@@ -335,6 +385,7 @@ pub struct NoiseFloor {
     min: Metric,
     max: Metric,
     trials: u32,
+    skipped: u32,
 }
 
 impl NoiseFloor {
@@ -362,6 +413,12 @@ impl NoiseFloor {
         self.trials
     }
 
+    /// The number of baseline trials under the judge that did not score and were skipped.
+    #[must_use]
+    pub const fn skipped(&self) -> u32 {
+        self.skipped
+    }
+
     /// `max - min`. Never negative; infinite when the difference overflows.
     #[must_use]
     pub fn spread(&self) -> f64 {
@@ -370,17 +427,22 @@ impl NoiseFloor {
 }
 
 /// The noise floor of `metric`, folded from the baseline's [`Outcome::Scored`] trials under `judge` that report
-/// it. `None` when there are none. Trials that did not score are skipped: they measured nothing.
+/// it. `None` when there are none. Trials that did not score are skipped and counted, the same
+/// [`TrialRule::ScoredOnly`] rule [`conclude`] applies to the incumbent: they measured nothing.
 #[must_use]
 pub fn noise_floor(
     state: &RunState,
     judge: &JudgeVersion,
     metric: &MetricName,
 ) -> Option<NoiseFloor> {
-    let mut values: Vec<Metric> = state
-        .trials(state.baseline(), judge)
-        .filter_map(|(_, judgment)| judgment.outcome().scorecard()?.value(metric))
-        .collect();
+    let mut values: Vec<Metric> = Vec::new();
+    let mut skipped: u32 = 0;
+    for (_, judgment) in state.trials(state.baseline(), judge) {
+        match judgment.outcome().scorecard() {
+            Some(card) => values.extend(card.value(metric)),
+            None => skipped = skipped.checked_add(1)?,
+        }
+    }
     values.sort_unstable();
     let trials = u32::try_from(values.len()).ok()?;
     Some(NoiseFloor {
@@ -388,6 +450,7 @@ pub fn noise_floor(
         min: *values.first()?,
         max: *values.last()?,
         trials,
+        skipped,
     })
 }
 

@@ -21,7 +21,7 @@ use minos_core::ledger::{
 use minos_core::limits::Limits;
 use minos_core::manifest::{Arch, JudgeVersion, Manifest, Tier};
 use minos_core::metric::{Metric, Scorecard};
-use minos_core::outcome::Outcome;
+use minos_core::outcome::{Outcome, Stage};
 use minos_core::path::RelPath;
 use minos_core::report::{
     DEPENDENCY_FILE_NAMES, Flag, MetricRole, Report, ReportError, ReportInput, SummaryRow,
@@ -224,6 +224,8 @@ struct Spec<'a> {
     parse_rs: &'a str,
     lib_rs: &'a str,
     baseline: &'a [(f64, f64)],
+    /// Baseline calibration trials, after the scored ones, that crashed.
+    baseline_crashed: u32,
     baseline_backend: BackendInfo,
 }
 
@@ -234,6 +236,7 @@ impl Default for Spec<'_> {
             parse_rs: PARSE_RS,
             lib_rs: LIB_RS,
             baseline: &[(99.0, 49.0), (100.0, 50.0), (101.0, 51.0)],
+            baseline_crashed: 0,
             baseline_backend: hardware(),
         }
     }
@@ -263,6 +266,16 @@ impl Fixture {
                 judge,
                 trial,
                 outcome: scored(*value, *held)?,
+                backend: spec.baseline_backend.clone(),
+            }));
+        }
+        let scored_trials = u32::try_from(spec.baseline.len())?;
+        for trial in scored_trials..scored_trials + spec.baseline_crashed {
+            records.push(rec(Event::Judged {
+                exp: baseline(),
+                judge,
+                trial,
+                outcome: Outcome::Crashed { stage: Stage::Run },
                 backend: spec.baseline_backend.clone(),
             }));
         }
@@ -415,6 +428,38 @@ fn anomalous_jump_fires_over_the_baseline_spread() -> TestResult {
     assert!(fixture.flags()?.contains(&Flag::AnomalousJump {
         metric: name(OBJECTIVE)?
     }));
+    Ok(())
+}
+
+#[test]
+fn anomalous_jump_still_fires_when_a_baseline_trial_crashed() -> TestResult {
+    // The baseline reduces over its scored trials (TrialRule::ScoredOnly), as in `conclude`, so one crashed
+    // calibration trial neither hides the baseline's score nor silences the flag; the row reports the skip.
+    let spec = Spec {
+        baseline: &[(99.5, 49.5), (100.0, 50.0), (100.5, 50.5)],
+        baseline_crashed: 1,
+        ..Spec::default()
+    };
+    let fixture = Fixture::build(
+        &spec,
+        vec![Step::new(
+            parse_line("    input.as_bytes().len()"),
+            "Jump.",
+            &[(150.0, 75.0)],
+        )],
+    )?;
+    assert!(fixture.flags()?.contains(&Flag::AnomalousJump {
+        metric: name(OBJECTIVE)?
+    }));
+    let rows = fixture.summary()?;
+    let objective = row(&rows, OBJECTIVE)?;
+    assert_eq!(objective.baseline_trials(), 3);
+    assert_eq!(objective.baseline_skipped(), 1);
+    let text = fixture.report()?.text().to_string();
+    assert!(
+        text.contains("3 of 4 trials scored"),
+        "report lacks the skipped count:\n{text}"
+    );
     Ok(())
 }
 

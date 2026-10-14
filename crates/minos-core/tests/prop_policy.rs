@@ -19,8 +19,8 @@ use minos_core::manifest::{Arch, JudgeVersion, Manifest, Objective, Tier};
 use minos_core::metric::{Metric, Scorecard};
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::policy::{
-    NoiseVerdict, PolicyError, Selection, check_scorecard, conclude, improves, lower_median,
-    noise_check, noise_floor, reduce_trials, select_greedy,
+    NoiseVerdict, PolicyError, Selection, TrialRule, check_scorecard, conclude, improves,
+    lower_median, noise_check, noise_floor, reduce_trials, select_greedy,
 };
 use minos_core::state::{RunState, fold};
 use proptest::prelude::*;
@@ -438,8 +438,9 @@ fn lower_median_takes_the_lower_middle() -> TestResult {
 #[test]
 fn reduce_trials_takes_the_lower_median_per_metric() -> TestResult {
     let trials = [scored(1.0)?, scored(3.0)?, scored(2.0)?, scored(4.0)?];
-    let reduced = reduce_trials(&trials).ok_or("no reduced score")?;
+    let reduced = reduce_trials(&trials, TrialRule::AllScored).ok_or("no reduced score")?;
     assert_eq!(reduced.trials(), 4);
+    assert_eq!(reduced.skipped(), 0);
     assert_eq!(reduced.get(&name(OBJECTIVE)?), Some(metric(2.0)?));
     assert_eq!(reduced.get(&name(GATE)?), Some(Metric::ONE));
     assert_eq!(reduced.metrics().len(), 2);
@@ -457,17 +458,41 @@ fn reduce_trials_is_none_for_any_unscored_trial() -> TestResult {
     ];
     for bad in unscored {
         let trials = [scored(1.0)?, bad, scored(2.0)?];
-        assert!(reduce_trials(&trials).is_none());
+        assert!(reduce_trials(&trials, TrialRule::AllScored).is_none());
     }
-    assert!(reduce_trials(&[]).is_none());
+    assert!(reduce_trials(&[], TrialRule::AllScored).is_none());
+    assert!(reduce_trials(&[], TrialRule::ScoredOnly).is_none());
+    Ok(())
+}
+
+#[test]
+fn reduce_trials_skips_and_counts_unscored_trials_under_scored_only() -> TestResult {
+    let trials = [
+        scored(3.0)?,
+        Outcome::Crashed { stage: Stage::Run },
+        scored(1.0)?,
+        Outcome::TimedOut {
+            stage: Stage::Judge,
+        },
+        scored(2.0)?,
+    ];
+    let reduced = reduce_trials(&trials, TrialRule::ScoredOnly).ok_or("no reduced score")?;
+    assert_eq!(reduced.trials(), 3);
+    assert_eq!(reduced.skipped(), 2);
+    assert_eq!(reduced.get(&name(OBJECTIVE)?), Some(metric(2.0)?));
+    // At least one scored trial is still required.
+    let none = [Outcome::Crashed { stage: Stage::Run }];
+    assert!(reduce_trials(&none, TrialRule::ScoredOnly).is_none());
     Ok(())
 }
 
 #[test]
 fn reduce_trials_is_none_when_a_metric_is_absent_from_a_trial() -> TestResult {
     let partial = Outcome::Scored(card(&[(GATE, 1.0, false)])?);
-    assert!(reduce_trials(&[scored(1.0)?, partial.clone()]).is_none());
-    assert!(reduce_trials(&[partial, scored(1.0)?]).is_none());
+    for rule in [TrialRule::AllScored, TrialRule::ScoredOnly] {
+        assert!(reduce_trials(&[scored(1.0)?, partial.clone()], rule).is_none());
+        assert!(reduce_trials(&[partial.clone(), scored(1.0)?], rule).is_none());
+    }
     Ok(())
 }
 
@@ -812,6 +837,48 @@ fn conclude_competes_against_the_latest_winner() -> TestResult {
 }
 
 #[test]
+fn conclude_reduces_the_incumbent_over_its_scored_trials() -> TestResult {
+    // One crashed calibration trial does not block the run: the incumbent is the median of the scored trials,
+    // 100, so 104 is below the 5% threshold and 106 clears it.
+    let (e1, e2) = (exp(1)?, exp(2)?);
+    let mut records = calibrated()?;
+    records.push(judged(
+        baseline(),
+        3,
+        Outcome::TimedOut { stage: Stage::Run },
+    )?);
+    records.extend([
+        proposed(e1, baseline(), 1)?,
+        judged(e1, 0, scored(104.0)?)?,
+        proposed(e2, baseline(), 2)?,
+        judged(e2, 0, scored(106.0)?)?,
+    ]);
+    let manifest = manifest("maximize", "5%")?;
+    assert_eq!(
+        decide(&records, &manifest, 1, 0)?,
+        Decision::new(
+            DecisionKind::Kept {
+                incumbent: baseline()
+            },
+            1,
+            0
+        )
+    );
+    records.push(selected(
+        1,
+        DecisionKind::Kept {
+            incumbent: baseline(),
+        },
+        1,
+    ));
+    assert_eq!(
+        decide(&records, &manifest, 2, 0)?,
+        Decision::new(DecisionKind::Improved { winner: e2 }, 1, 0)
+    );
+    Ok(())
+}
+
+#[test]
 fn conclude_refuses_an_unscored_incumbent() -> TestResult {
     let e1 = exp(1)?;
     let records = vec![
@@ -938,6 +1005,7 @@ fn noise_floor_skips_unscored_baseline_trials() -> TestResult {
     let state = state(&records)?;
     let floor = noise_floor(&state, &judge()?, &name(OBJECTIVE)?).ok_or("no floor")?;
     assert_eq!(floor.trials(), 2);
+    assert_eq!(floor.skipped(), 1);
     Ok(())
 }
 
