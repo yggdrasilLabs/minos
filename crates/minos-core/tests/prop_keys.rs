@@ -26,14 +26,14 @@ use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-/// The start time of the golden_ids.rs `RunId`.
+/// The start time of the `golden_ids.rs` `RunId`.
 const STARTED_AT: u64 = 1_760_000_000;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------------------------------------------
 
-/// The `RunId` of golden_ids.rs: manifest `m`, base tree `t`, started at [`STARTED_AT`].
+/// The `RunId` of `golden_ids.rs`: manifest `m`, base tree `t`, started at [`STARTED_AT`].
 fn run() -> RunId {
     RunId::of(&ManifestId::of(b"m"), &TreeId::of(b"t"), STARTED_AT)
 }
@@ -149,7 +149,7 @@ fn one_of_each() -> Result<Vec<Event>, Box<dyn Error>> {
     ])
 }
 
-/// The snake_case variant name each event in [`one_of_each`] serializes under.
+/// The `snake_case` variant name each event in [`one_of_each`] serializes under.
 const VARIANT_NAMES: [&str; 11] = [
     "run_started",
     "manifest_changed",
@@ -272,7 +272,7 @@ fn non_key_fields_do_not_change_key() -> TestResult {
     assert_eq!(s1.key(&run), s2.key(&run));
 
     let start = |manifest: &[u8], started_at: u64| Event::RunStarted {
-        run: run,
+        run,
         manifest: ManifestId::of(manifest),
         base: TreeId::of(b"t"),
         baseline: ExperimentId::baseline(&TreeId::of(b"t")),
