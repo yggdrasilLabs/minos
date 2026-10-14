@@ -12,7 +12,7 @@ use minos_core::experiment::Experiment;
 use minos_core::id::{BlobId, ExperimentId, ImageDigest, TreeId};
 use minos_core::job::{JOB_VERSION, JobBudget, JobError, JobRequest, JobResult};
 use minos_core::ledger::{BackendInfo, BackendKind, ConfinementLayer, Isolation};
-use minos_core::limits::{MAX_STAGE_MS, MAX_TRIALS, MIN_STAGE_MS};
+use minos_core::limits::{Limits, MAX_STAGE_MS, MAX_TRIALS, MIN_STAGE_MS};
 use minos_core::manifest::{Arch, JudgeVersion, Manifest};
 use minos_core::outcome::{Outcome, Stage};
 use minos_core::usage::Usage;
@@ -100,7 +100,7 @@ fn judge() -> Result<JudgeVersion, Box<dyn Error>> {
 
 fn diff() -> Result<Diff, Box<dyn Error>> {
     let manifest = manifest()?;
-    Ok(Diff::parse(DIFF, manifest.writable(), &minos_core::limits::Limits::standard())?)
+    Ok(Diff::parse(DIFF, manifest.writable(), &Limits::standard())?)
 }
 
 fn candidate() -> Result<Experiment, Box<dyn Error>> {
@@ -309,7 +309,7 @@ fn verify_diff_recomputes_the_experiment() -> TestResult {
     let other = Diff::parse(
         &edit(DIFF, "new();", "newer();")?,
         manifest.writable(),
-        &minos_core::limits::Limits::standard(),
+        &Limits::standard(),
     )?;
     assert!(!request.verify_diff(&other));
     assert!(!baseline_request()?.verify_diff(&diff()?));
