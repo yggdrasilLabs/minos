@@ -20,9 +20,12 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 
 - [x] Greedy policy with `min_improvement`, tie-broken on `ExperimentId`, permutation-invariant — Validated in Phase 3: Core Types and Pure Logic (2026-10-14; see 03-VALIDATION.md, 03-EVIDENCE.md and 03-VERIFICATION.md)
 
+- [x] `minos-sandbox` encodes roles as types: a `SandboxSpec<Candidate>` cannot receive judge data or a network device, a `LaunchPlan` comes only from `seal()`, `launch` needs a `Cleared` that only `preflight` mints, and `Untrusted<T>` has no `Deref`, `Display`, or `Debug`; proven by 12 `trybuild` compile-fail cases — Validated in Phase 4: Store, Source Snapshot, and Sandbox Types (2026-10-15; see 04-VALIDATION.md, 04-EVIDENCE.md and 04-VERIFICATION.md)
+
+- [x] `minos-store` ships the synchronous `Ledger` and `Blobs` traits with a `MemoryStore` and a crash-safe `FileStore` (locked append-only JSONL with torn-tail repair, temp-then-rename blobs rehashed on read), and `minos-source` packs a deterministic, denylisted, secret-scanned source tarball whose SHA-256 is the `TreeId` — Validated in Phase 4: Store, Source Snapshot, and Sandbox Types (2026-10-15; see 04-VALIDATION.md, 04-EVIDENCE.md and 04-VERIFICATION.md)
+
 ### Active
 
-- [ ] `minos-sandbox` encodes roles as types: a `SandboxSpec<Candidate>` cannot receive judge data or a network device, and this is proven by compile-fail tests
 - [ ] A libkrun backend on macOS arm64 launches a VM from a sealed `LaunchPlan`, with no network device, input delivered as read-only disk images, and output returned as a capped tar stream over vsock wrapped in `Untrusted<T>`
 - [ ] `minos-guest` runs inside the VM: applies the base tarball plus diff with a pure-Rust patch crate, runs the manifest's argv commands under budget, and streams results out
 - [ ] A local loop driver in the CLI process runs generations against a file-backed ledger and blob store, using the same pure core functions the Lambda orchestrator will use later
@@ -102,4 +105,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-14 after Phase 3: Core Types and Pure Logic (13/13 plans; verified 4/4 success criteria and 18/18 requirements; `cargo clean` run after verification; code review open: 1 Critical, 5 Warnings, 6 Info in 03-REVIEW.md; `/gsd-secure-phase 3` pending)*
+*Last updated: 2026-10-15 after Phase 4: Store, Source Snapshot, and Sandbox Types (9/9 plans; verified 4/4 success criteria and 11/11 requirements; `cargo clean` run after verification; code review open: 0 Critical, 3 Warnings, 6 Info in 04-REVIEW.md; `/gsd-secure-phase 4` pending)*
