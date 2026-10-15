@@ -10,11 +10,13 @@
 //! refuses any other dependent, so the filesystem walker and the read-only `git` exec of the clean
 //! check never enter the loop's or the runner's graph.
 //!
-//! The guards are public and tested on their own: [`denylist`] and [`scan`]. None of them produces a
+//! The guards are public and tested on their own: [`denylist`], [`scan`], and [`clean`]. None of them produces a
 //! tarball, so exposing them opens no path around the scan.
 
+pub mod clean;
 pub mod denylist;
 pub mod scan;
 
+pub use clean::{CleanPolicy, Dirty, check_clean};
 pub use denylist::{DenyRule, deny_component};
 pub use scan::{ScanError, Scanner, SecretHit};
