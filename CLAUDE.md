@@ -216,16 +216,19 @@ Roles are types. Policy is enforced when a spec is built, and backends only ever
 pub struct SandboxSpec<R: Role> { /* image, mounts, budget, PhantomData<R> */ }
 
 impl SandboxSpec<Judge> {
-    pub fn secrets(self, s: JudgeSecrets) -> Self { /* read-only mount */ }
+    pub fn secrets(self, s: JudgeData) -> Self { /* read-only mount */ }
 }
 
 // No role has a method that attaches a network. Only Judge can mount judge data.
 // A candidate with network access or judge data must not compile.
 
 impl<R: Role> SandboxSpec<R> {
-    pub fn seal(self) -> LaunchPlan { /* the only constructor of LaunchPlan */ }
+    pub fn new(job: &JobRequest, root: ImageDigest, input: InputDisk, machine: Machine, arch: Arch) -> Result<Self, SpecError>;
+    pub fn seal(self) -> LaunchPlan<R> { /* the only constructor of LaunchPlan */ }
 }
 ```
+
+A spec carries IDs and digests only: the root image digest, the input disk blob, the judge data blob for a Judge, the `JobBudget`, the `Machine`, the `Arch`, the launch key, and the hard maximum duration, which is build + run + 30 s for a Candidate and judge + 30 s for a Judge, refused above one hour. A `SpecError` such as `DurationOverCeiling` is a configuration error, neither an `Outcome` nor a retried infrastructure failure: each stage budget may be up to an hour, so an over-ceiling sum fails every experiment of the run alike. The runner (Phase 7) therefore builds the baseline's Candidate and Judge specs before generation 0 and refuses to start the run, and `minos check` (Phase 8, CLI-05) reports it. `LaunchKey` is `IdHasher::new("minos/launch/v1").digest(exp).u64(role tag).digest(judge).u64(trial)`, with role tags Candidate 1, Judge 2, and 3 reserved for Agent (04-CONTEXT D-15). `preflight(host: &Capabilities, plan: LaunchPlan<R>) -> Result<Cleared<R>, Vec<Refusal>>` is the only constructor of `Cleared<R>`, which owns its plan.
 
 Sandbox output is wrapped so it cannot be used unvalidated:
 
@@ -233,14 +236,21 @@ Sandbox output is wrapped so it cannot be used unvalidated:
 /// No Deref, Display, or Debug. The only exits are validating parsers.
 pub struct Untrusted<T>(T);
 
-impl Untrusted<Bytes> {
-    pub fn into_scorecard(self, limits: &Limits) -> Result<Scorecard, Rejected>;
+impl Untrusted<GuestOutput<Judge>> { // judge output only (D-14)
+    pub fn into_scorecard(self, limits: &Limits) -> Result<Scorecard, ScorecardFault>;
+}
+
+impl<R: Role> Untrusted<GuestOutput<R>> {
+    pub fn into_diff_texts(self, limits: &Limits) -> Result<Vec<String>, OutputFault>;
+    pub fn take(&mut self, path: &RelPath) -> Option<Untrusted<OutputFile<R>>>; // a projection, not an exit
+}
+
+impl<R: Role> Untrusted<OutputFile<R>> {
     pub fn into_log_excerpt(self, max: usize) -> LogExcerpt; // truncated, control chars stripped
-    pub fn into_diff_texts(self, limits: &Limits) -> Vec<String>;
 }
 ```
 
-`Backend` has two methods, `capabilities()` and `launch(plan)`. The runner is generic over `B: Backend`. Each binary picks its backend concretely, and a binary that can choose among several at runtime defines its own enum (for example `LocalBackend { Krun, Chv }`). Never use trait objects, and never put a backend enum in `minos-sandbox`. Dropping a `Running` handle destroys the VM.
+`Backend` has two methods, `capabilities()` and `launch(ok: Cleared<R>)`, and a generic associated type `Running<R>`; `RunningVm::wait(self) -> Result<Finished<R>, InfraError>`. `Finished<R>` holds the host-observed `Ended` (`Exited`, `Crashed`, `TimedOut`, from the K7 classification), the launch key, and the hostile stream, which leaves only through `into_output` (the raw-mode tar reader: ustar regular files only, `RelPath` names, 1024 entries, 8 MiB per entry, 16 MiB total, two zero end blocks and nothing after). It can only be built from a `Cleared<R>`, so output of a role exists only for a cleared launch of that role (refinement of 04-CONTEXT D-17). The runner is generic over `B: Backend`. Each binary picks its backend concretely, and a binary that can choose among several at runtime defines its own enum (for example `LocalBackend { Krun, Chv }`). Never use trait objects, and never put a backend enum in `minos-sandbox`. Dropping a `Running` handle destroys the VM.
 
 Launches are idempotent: derive the client token from `ExperimentId` plus role. Every launch sets a hard maximum duration, so nothing depends on cleanup running.
 
@@ -396,8 +406,8 @@ Local is where a breakout costs the most, because it lands next to the user's ke
 - Preflight fails closed and is enforced by the type system:
 
 ```rust
-pub fn preflight(host: &Host, plan: &LaunchPlan) -> Result<Cleared, Vec<Refusal>>;
-pub async fn launch(&self, plan: LaunchPlan, _ok: Cleared) -> Result<Running, LaunchError>;
+pub fn preflight<R: Role>(host: &Capabilities, plan: LaunchPlan<R>) -> Result<Cleared<R>, Vec<Refusal>>;
+fn launch<R: Role>(&self, ok: Cleared<R>) -> Result<Self::Running<R>, LaunchError>;
 ```
 
 `minos host doctor` runs the same preflight and explains each refusal.
@@ -440,7 +450,7 @@ minos stop <run>
 
 - Property tests (`proptest`) for parsers, `RelPath`, `Diff::parse`, policy permutation-invariance, and the ledger fold.
 - Golden vectors for every ID hash and golden files for every persisted wire format.
-- Compile-fail tests (`trybuild`) proving a `SandboxSpec<Candidate>` cannot get judge data and that `launch` cannot be called without `Cleared`.
+- Compile-fail tests (`trybuild`) proving a `SandboxSpec<Candidate>` cannot get judge data and that `launch` cannot be called without `Cleared`; that no role has a network method; that `LaunchPlan` and `Cleared` cannot be built by literal and `Cleared` cannot be cloned; that `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`; and that candidate output has no `into_scorecard`.
 - `LocalRunner` tests for orchestrator logic, including the per-generation operation budget.
 - In-memory `Ledger` and `Blobs` implementations for everything above the store.
 
