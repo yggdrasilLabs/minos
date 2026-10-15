@@ -33,13 +33,19 @@ fn hit_vectors() -> [(&'static str, String); 9] {
             "pem-private-key",
             format!("{}{}{}", "-----BEGIN ", "RSA PRIVATE", " KEY-----"),
         ),
-        ("aws-access-key-id", format!("{}{}{}", "AK", "IA", upper(16))),
+        (
+            "aws-access-key-id",
+            format!("{}{}{}", "AK", "IA", upper(16)),
+        ),
         ("github-token", format!("{}{}{}", "gh", "p_", alnum(36))),
         (
             "github-fine-grained-pat",
             format!("{}{}{}", "github", "_pat_", alnum(82)),
         ),
-        ("anthropic-api-key", format!("{}{}{}", "sk-", "ant-", alnum(30))),
+        (
+            "anthropic-api-key",
+            format!("{}{}{}", "sk-", "ant-", alnum(30)),
+        ),
         (
             "openai-api-key",
             format!(
@@ -197,7 +203,7 @@ fn scan_dir(scanner: &Scanner, dir: &Path) -> Result<usize, Box<dyn Error>> {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_str().ok_or("non-UTF-8 file name")?;
-        if entry.file_type()?.is_file() && name.ends_with(".rs") {
+        if entry.file_type()?.is_file() && entry.path().extension().is_some_and(|ext| ext == "rs") {
             let hits = scanner.scan(&rel(name)?, &fs::read(entry.path())?);
             assert!(hits.is_empty(), "{}: {hits:?}", entry.path().display());
             scanned += 1;
