@@ -103,7 +103,10 @@ impl Backend for FakeBackend {
 
 /// The runner's shape: clear `plan` against the backend's capabilities, launch it, and wait. Generic over the
 /// backend, never a trait object.
-fn run<B: Backend, R: Role>(backend: &B, plan: LaunchPlan<R>) -> Result<Finished<R>, Box<dyn Error>> {
+fn run<B: Backend, R: Role>(
+    backend: &B,
+    plan: LaunchPlan<R>,
+) -> Result<Finished<R>, Box<dyn Error>> {
     let cleared =
         preflight(&backend.capabilities(), plan).map_err(|refusals| format!("{refusals:?}"))?;
     Ok(backend.launch(cleared)?.wait()?)
@@ -200,7 +203,10 @@ fn judge_flow_end_to_end() -> TestResult {
     let log = output
         .take(&RelPath::try_from(JUDGE_LOG_PATH)?)
         .ok_or("the judge log is missing")?;
-    assert_eq!(log.into_log_excerpt(4096).text().as_str(), "judged 3 cases\n");
+    assert_eq!(
+        log.into_log_excerpt(4096).text().as_str(),
+        "judged 3 cases\n"
+    );
     assert_eq!(
         output.into_scorecard(&limits)?,
         Scorecard::parse_json(SCORECARD, &limits)?
@@ -228,7 +234,9 @@ fn candidate_flow_end_to_end() -> TestResult {
     // Assert
     assert_eq!(finished.ended(), Ended::Exited);
     assert_eq!(finished.key(), &key);
-    let texts = finished.into_output()?.into_diff_texts(&Limits::standard())?;
+    let texts = finished
+        .into_output()?
+        .into_diff_texts(&Limits::standard())?;
     assert_eq!(texts, vec![first.to_owned(), second.to_owned()]);
     Ok(())
 }
@@ -317,7 +325,7 @@ fn every_launch_carries_a_hard_limit() -> TestResult {
     assert_eq!(launched, expected);
     assert_eq!(
         launched.iter().map(|l| l.max_duration).collect::<Vec<_>>(),
-        vec![Duration::from_millis(210_000), Duration::from_millis(120_000)]
+        vec![Duration::from_secs(210), Duration::from_mins(2)]
     );
     Ok(())
 }
