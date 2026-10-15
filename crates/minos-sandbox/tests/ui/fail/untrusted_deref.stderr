@@ -1,0 +1,5 @@
+error[E0614]: type `Untrusted<GuestOutput<minos_sandbox::Judge>>` cannot be dereferenced
+ --> tests/ui/fail/untrusted_deref.rs:5:19
+  |
+5 |     let _inner = &*output;
+  |                   ^^^^^^^ can't be dereferenced

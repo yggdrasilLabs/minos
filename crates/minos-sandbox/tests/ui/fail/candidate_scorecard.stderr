@@ -1,0 +1,7 @@
+error[E0599]: no method named `into_scorecard` found for struct `Untrusted<GuestOutput<minos_sandbox::Candidate>>` in the current scope
+  --> tests/ui/fail/candidate_scorecard.rs:11:12
+   |
+11 |     output.into_scorecard(limits)
+   |            ^^^^^^^^^^^^^^ method not found in `Untrusted<GuestOutput<minos_sandbox::Candidate>>`
+   |
+   = note: the method was found for `Untrusted<GuestOutput<minos_sandbox::Judge>>`

@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `Cleared<R>` in the current scope
+ --> tests/ui/fail/cleared_clone.rs:5:19
+  |
+5 |     let copy = ok.clone();
+  |                   ^^^^^ method not found in `Cleared<minos_sandbox::Judge>`

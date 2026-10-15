@@ -1,0 +1,5 @@
+error[E0599]: no method named `network` found for struct `SandboxSpec<R>` in the current scope
+ --> tests/ui/fail/judge_network.rs:5:10
+  |
+5 |     spec.network()
+  |          ^^^^^^^ method not found in `SandboxSpec<minos_sandbox::Judge>`

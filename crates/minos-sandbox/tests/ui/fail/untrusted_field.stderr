@@ -1,0 +1,5 @@
+error[E0616]: field `0` of struct `Untrusted` is private
+ --> tests/ui/fail/untrusted_field.rs:5:12
+  |
+5 |     output.0
+  |            ^ private field

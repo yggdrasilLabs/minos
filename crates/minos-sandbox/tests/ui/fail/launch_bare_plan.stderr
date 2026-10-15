@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail/launch_bare_plan.rs:9:20
+  |
+9 |     backend.launch(plan)
+  |             ------ ^^^^ expected `Cleared<Candidate>`, found `LaunchPlan<Candidate>`
+  |             |
+  |             arguments to this method are incorrect
+  |
+  = note: expected struct `Cleared<minos_sandbox::Candidate>`
+             found struct `LaunchPlan<minos_sandbox::Candidate>`
+note: method defined here
+ --> src/backend.rs
+  |
+  |     fn launch<R: Role>(&self, ok: Cleared<R>) -> Result<Self::Running<R>, LaunchError>;
+  |        ^^^^^^

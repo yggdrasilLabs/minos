@@ -1,0 +1,8 @@
+error[E0277]: `Untrusted<GuestOutput<minos_sandbox::Judge>>` doesn't implement `std::fmt::Display`
+ --> tests/ui/fail/untrusted_display.rs:5:14
+  |
+5 |     format!("{output}")
+  |              ^^^^^^^^ `Untrusted<GuestOutput<minos_sandbox::Judge>>` cannot be formatted with the default formatter
+  |
+  = help: the trait `std::fmt::Display` is not implemented for `Untrusted<GuestOutput<minos_sandbox::Judge>>`
+  = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead

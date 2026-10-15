@@ -1,0 +1,23 @@
+error[E0451]: fields `key`, `root`, `input`, `budget`, `machine`, `arch`, `max_duration_ms`, `judge_data` and `role` of struct `LaunchPlan` are private
+  --> tests/ui/fail/launch_plan_literal.rs:19:9
+   |
+18 |     LaunchPlan {
+   |     ---------- in this type
+19 |         key,
+   |         ^^^ private field
+20 |         root,
+   |         ^^^^ private field
+21 |         input,
+   |         ^^^^^ private field
+22 |         budget,
+   |         ^^^^^^ private field
+23 |         machine,
+   |         ^^^^^^^ private field
+24 |         arch,
+   |         ^^^^ private field
+25 |         max_duration_ms: 1,
+   |         ^^^^^^^^^^^^^^^ private field
+26 |         judge_data: None,
+   |         ^^^^^^^^^^ private field
+27 |         role: PhantomData,
+   |         ^^^^ private field

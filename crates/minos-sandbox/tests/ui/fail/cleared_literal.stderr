@@ -1,0 +1,5 @@
+error[E0451]: field `plan` of struct `Cleared` is private
+ --> tests/ui/fail/cleared_literal.rs:6:15
+  |
+6 |     Cleared { plan }
+  |               ^^^^ private field
