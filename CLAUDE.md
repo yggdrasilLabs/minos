@@ -208,6 +208,16 @@ pub enum Event {
 
 **Wire formats are an API.** These types persist in checkpoints, S3, and the ledger. Golden-file tests guard serialization, golden vectors guard hashing, and the `v` tag is how a format changes. Golden wire files are insta snapshots paired with a SHA-256 pin of the exact bytes, because insta normalizes trailing whitespace and line endings when it compares, and `.config/insta.yaml` sets `update: no` so the gate never writes or accepts a snapshot.
 
+## minos-store
+
+`Ledger` (`append`, `read`) and `Blobs` (`put`, `get` with a size cap, `contains`) are synchronous traits with `&self` methods. `MemoryStore` implements them for every test above the store (LOOP-09), `FileStore` implements them for v1, and the AWS milestone's DynamoDB and S3 stores will implement the same traits. One contract test file, `crates/minos-store/tests/contract.rs`, runs every case against each implementation.
+
+The file store lives in `<project>/.minos/` (`STORE_DIR`). The root is created with mode 0700, a symlinked root is refused, and `.minos` is on the source snapshot's hard denylist. `runs/<run-hex>/ledger.jsonl` holds one ledger per run, and `blobs/sha256/<2 hex>/<62 hex>` holds the blobs, shared by every run, judge data included (04-CONTEXT D-10). Every store directory and file is checked with `symlink_metadata` before use, and an opened file's device and inode must match that check, so a symlink anywhere in the store is `StoreError::Unsafe`; new files are created with `create_new`.
+
+Every append takes an exclusive `std::fs::File::lock` on `runs/<run-hex>/ledger.lock`, rebuilds the key set from the file under the lock, writes one line with its newline, and calls `sync_data` before returning (on macOS std implements that with `F_FULLFSYNC`), and it fsyncs any directory that gained an entry (D-11, D-12). Reads take a shared lock and never write. An append whose key already exists writes nothing and returns `Duplicate` (equal record) or `Conflict` (different record; the first write wins), and `Appended` is `#[must_use]`, so a caller cannot drop a `Conflict` unnoticed. A torn tail is tolerated: bytes after the last newline, or a final newline-terminated line that is not valid JSON at all. `read` reports it as a count, never its bytes, and the next append truncates only it, with `set_len` under the exclusive lock; that is the only mutation of existing bytes, and the ledger is never opened with truncation. Everything else refuses the ledger with `StoreError::Corrupt` naming the run, the 1-based line, and the kind: invalid JSON or valid JSON that is not a `Line` elsewhere (`BadJson`), a key mismatch, a seq gap, a line over 1 MiB (`LineTooLong`), and any `v` other than `"1"` (`UnknownVersion`), wherever the line sits (D-13). A ledger over 64 MiB is `LedgerTooLarge`, and a record whose serialized line would exceed 1 MiB is refused on append with `StoreError::LineTooLong`, because the ledger is not corrupt. `StoreError::Io` is the only retryable variant; no store error is an `Outcome`, and none carries file bytes.
+
+Blobs are written temp-then-rename in their shard directory (the temporary file is synced, renamed, and the shard fsynced), so a reader sees the whole blob or none of it. A get checks the stored size against the caller's cap from the metadata before opening, reads at most one byte more than the cap, and rehashes what it read, so a flipped byte is `BlobTampered` and never reaches a caller. A put always writes, so storing the bytes again heals a tampered blob. Phase 7's whole-run `driver.lock` (LOOP-06) is a separate file on top of the per-append `ledger.lock`.
+
 ## minos-sandbox
 
 Roles are types. Policy is enforced when a spec is built, and backends only ever receive a sealed plan:
@@ -514,6 +524,9 @@ Unverified. Each needs a test or a doc check before code depends on it.
 - Whether the Seatbelt profile's starting allowances can be narrowed: rows 1 to 6 of the SPIKE-05 answer table were not minimized one by one, and only the socket rule was shown to be needed (SPIKE-05 answer).
 - The cost of the chunked vsock output protocol: one connection per 4 KiB chunk, so 64 MiB takes 16384 connections, and the supervisor has handled only two connections per run so far (S03-ANSWER).
 - Launch rate and memory per VM for concurrent candidates (K8; deferred with NEXT-04).
+- Whether the hard denylist's `id_*` rule should narrow to the SSH key names (`id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, and their `_sk` forms), since it also drops ordinary files such as `src/id_map.rs`, and whether `.netrc`, `.npmrc`, `.pypirc`, `*.key`, and `*.p12` belong on it. D-07 is implemented as written and every drop is reported in the pack report (04-RESEARCH Open Question 4; the user decides).
+- How a backend receives blob bytes: `deny.toml` keeps `minos-store` out of backend crates, and `Backend` takes no store (04-RESEARCH Open Question 7; Phase 5 decides).
+- Whether large blobs such as root images need a streaming put. That needs a core constructor that hashes inside core, because `BlobId::of` takes a slice and `Blobs::put` takes the whole byte slice (Phase 5).
 
 ### Deferred to the AWS milestone
 
