@@ -1,5 +1,5 @@
-//! The Ledger and Blobs contract, run against every implementation (STORE-01). Plan 04-05 adds the file arm to
-//! each macro.
+//! The Ledger and Blobs contract, run against every implementation (STORE-01): the memory store and the file
+//! store, each file case on its own fresh temporary store root.
 //!
 //! Each case is one generic function over `L: Ledger` or `B: Blobs`. `ledger_contract!` and `blob_contract!`
 //! expand a case into a module with one `#[test]` per implementation, so the memory store and the file store
@@ -10,7 +10,7 @@ use std::error::Error;
 
 use minos_core::id::{BlobId, ManifestId, RunId, TreeId};
 use minos_core::ledger::{Event, EventKey, Record};
-use minos_store::{Appended, Blobs, Ledger, MemoryStore, StoreError};
+use minos_store::{Appended, Blobs, FileStore, Ledger, MemoryStore, StoreError};
 use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -209,13 +209,19 @@ fn put_is_idempotent<B: Blobs>(blobs: &B) -> TestResult {
 // Arms
 // ---------------------------------------------------------------------------------------------------------------
 
-/// Runs a ledger case against every implementation.
+/// Runs a ledger case against every implementation. The file arm keeps its `TempDir` alive until the case returns.
 macro_rules! ledger_contract {
     ($case:ident) => {
         mod $case {
             #[test]
             fn memory() -> super::TestResult {
                 super::$case(&minos_store::MemoryStore::new())
+            }
+
+            #[test]
+            fn file() -> super::TestResult {
+                let dir = tempfile::tempdir()?;
+                super::$case(&minos_store::FileStore::open(dir.path())?)
             }
         }
     };
@@ -250,6 +256,11 @@ fn is_send_sync<T: Send + Sync>() {}
 #[test]
 fn memory_store_is_send_and_sync() {
     is_send_sync::<MemoryStore>();
+}
+
+#[test]
+fn file_store_is_send_and_sync() {
+    is_send_sync::<FileStore>();
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -305,5 +316,16 @@ proptest! {
     #[test]
     fn append_sequence_keeps_first_write(ops in ops()) {
         keeps_first_write(&MemoryStore::new(), &ops)?;
+    }
+}
+
+proptest! {
+    // Every file append ends in sync_data, which is F_FULLFSYNC on macOS, so the file arm runs fewer cases.
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn append_sequence_keeps_first_write_on_file(ops in ops()) {
+        let dir = tempfile::tempdir()?;
+        keeps_first_write(&FileStore::open(dir.path())?, &ops)?;
     }
 }
