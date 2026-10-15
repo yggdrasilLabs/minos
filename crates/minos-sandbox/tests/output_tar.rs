@@ -476,30 +476,106 @@ fn build_bad_checksum() -> Built {
 
 /// The committed corpus: file name, builder, and the SHA-256 of the committed bytes.
 const CORPUS: [(&str, Builder, &str); 20] = [
-    ("path_traversal.tar", build_path_traversal, "PENDING"),
-    ("absolute_path.tar", build_absolute_path, "PENDING"),
-    ("non_grammar_name.tar", build_non_grammar_name, "PENDING"),
-    ("symlink.tar", || Ok(build_symlink()), "PENDING"),
-    ("hardlink.tar", || Ok(build_hardlink()), "PENDING"),
-    ("char_device.tar", build_char_device, "PENDING"),
-    ("fifo.tar", build_fifo, "PENDING"),
-    ("directory.tar", build_directory, "PENDING"),
-    ("legacy_regular.tar", build_legacy_regular, "PENDING"),
-    ("gnu_long_name.tar", build_gnu_long_name, "PENDING"),
-    ("pax_path_override.tar", build_pax_path_override, "PENDING"),
-    ("pax_size_desync.tar", build_pax_size_desync, "PENDING"),
-    ("v7_header.tar", || Ok(build_v7_header()), "PENDING"),
-    ("size_8gb.tar", || Ok(build_size_8gb()), "PENDING"),
+    (
+        "path_traversal.tar",
+        build_path_traversal,
+        "2b2ad23b90f110add8555148b3b4830c6e736645513e09e98df53b7b2bfed5ad",
+    ),
+    (
+        "absolute_path.tar",
+        build_absolute_path,
+        "ce1bb127ec908e7e30fcb051628b3dbfaf14bd10e8cf0012fae27383c99dd20e",
+    ),
+    (
+        "non_grammar_name.tar",
+        build_non_grammar_name,
+        "a8ea998d998974ca562010e18aefb45b5edc3f60c21493dbbdb526d3d60333ad",
+    ),
+    (
+        "symlink.tar",
+        || Ok(build_symlink()),
+        "271b43475022946186dda0149d67d292ea37a6676136013b156c3f0b294a84cf",
+    ),
+    (
+        "hardlink.tar",
+        || Ok(build_hardlink()),
+        "b2d8d27aedf42c43ac93f192b17a7d0e9f3f8519207a1f1f97a62b10800a09da",
+    ),
+    (
+        "char_device.tar",
+        build_char_device,
+        "aaae1446099bb123e9915a1dcd85f7304be05c6963be2d53390bc70fa4d2a66f",
+    ),
+    (
+        "fifo.tar",
+        build_fifo,
+        "69e18788da9e819edbd5d8f653f8f3bc06ffa6a5449137720c9574042adc6a4a",
+    ),
+    (
+        "directory.tar",
+        build_directory,
+        "663345023a2ac83544ba25190cd9be9dc7ed1991607f694cf354525184c71ee6",
+    ),
+    (
+        "legacy_regular.tar",
+        build_legacy_regular,
+        "9725f0e27110283dfec557b4a75247e73465f2187821274bcb01eb6d3fa48725",
+    ),
+    (
+        "gnu_long_name.tar",
+        build_gnu_long_name,
+        "df2733b4e149a4079dcfe72f40b698829998123baa3fa92923a5306279466d70",
+    ),
+    (
+        "pax_path_override.tar",
+        build_pax_path_override,
+        "9ac5a02201e3fc1a58df19e563111cd7b933a57b1ac1a34abe19d8b58e12d9b4",
+    ),
+    (
+        "pax_size_desync.tar",
+        build_pax_size_desync,
+        "9f6936c5d559c0501ec5797dd87485b4cb6cef2a445db7cbeba021c7c79019bc",
+    ),
+    (
+        "v7_header.tar",
+        || Ok(build_v7_header()),
+        "7024e75af94581249ee1de502cba4d9ec27f18a02bc7ee06fc6e090e801f8622",
+    ),
+    (
+        "size_8gb.tar",
+        || Ok(build_size_8gb()),
+        "ff49ee97928b1266bfae14d144376adfb9eec791471fcf0acb77c8c7c5eac64a",
+    ),
     (
         "truncated_data.tar",
         || Ok(build_truncated_data()),
-        "PENDING",
+        "e786c0cd92292965d810d430ccbf8823d1a3489b0cbd9142c19502582ec6507e",
     ),
-    ("no_end_marker.tar", build_no_end_marker, "PENDING"),
-    ("trailing_data.tar", build_trailing_data, "PENDING"),
-    ("duplicate_name.tar", build_duplicate_name, "PENDING"),
-    ("bad_checksum.tar", build_bad_checksum, "PENDING"),
-    ("valid_judge_output.tar", valid_judge_output, "PENDING"),
+    (
+        "no_end_marker.tar",
+        build_no_end_marker,
+        "5c52fbabcc462ef5b55142a476e5f28f4f5dfd9ea5f86f0e1543f5b557efa6d7",
+    ),
+    (
+        "trailing_data.tar",
+        build_trailing_data,
+        "833df30eddd94e95717b55933eec4696c07899b3236a2835a0225a9273a05144",
+    ),
+    (
+        "duplicate_name.tar",
+        build_duplicate_name,
+        "2617596d0d37ca15e8189f98340ae6992dd47d23fb7fb99cde8ba29ee29d37ad",
+    ),
+    (
+        "bad_checksum.tar",
+        build_bad_checksum,
+        "b75028a3716ff05e2efc6aa590686945b19933ff2ae9798b4b5ba9d1f1cac17d",
+    ),
+    (
+        "valid_judge_output.tar",
+        valid_judge_output,
+        "37f1f10657a1d069fa59ff163d374fa146e8b3f0c8e6cc3e2bb2d6bf3e683a0e",
+    ),
 ];
 
 /// The directory of the committed corpus.
@@ -730,8 +806,8 @@ struct EntrySpec {
     fill: u8,
 }
 
-/// Headers of every format, with names from a small alphabet that includes separators, a backslash, and a
-/// non-ASCII byte, typeflags weighted toward the interesting ones, and sizes that are small, just over a cap, or
+/// Headers of every format, with names that are either valid (and may repeat) or drawn from a small alphabet that
+/// includes separators, a backslash, and a non-ASCII byte, typeflags weighted toward the interesting ones, and sizes that are small, just over a cap, or
 /// huge. When `honest` is drawn and the size is small, the data length matches the size, so accepted outputs
 /// occur; otherwise the data length is independent of the size.
 fn entry_spec() -> impl Strategy<Value = EntrySpec> {
@@ -741,10 +817,13 @@ fn entry_spec() -> impl Strategy<Value = EntrySpec> {
             1 => Just(Magic::Gnu),
             1 => Just(Magic::Old),
         ],
-        proptest::collection::vec(
-            prop::sample::select(vec![b'a', b'b', b'0', b'/', b'.', b'\\', b'-', 0x80]),
-            0..12,
-        ),
+        prop_oneof![
+            1 => prop::sample::select(vec![b"out/a".to_vec(), b"out/b".to_vec(), b"diffs/0.diff".to_vec()]),
+            2 => proptest::collection::vec(
+                prop::sample::select(vec![b'a', b'b', b'0', b'/', b'.', b'\\', b'-', 0x80]),
+                0..12,
+            ),
+        ],
         prop_oneof![
             4 => prop::sample::select(vec![b'0', b'\0', b'1', b'2', b'5', b'x', b'L', b'S']),
             1 => any::<u8>(),
