@@ -5,7 +5,9 @@
 //! contract, and one test file (`tests/contract.rs`) runs every case against each of them:
 //!
 //! - [`MemoryStore`] holds everything in memory, for every test above the store.
-//! - `FileStore` (plan 04-05) keeps JSON Lines ledgers and blob files under the project's `.minos/` directory.
+//! - [`FileStore`] keeps one append-only JSON Lines ledger per run and a content-addressed blob tree under a
+//!   store root, which Phase 8 opens at `<project>/`[`STORE_DIR`]. Appends are locked per run and durable before
+//!   they return, a torn final line left by a crash is tolerated, and every blob is rehashed on read.
 //! - The AWS milestone's table and object stores implement the same traits.
 //!
 //! Run state is never stored. It is rebuilt by folding the records [`Ledger::read`] returns
@@ -28,11 +30,13 @@
 //! `Outcome`: a store fault is never blamed on a candidate. No variant carries file bytes; each names IDs,
 //! numbers, and fixed text only.
 
+pub mod file;
 pub mod memory;
 
 use minos_core::id::{BlobId, RunId};
 use minos_core::ledger::{Line, Record};
 
+pub use file::{FileStore, STORE_DIR};
 pub use memory::MemoryStore;
 
 /// What an [`Ledger::append`] did. Every variant carries the `seq` of the line that holds the key.
@@ -173,6 +177,14 @@ pub enum StoreError {
     /// Serializing a ledger line failed.
     #[error("encoding a ledger line failed")]
     Encode(#[source] serde_json::Error),
+    /// A record serializes to a line longer than the store's line cap, so it was not written.
+    #[error("a ledger line would be {bytes} bytes, over the {max}-byte line cap")]
+    LineTooLong {
+        /// The serialized line's length in bytes, without its newline.
+        bytes: u64,
+        /// The cap.
+        max: u64,
+    },
     /// No blob has this ID.
     #[error("blob {id} is not in the store")]
     BlobMissing {
@@ -225,7 +237,8 @@ pub trait Ledger {
     ///
     /// [`StoreError::Io`] when the ledger cannot be read or written, [`StoreError::Corrupt`] or
     /// [`StoreError::LedgerTooLarge`] when the existing ledger is refused, [`StoreError::Encode`] when the line
-    /// cannot be serialized, [`StoreError::Unsafe`] when a store path is not the expected file, and
+    /// cannot be serialized, [`StoreError::LineTooLong`] when it is over the store's line cap,
+    /// [`StoreError::Unsafe`] when a store path is not the expected file, and
     /// [`StoreError::Poisoned`] when an in-memory lock was poisoned.
     fn append(&self, run: &RunId, record: Record) -> Result<Appended, StoreError>;
 
@@ -321,6 +334,7 @@ mod tests {
                 max: 1,
             },
             StoreError::Encode(json_error()?),
+            StoreError::LineTooLong { bytes: 2, max: 1 },
             StoreError::BlobMissing { id },
             StoreError::BlobTooLarge {
                 id,
