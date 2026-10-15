@@ -210,7 +210,7 @@ Plans:
   4. Packing the same working tree twice yields byte-identical tarballs and the same `TreeId` (sorted paths, zeroed metadata, regular files only), honoring `.gitignore`, `.minosignore`, and the hard denylist. A planted secret blocks the pack, and a dirty tree is refused unless `--allow-dirty` is given (CLI-11)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 6/9 plans executed
+**Plans**: 7/9 plans executed
 Plans:
 **Wave 1**
 
@@ -226,7 +226,7 @@ Plans:
 
 - [x] 04-05-PLAN.md — `FileStore`: locked, durable JSONL ledger with torn-tail repair and corruption refusals; atomic, verified blobs (wave 3)
 - [x] 04-06-PLAN.md — `Untrusted<T>`, role-typed `GuestOutput<R>`, `Finished<R>`, raw-mode output tar reader with committed hostile corpus and properties, the three capped exits (wave 3)
-- [ ] 04-07-PLAN.md — `snapshot`: four-source walk, offenders, caps, negation refusal, scan, clean check, deterministic ustar tarball and `TreeId`, CLAUDE.md Source rules (wave 3)
+- [x] 04-07-PLAN.md — `snapshot`: four-source walk, offenders, caps, negation refusal, scan, clean check, deterministic ustar tarball and `TreeId`, CLAUDE.md Source rules (wave 3)
 
 **Wave 4** *(blocked on 04-06)*
 
@@ -322,7 +322,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
-| 4. Store, Source Snapshot, and Sandbox Types | 6/9 | In Progress|  |
+| 4. Store, Source Snapshot, and Sandbox Types | 7/9 | In Progress|  |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |
 | 6. Proposers | 0/TBD | Not started | - |
 | 7. Runner and Loop | 0/TBD | Not started | - |

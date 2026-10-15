@@ -130,7 +130,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **CLI-08**: `minos report <exp>` renders the hashed report and prints its hash
 - [ ] **CLI-09**: `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test), and never applies it
 - [ ] **CLI-10**: `minos stop <run>` records `StopRequested` and the driver exits at the next safe point
-- [ ] **CLI-11**: `minos run` packs the working tree into a deterministic tarball (sorted paths, zeroed metadata, regular files only) respecting `.gitignore` and `.minosignore`, applies a hard denylist, runs a secret scan that blocks on a hit, and requires a clean commit unless `--allow-dirty`
+- [x] **CLI-11**: `minos run` packs the working tree into a deterministic tarball (sorted paths, zeroed metadata, regular files only) respecting `.gitignore` and `.minosignore`, applies a hard denylist, runs a secret scan that blocks on a hit, and requires a clean commit unless `--allow-dirty`
 
 ### Cost (COST)
 
@@ -282,7 +282,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-08 | Phase 8 | Pending |
 | CLI-09 | Phase 8 | Pending |
 | CLI-10 | Phase 8 | Pending |
-| CLI-11 | Phase 4 | Pending |
+| CLI-11 | Phase 4 | Complete |
 | COST-01 | Phase 3 | Complete |
 | COST-02 | Phase 8 | Pending |
 | DOCS-01 | Phase 8 | Pending |

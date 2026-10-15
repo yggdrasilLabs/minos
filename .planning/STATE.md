@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: store-source-snapshot-and-sandbox-types
 status: executing
 stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-10-15T14:38:55.731Z"
+last_updated: "2026-10-15T14:50:48.543Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 38
-  completed_plans: 35
+  completed_plans: 36
   percent: 38
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 04 (store-source-snapshot-and-sandbox-types) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 04 execution started
 
@@ -92,6 +92,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 04 P04 | 5min | 3 tasks | 8 files |
 | Phase 04 P05 | 6min | 3 tasks | 7 files |
 | Phase 04 P06 | 9min | 3 tasks | 26 files |
+| Phase 04 P07 | 7min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -196,6 +197,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-05: store files are opened after a symlink_metadata check with an inode match; creation uses create_new
 - [Phase 04]: 04-06: Finished<R> refines D-17: wait returns the host-observed Ended (Exited, Crashed, TimedOut) beside the still-hostile output stream; infrastructure failures stay on Err
 - [Phase 04]: 04-06: the output reader uses tar raw mode and accepts only ustar typeflag b'0' entries; every reader fault is a candidate fault (OutputInvalid or OutputTooLarge), never retried
+- [Phase 04]: 04-07: an ignore file the walker cannot read or parse fails the pack (fail closed), and the .minosignore negation check strips a line-1 UTF-8 BOM as the ignore matcher does
+- [Phase 04]: 04-07: snapshot offenders take priority over the total-size error; reads stop past 64 MiB while sizes keep being recorded to name the largest files
 
 ### Pending Todos
 
@@ -220,6 +223,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-15T14:38:55.726Z
+Last session: 2026-10-15T14:50:33.414Z
 Stopped at: Completed 04-06-PLAN.md
 Resume file: None
