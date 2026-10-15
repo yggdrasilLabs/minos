@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: store-source-snapshot-and-sandbox-types
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-10-15T14:15:53.454Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-10-15T14:26:45.607Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 38
-  completed_plans: 33
+  completed_plans: 34
   percent: 38
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 04 (store-source-snapshot-and-sandbox-types) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 04 execution started
 
@@ -90,6 +90,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 04 P02 | 5min | 2 tasks | 3 files |
 | Phase 04 P03 | 17min | 3 tasks | 7 files |
 | Phase 04 P04 | 5min | 3 tasks | 8 files |
+| Phase 04 P05 | 6min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -188,6 +189,10 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-03: InputDisk and JudgeData are publicly constructible in Phase 4; Phase 5 may restrict InputDisk; preflight refuses a Judge plan whose judge data equals its input disk
 - [Phase 04]: 04-04: DENYLIST is a public [DenyRule; 9]; name patterns live on a private DenyRule::name_pattern because a public const cannot expose the private NamePattern type
 - [Phase 04]: 04-04: every git failure, including an unreadable stdout, maps to a Dirty variant; CLI-11 stays unchecked until 04-07 composes the guards into snapshot
+- [Phase 04]: 04-05: a newline-terminated torn tail must be invalid JSON; valid JSON that is not a Line is BadJson
+- [Phase 04]: 04-05: unterminated tail bytes over the 1 MiB line cap are LineTooLong, not torn
+- [Phase 04]: 04-05: StoreError::LineTooLong refuses a record whose serialized line is over the cap
+- [Phase 04]: 04-05: store files are opened after a symlink_metadata check with an inode match; creation uses create_new
 
 ### Pending Todos
 
@@ -212,6 +217,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-15T14:15:43.488Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-10-15T14:26:45.603Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
