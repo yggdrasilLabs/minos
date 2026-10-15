@@ -18,4 +18,7 @@ pub use output::{OutputCap, OutputFault, OutputInvalid};
 pub use preflight::{Capabilities, Cleared, Refusal, preflight};
 pub use role::{Candidate, Judge, Role, RoleKind};
 pub use spec::{InputDisk, JudgeData, LaunchPlan, Machine, SandboxSpec, SpecError};
-pub use untrusted::{GuestOutput, Untrusted};
+pub use untrusted::{
+    BUILD_LOG_PATH, DIFFS_DIR, GuestOutput, JUDGE_LOG_PATH, OUT_DIR, OutputFile, RUN_LOG_PATH,
+    SCORECARD_PATH, ScorecardFault, Untrusted,
+};

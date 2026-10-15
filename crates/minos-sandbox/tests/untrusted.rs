@@ -126,9 +126,8 @@ fn judge_scorecard_parses_like_core() -> TestResult {
 #[test]
 fn missing_scorecard_is_refused() -> TestResult {
     let output = judge_output(&[(JUDGE_LOG_PATH, b"no scorecard\n")])?;
-    let fault = match output.into_scorecard(&Limits::standard()) {
-        Ok(_) => return Err("a scorecard was produced".into()),
-        Err(fault) => fault,
+    let Err(fault) = output.into_scorecard(&Limits::standard()) else {
+        return Err("a scorecard was produced".into());
     };
     assert!(matches!(fault, ScorecardFault::Missing));
     assert_eq!(fault.reason(), Reason::ScorecardInvalid);
@@ -139,9 +138,8 @@ fn missing_scorecard_is_refused() -> TestResult {
 fn oversized_scorecard_is_refused_by_core() -> TestResult {
     let big = vec![b' '; 5000];
     let output = judge_output(&[(SCORECARD_PATH, &big)])?;
-    let fault = match output.into_scorecard(&Limits::standard()) {
-        Ok(_) => return Err("a scorecard was produced".into()),
-        Err(fault) => fault,
+    let Err(fault) = output.into_scorecard(&Limits::standard()) else {
+        return Err("a scorecard was produced".into());
     };
     assert!(matches!(
         fault,
