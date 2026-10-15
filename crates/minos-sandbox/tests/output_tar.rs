@@ -68,8 +68,11 @@ fn candidate_cleared() -> Result<Cleared<Candidate>, Box<dyn Error>> {
         .map_err(|refusals| format!("{refusals:?}").into())
 }
 
+/// What reading a judge stream yields.
+type ReadResult = Result<Untrusted<GuestOutput<Judge>>, OutputFault>;
+
 /// Reads `stream` as the output of an exited Judge launch.
-fn read(stream: Vec<u8>) -> Result<Result<Untrusted<GuestOutput<Judge>>, OutputFault>, Box<dyn Error>> {
+fn read(stream: Vec<u8>) -> Result<ReadResult, Box<dyn Error>> {
     Ok(Finished::new(&judge_cleared()?, Ended::Exited, stream).into_output())
 }
 
@@ -134,7 +137,10 @@ fn entry(header: &Header, data: &[u8]) -> Vec<u8> {
 /// A ustar regular-file entry named `name` holding `data`.
 fn regular(name: &str, data: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let size = u64::try_from(data.len())?;
-    Ok(entry(&header(Magic::Ustar, name.as_bytes(), b'0', size), data))
+    Ok(entry(
+        &header(Magic::Ustar, name.as_bytes(), b'0', size),
+        data,
+    ))
 }
 
 /// The two zero blocks that end an archive.
@@ -143,7 +149,8 @@ fn end_blocks() -> Vec<u8> {
 }
 
 /// The scorecard a valid judge writes.
-const SCORECARD: &[u8] = br#"{"v":1,"metrics":[{"name":"throughput_mb_s","value":12.5,"held_out":false}]}"#;
+const SCORECARD: &[u8] =
+    br#"{"v":1,"metrics":[{"name":"throughput_mb_s","value":12.5,"held_out":false}]}"#;
 /// The judge's log.
 const JUDGE_LOG: &[u8] = b"judge ok\n";
 /// A judge artifact.
@@ -256,5 +263,21 @@ fn finished_reports_its_end_and_key() -> TestResult {
     let finished = Finished::new(&candidate, Ended::Exited, valid_judge_output()?);
     assert_eq!(finished.key(), candidate.plan().key());
     assert_eq!(finished.into_output()?.entry_count(), 3);
+    Ok(())
+}
+
+#[test]
+fn gnu_and_v7_headers_are_not_ustar() -> TestResult {
+    for magic in [Magic::Gnu, Magic::Old] {
+        let mut stream = entry(&header(magic, b"out/a", b'0', 4), b"data");
+        stream.extend(end_blocks());
+        assert_eq!(
+            fault(stream)?,
+            OutputFault::Invalid {
+                why: OutputInvalid::NotUstar
+            },
+            "{magic:?}"
+        );
+    }
     Ok(())
 }
