@@ -331,3 +331,59 @@ Twelve cases, each a compile error for the intended reason: no role can attach a
 `into_scorecard`, only a Judge spec takes secrets, `Cleared` cannot be cloned or built by literal, `launch` refuses
 a bare `LaunchPlan`, `LaunchPlan` cannot be built by literal, and `Untrusted` has no Debug, Display, Deref, or
 public field. `git status --porcelain crates` printed nothing after this task.
+
+## Final gate
+
+Run on 2026-10-15 from the repository root, in this order, after the Task 1 and Task 2 commits (HEAD `11f7ed3`),
+with `TRYBUILD` unset in the environment. Every step exited 0.
+
+1. `cargo fmt --all --check`: exit 0, no output.
+2. `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+   ```
+       Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+   ```
+3. `cargo test --workspace` (`TRYBUILD` unset): exit 0. Over every test binary and doc-test run: 911 passed,
+   0 failed, 26 ignored. The known flaky `minos-backend-krun` supervise test did not fail. The Phase 4 binaries:
+   ```
+   minos-store   unittests src/lib.rs      test result: ok. 5 passed; 0 failed; 0 ignored
+   minos-store   tests/contract.rs         test result: ok. 24 passed; 0 failed; 0 ignored
+   minos-store   tests/file_blobs.rs       test result: ok. 8 passed; 0 failed; 0 ignored
+   minos-store   tests/file_ledger.rs      test result: ok. 24 passed; 0 failed; 0 ignored
+   minos-sandbox unittests src/lib.rs      test result: ok. 1 passed; 0 failed; 0 ignored
+   minos-sandbox tests/backend.rs          test result: ok. 6 passed; 0 failed; 0 ignored
+   minos-sandbox tests/compile_fail.rs     test result: ok. 1 passed; 0 failed; 0 ignored
+   minos-sandbox tests/output_tar.rs       test result: ok. 35 passed; 0 failed; 1 ignored
+   minos-sandbox tests/preflight.rs        test result: ok. 6 passed; 0 failed; 0 ignored
+   minos-sandbox tests/spec.rs             test result: ok. 10 passed; 0 failed; 0 ignored
+   minos-sandbox tests/untrusted.rs        test result: ok. 11 passed; 0 failed; 0 ignored
+   minos-source  unittests src/lib.rs      test result: ok. 7 passed; 0 failed; 0 ignored
+   minos-source  tests/clean.rs            test result: ok. 10 passed; 0 failed; 0 ignored
+   minos-source  tests/denylist.rs         test result: ok. 5 passed; 0 failed; 0 ignored
+   minos-source  tests/pack.rs             test result: ok. 8 passed; 0 failed; 0 ignored
+   minos-source  tests/refusals.rs         test result: ok. 12 passed; 0 failed; 0 ignored
+   minos-source  tests/scan.rs             test result: ok. 9 passed; 0 failed; 0 ignored
+   ```
+   The one ignored `output_tar` test is the corpus writer, run by hand only.
+4. `cargo deny check`: exit 0.
+   ```
+   advisories ok, bans ok, licenses ok, sources ok
+   ```
+   Warnings only: seven `duplicate` entries (bitflags, getrandom, miniz_oxide, nix, rand_chacha, rand_core, syn) and
+   three `unused-wrapper` entries for layering edges that do not exist yet; both predate this plan.
+5. `cargo doc --workspace --no-deps`: exit 0, no warning or error line.
+6. `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings`: exit 0.
+7. C-01 printed 11 `ok` lines and no `MISSING` line (backend-krun, cli, core, guest, loop, propose, runner,
+   sandbox, source, store, vmm). C-02 `grep -rnE '#!?\[allow\(' crates --include='*.rs'` printed nothing (grep
+   exit 1).
+8. Unchanged bans: `git log --diff-filter=A --format=%h -- crates/minos-source/clippy.toml` is `56467aa`, the 04-01
+   commit that created all three crate files, and
+   `git log --oneline 56467aa..HEAD -- crates/minos-store/clippy.toml crates/minos-sandbox/clippy.toml crates/minos-source/clippy.toml`
+   printed nothing. `git diff --quiet -- crates/minos-core/clippy.toml` exited 0, and no commit since `56467aa`
+   touched it.
+
+Every step exited 0, so `cargo clean` ran next, as the last cargo command of this plan:
+
+```
+$ cargo clean
+     Removed 36320 files, 5.0GiB total
+```
