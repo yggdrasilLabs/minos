@@ -23,6 +23,7 @@
 //! directory that holds the new entry is fsynced as well. A blob is written to a temporary file in its shard
 //! directory, synced, and renamed over its final path, so a reader sees the whole blob or none of it.
 
+mod blobs;
 mod ledger;
 
 pub use ledger::{MAX_LEDGER_BYTES, MAX_LEDGER_LINE_BYTES};
@@ -32,7 +33,7 @@ use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
-use minos_core::id::RunId;
+use minos_core::id::{BlobId, RunId};
 
 use crate::StoreError;
 
@@ -101,6 +102,28 @@ impl FileStore {
     /// `root/runs/<run hex>/ledger.lock`.
     fn lock_path(&self, run: &RunId) -> PathBuf {
         self.run_dir(run).join(LOCK_FILE)
+    }
+
+    /// `root/blobs`.
+    fn blobs_dir(&self) -> PathBuf {
+        self.root.join("blobs")
+    }
+
+    /// `root/blobs/sha256`.
+    fn sha256_dir(&self) -> PathBuf {
+        self.blobs_dir().join("sha256")
+    }
+
+    /// `root/blobs/sha256/<first 2 hex>`: the blob's shard directory. Built from characters, never by indexing.
+    fn blob_shard(&self, id: &BlobId) -> PathBuf {
+        let shard: String = id.to_hex().chars().take(2).collect();
+        self.sha256_dir().join(shard)
+    }
+
+    /// `root/blobs/sha256/<first 2 hex>/<remaining 62 hex>`: the blob's file.
+    fn blob_path(&self, id: &BlobId) -> PathBuf {
+        let rest: String = id.to_hex().chars().skip(2).collect();
+        self.blob_shard(id).join(rest)
     }
 }
 
