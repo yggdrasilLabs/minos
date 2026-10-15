@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04
 current_phase_name: store-source-snapshot-and-sandbox-types
-status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-10-15T14:59:50.541Z"
+status: verifying
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-10-15T15:09:46.340Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 8
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 38
-  completed_plans: 37
-  percent: 38
+  completed_plans: 38
+  percent: 50
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 Phase: 04 (store-source-snapshot-and-sandbox-types) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-14 — Phase 04 execution started
 
 Progress: [██████████] 100% (29 of 29 plans)
@@ -94,6 +94,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 04 P06 | 9min | 3 tasks | 26 files |
 | Phase 04 P07 | 7min | 3 tasks | 6 files |
 | Phase 04 P08 | 6min | 3 tasks | 30 files |
+| Phase 04 P09 | 6min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -203,6 +204,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-08: Backend has exactly capabilities() and launch(ok: Cleared<R>) plus the GAT Running<R: Role>: RunningVm<R>; wait returns Result<Finished<R>, InfraError>; candidate faults stay values inside Finished
 - [Phase 04]: 04-08: Backend is not sealed (backend crates implement it); Cleared, minted only by preflight and taken by value, carries the security
 - [Phase 04]: 04-08: the compile-fail suite holds the twelve planned cases; Untrusted::new from outside and Finished::new with a wrong-role Cleared are follow-up candidates
+- [Phase 04]: 04-09: GATE-06 not checked off (cross-cutting); the phase verifier reruns cargo clean as its last command after verification passes
+- [Phase 04]: 04-09: CLAUDE.md gains the minos-store section and three open questions (id_* denylist breadth, backend blob access, streaming blob put); other known limitations live in 04-VALIDATION.md
 
 ### Pending Todos
 
@@ -227,6 +230,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-15T14:59:33.598Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-10-15T15:09:41.393Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None

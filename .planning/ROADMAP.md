@@ -46,7 +46,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Workspace and Gates** - Five plain cargo commands enforce lints, supply-chain policy, and crate layering from the first commit (completed 2026-10-09)
 - [x] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md (completed 2026-10-10)
 - [x] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core` (completed 2026-10-14)
-- [ ] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts
+- [x] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts (completed 2026-10-15)
 - [ ] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor`
 - [ ] **Phase 6: Proposers** - Seeded sweep and a locked-down `claude -p` single_shot behind the `ModelProvider` abstraction
 - [ ] **Phase 7: Runner and Loop** - Candidate-then-judge VMs and a resumable generation driver with caps and a circuit breaker
@@ -210,7 +210,7 @@ Plans:
   4. Packing the same working tree twice yields byte-identical tarballs and the same `TreeId` (sorted paths, zeroed metadata, regular files only), honoring `.gitignore`, `.minosignore`, and the hard denylist. A planted secret blocks the pack, and a dirty tree is refused unless `--allow-dirty` is given (CLI-11)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 8/9 plans executed
+**Plans**: 9/9 plans complete
 Plans:
 **Wave 1**
 
@@ -234,7 +234,7 @@ Plans:
 
 **Wave 5** *(blocked on all prior plans)*
 
-- [ ] 04-09-PLAN.md — CLAUDE.md store section and open questions, validation map, deliberate-violation evidence, full gate, then `cargo clean` (wave 5)
+- [x] 04-09-PLAN.md — CLAUDE.md store section and open questions, validation map, deliberate-violation evidence, full gate, then `cargo clean` (wave 5)
 
 **Research**: Standard patterns; skip research-phase
 **Note (2026-10-14, from the Phase 3 plan check)**: `RelPath` (Phase 3, CORE-02) is ASCII-only in v1: each component matches `[A-Za-z0-9._+-]+`, is not `.` or `..`, and does not start with `-`. Phase 4's source packing (CLI-11) and hostile-tar parsing (SBX-05) inherit that grammar. Phase 4 must either live with it (refuse a project file or output entry whose name falls outside it, with a clear error) or widen it with a property test that keeps every CORE-02 rejection.
@@ -322,7 +322,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 1. Workspace and Gates | 5/5 | Complete    | 2026-10-09 |
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
-| 4. Store, Source Snapshot, and Sandbox Types | 8/9 | In Progress|  |
+| 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete   | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 0/TBD | Not started | - |
 | 6. Proposers | 0/TBD | Not started | - |
 | 7. Runner and Loop | 0/TBD | Not started | - |
