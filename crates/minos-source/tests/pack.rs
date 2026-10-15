@@ -187,7 +187,12 @@ fn golden_project_tree() -> TestResult {
     let files = golden_files();
     // Each file's content first, so a typo in a file fails here and not as an opaque tarball mismatch.
     for file in &files {
-        assert_eq!(BlobId::of(file.bytes).to_hex(), file.sha256, "{}", file.path);
+        assert_eq!(
+            BlobId::of(file.bytes).to_hex(),
+            file.sha256,
+            "{}",
+            file.path
+        );
     }
     let dir = project()?;
     let snap = pack(dir.path())?;
@@ -296,18 +301,33 @@ fn exclusions() -> TestResult {
     write_file(parent.path(), ".gitignore", b"notes.txt\n", false)?;
     let dir = parent.path().join("project");
     write_project(&dir, &golden_files())?;
-    write_file(&dir, "notes.txt", b"kept: only a parent .gitignore names it\n", false)?;
+    write_file(
+        &dir,
+        "notes.txt",
+        b"kept: only a parent .gitignore names it\n",
+        false,
+    )?;
     // A project .ignore file must have no effect.
     write_file(&dir, ".ignore", b"extra.txt\n", false)?;
     write_file(&dir, "extra.txt", b"kept: only .ignore names it\n", false)?;
     write_file(&dir, ".gitignore", b"build.log\n", false)?;
     write_file(&dir, "build.log", b"dropped by .gitignore\n", false)?;
     write_file(&dir, "sub/.gitignore", b"local.tmp\n", false)?;
-    write_file(&dir, "sub/local.tmp", b"dropped by a nested .gitignore\n", false)?;
+    write_file(
+        &dir,
+        "sub/local.tmp",
+        b"dropped by a nested .gitignore\n",
+        false,
+    )?;
     write_file(&dir, "sub/kept.txt", b"kept\n", false)?;
     write_file(&dir, ".minosignore", b"scratch.txt\n", false)?;
     write_file(&dir, "scratch.txt", b"dropped by .minosignore\n", false)?;
-    write_file(&dir, "docs/guide.md", b"dropped by [source] exclude\n", false)?;
+    write_file(
+        &dir,
+        "docs/guide.md",
+        b"dropped by [source] exclude\n",
+        false,
+    )?;
 
     let snap = pack(&dir)?;
     let paths = listed(snap.tarball())?;
