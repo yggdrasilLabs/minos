@@ -227,13 +227,19 @@ macro_rules! ledger_contract {
     };
 }
 
-/// Runs a blob case against every implementation.
+/// Runs a blob case against every implementation. The file arm keeps its `TempDir` alive until the case returns.
 macro_rules! blob_contract {
     ($case:ident) => {
         mod $case {
             #[test]
             fn memory() -> super::TestResult {
                 super::$case(&minos_store::MemoryStore::new())
+            }
+
+            #[test]
+            fn file() -> super::TestResult {
+                let dir = tempfile::tempdir()?;
+                super::$case(&minos_store::FileStore::open(dir.path())?)
             }
         }
     };
