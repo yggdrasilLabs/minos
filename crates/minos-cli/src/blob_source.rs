@@ -31,12 +31,28 @@ impl FileBlobSource {
 }
 
 impl BlobSource for FileBlobSource {
-    fn get(&self, id: &BlobId, _max: u64) -> Result<Vec<u8>, BlobSourceError> {
-        Err(BlobSourceError::Missing { id: *id })
+    fn get(&self, id: &BlobId, max: u64) -> Result<Vec<u8>, BlobSourceError> {
+        self.store.get(id, max).map_err(|error| match error {
+            StoreError::BlobMissing { id } => BlobSourceError::Missing { id },
+            StoreError::BlobTooLarge { id, size, max } => {
+                BlobSourceError::TooLarge { id, size, max }
+            }
+            StoreError::BlobTampered { id } => BlobSourceError::Tampered { id },
+            other => infrastructure(other, "reading a blob"),
+        })
     }
 
-    fn root_image(&self, _digest: &ImageDigest) -> Result<VerifiedPath, BlobSourceError> {
-        Err(BlobSourceError::Unsafe { what: "stub" })
+    fn root_image(&self, digest: &ImageDigest) -> Result<VerifiedPath, BlobSourceError> {
+        let path = self
+            .store
+            .verified_path(&digest.to_blob_id())
+            .map_err(|error| match error {
+                StoreError::BlobMissing { .. } => {
+                    BlobSourceError::RootImageMissing { digest: *digest }
+                }
+                other => infrastructure(other, "checking a root image path"),
+            })?;
+        VerifiedPath::new(path)
     }
 }
 

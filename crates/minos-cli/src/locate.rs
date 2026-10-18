@@ -8,7 +8,7 @@
 //!
 //! 1. `<dir>/minos-vmm`, where `<dir>` is the canonical directory of the running `minos`: accepted when it is a
 //!    regular file.
-//! 2. `<dir>/minos-guest`: accepted only when it is a static AArch64 ELF (`check_guest_elf`), as in an installed
+//! 2. `<dir>/minos-guest`: accepted only when it is a static aarch64 ELF (`check_guest_elf`), as in an installed
 //!    layout. In a development checkout this is the macOS build, a Mach-O file, which is rejected with its reason
 //!    (05-RESEARCH Pitfall 8): packed as `/init` it would never boot, and the run would be blamed on the candidate.
 //! 3. `<dir>/../aarch64-unknown-linux-musl/release/minos-guest`, the cargo musl build of a development checkout,
@@ -82,7 +82,7 @@ impl Located {
         self.vmm.as_deref()
     }
 
-    /// The canonical path of the static AArch64 guest, when one was found.
+    /// The canonical path of the static aarch64 guest, when one was found.
     #[must_use]
     pub fn guest(&self) -> Option<&Path> {
         self.guest.as_deref()
@@ -106,13 +106,29 @@ impl Located {
 /// configuration file.
 #[must_use]
 pub fn locate(exe: &Path) -> Located {
+    let parent = exe.parent().unwrap_or(exe);
+    let dir = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    let mut checked = Vec::with_capacity(3);
+
+    let vmm_checked = dir.join(VMM_NAME);
+    let vmm = check(&vmm_checked, check_vmm, &mut checked);
+
+    let mut guest_checked = dir.join(GUEST_NAME);
+    let mut guest = check(&guest_checked, check_guest, &mut checked);
+    if guest.is_none()
+        && let Some(target) = dir.parent()
+    {
+        guest_checked = target.join(GUEST_TARGET).join("release").join(GUEST_NAME);
+        guest = check(&guest_checked, check_guest, &mut checked);
+    }
+
     Located {
-        vmm: None,
-        guest: None,
+        vmm,
+        guest,
         krunfw: PathBuf::from(KRUNFW_PATH),
-        vmm_checked: exe.to_path_buf(),
-        guest_checked: exe.to_path_buf(),
-        checked: Vec::new(),
+        vmm_checked,
+        guest_checked,
+        checked,
     }
 }
 
@@ -169,7 +185,7 @@ fn check_vmm(path: &Path) -> Result<&'static str, &'static str> {
     }
 }
 
-/// The guest must be a regular file of at most [`GUEST_MAX_BYTES`] that is a static AArch64 ELF.
+/// The guest must be a regular file of at most [`GUEST_MAX_BYTES`] that is a static aarch64 ELF.
 fn check_guest(path: &Path) -> Result<&'static str, &'static str> {
     // Checked before opening, so a FIFO or a device is never opened.
     match fs::metadata(path) {
@@ -194,7 +210,7 @@ fn check_guest(path: &Path) -> Result<&'static str, &'static str> {
         .map_err(elf_reason)
 }
 
-/// Why a guest candidate is not a static AArch64 ELF, as fixed text.
+/// Why a guest candidate is not a static aarch64 ELF, as fixed text.
 fn elf_reason(error: ElfError) -> &'static str {
     match error {
         ElfError::NotElf => "not an ELF file (the macOS build of minos-guest is Mach-O)",
@@ -219,7 +235,7 @@ mod tests {
 
     type TestResult = Result<(), Box<dyn Error>>;
 
-    /// A minimal static AArch64 ELF header: 64-bit, little-endian, `EM_AARCH64`, no program headers.
+    /// A minimal static aarch64 ELF header: 64-bit, little-endian, `EM_AARCH64`, no program headers.
     fn static_elf() -> Vec<u8> {
         let mut bytes = Vec::with_capacity(64);
         bytes.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0]);
@@ -253,7 +269,11 @@ mod tests {
     }
 
     fn paths(located: &super::Located) -> Vec<&Path> {
-        located.checked().iter().map(super::Candidate::path).collect()
+        located
+            .checked()
+            .iter()
+            .map(super::Candidate::path)
+            .collect()
     }
 
     #[test]
@@ -304,7 +324,11 @@ mod tests {
             .find(|candidate| candidate.path() == debug.join(GUEST_NAME))
             .ok_or("the Mach-O guest is listed")?;
         assert!(!rejected.is_accepted());
-        assert!(rejected.reason().contains("not an ELF"), "{}", rejected.reason());
+        assert!(
+            rejected.reason().contains("not an ELF"),
+            "{}",
+            rejected.reason()
+        );
         assert_eq!(
             paths(&located),
             [
