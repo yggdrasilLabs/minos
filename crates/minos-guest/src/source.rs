@@ -168,6 +168,9 @@ pub enum SourceError {
     /// The DIFF section is not UTF-8, so it cannot be the canonical diff.
     #[error("the diff section is not UTF-8")]
     DiffNotUtf8,
+    /// A [`ReadJobSource`] was asked for its job a second time: the one job was already handed out.
+    #[error("the job was already read")]
+    AlreadyRead,
 }
 
 /// A [`JobSource`] over an input disk read from `reader`.
@@ -184,6 +187,35 @@ impl<R: Read> DiskJobSource<R> {
     #[must_use]
     pub const fn new(reader: R) -> Self {
         Self { reader }
+    }
+}
+
+/// A [`JobSource`] over a job that was already read: it hands out that one result once.
+///
+/// PID 1 reads the input disk before it calls [`run_job`](crate::run::run_job), because it needs the token for
+/// the sink, the job's scratch cap for the tmpfs, and the disk closed so it can remove the device node before any
+/// stage runs (05-RESEARCH Pitfall 1). This source then gives `run_job` exactly what that read produced, a
+/// failure included, so a source failure that kept the token still reaches the host as an authenticated status.
+/// A second call is [`SourceError::AlreadyRead`] with no token.
+#[derive(Debug)]
+pub struct ReadJobSource {
+    read: Option<Result<GuestInput, SourceFailure>>,
+}
+
+impl ReadJobSource {
+    /// A source that returns `read` on its first call.
+    #[must_use]
+    pub const fn new(read: Result<GuestInput, SourceFailure>) -> Self {
+        Self { read: Some(read) }
+    }
+}
+
+impl JobSource for ReadJobSource {
+    fn read_input(&mut self) -> Result<GuestInput, SourceFailure> {
+        self.read.take().unwrap_or(Err(SourceFailure {
+            token: None,
+            error: SourceError::AlreadyRead,
+        }))
     }
 }
 
@@ -263,7 +295,7 @@ mod tests {
     use minos_core::guest::{DiskError, SectionKind, write_input_disk};
     use minos_core::id::BlobId;
 
-    use super::{DiskJobSource, GuestInput, JobSource, SourceError, SourceFailure};
+    use super::{DiskJobSource, GuestInput, JobSource, ReadJobSource, SourceError, SourceFailure};
     use crate::test_fixture::{BASE, baseline_job, candidate_job, diff, judge_job};
 
     type TestResult = Result<(), Box<dyn Error>>;
@@ -437,6 +469,45 @@ mod tests {
         assert!(shown.contains(&format!("base_len: Some({})", BASE.len())));
         // The Debug of the base bytes as a list would start with the bytes of "the".
         assert!(!shown.contains("[116, 104, 101"));
+        Ok(())
+    }
+
+    #[test]
+    fn read_source_hands_out_its_one_result() -> TestResult {
+        let job = candidate_job()?;
+        let json = job.to_json()?;
+        let diff = diff()?;
+        let bytes = disk(&[
+            (SectionKind::Job, &json),
+            (SectionKind::Base, BASE),
+            (SectionKind::Diff, diff.as_bytes()),
+        ])?;
+        let mut source = ReadJobSource::new(read(bytes));
+
+        let first = source.read_input()?;
+        let second = source.read_input();
+
+        assert!(first.token().ct_eq(&TOKEN));
+        assert_eq!(first.job(), &job);
+        let Err(failure) = second else {
+            return Err("a second read returned a job".into());
+        };
+        assert!(failure.token().is_none());
+        assert!(matches!(failure.error(), SourceError::AlreadyRead));
+        Ok(())
+    }
+
+    #[test]
+    fn read_source_passes_a_failure_through() -> TestResult {
+        let bytes = disk(&[(SectionKind::Job, b"{not json")])?;
+        let mut source = ReadJobSource::new(read(bytes));
+
+        let Err(failure) = source.read_input() else {
+            return Err("a bad job was accepted".into());
+        };
+
+        assert!(has_fixed_token(&failure));
+        assert!(matches!(failure.error(), SourceError::Job(_)));
         Ok(())
     }
 }

@@ -44,6 +44,13 @@ pub const JOB_ERROR_MARKER: &str = "MINOS-GUEST-JOB-ERROR";
 /// Console prefix printed after the status frame was written to the host.
 pub const FRAME_SENT_MARKER: &str = "MINOS-GUEST-FRAME-SENT";
 
+/// Console prefix for a setup failure PID 1 could not report to the host: the input disk could not be read, so
+/// there is no token to authenticate a status with, or nothing could be packed.
+pub const SETUP_ERROR_MARKER: &str = "MINOS-GUEST-SETUP-ERROR";
+
+/// Console prefix printed after the output tar was sent, followed by the number of connections it took.
+pub const OUTPUT_SENT_MARKER: &str = "MINOS-GUEST-OUTPUT-SENT";
+
 /// Console line printed just before the guest asks the kernel to power off.
 pub const POWEROFF_MARKER: &str = "MINOS-GUEST-POWEROFF";
 

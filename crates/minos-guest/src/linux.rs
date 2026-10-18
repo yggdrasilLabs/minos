@@ -1,73 +1,105 @@
-//! The PID 1 path: print the boot marker, mount `/proc`, `/sys`, and a tmpfs on `/tmp`, read the job from
-//! `/dev/vdb`, run its steps in order, send one status frame to the host over vsock, then power off or return
-//! as the job says.
+//! The Linux half of the guest: PID 1, the stage trampoline, and the Linux implementations of the four traits
+//! [`run_job`] works through (GUEST-01, GUEST-03, GUEST-05; 05-CONTEXT D-05, D-07, D-08).
 //!
-//! This is the only Linux-only file in the guest; `main.rs` gates the module (02-CONTEXT.md D-03). Every step
-//! failure becomes a field in that step's result. Nothing here panics on bad input, and nothing returns early
-//! from [`run`] except the job's own `return` finish.
+//! This is the only Linux-only file in the guest; `main.rs` gates the module (02-CONTEXT.md D-03).
 //!
-//! A `run` step owns a process group and a deadline. Its pipes are drained without blocking, so a daemon that
-//! inherits stdout cannot hold the step open after the command exits, and at the deadline the whole group is
-//! killed, so a command that sleeps forever costs the job one step's timeout rather than the host deadline and
-//! every earlier result. Orphans are reaped before every step as well as after a `run`.
+//! **PID 1** ([`pid1`]) does boot-time work only until it reads the job: the boot marker, `/proc` with
+//! `hidepid=invisible` (a stage cannot see PID 1's or any other uid's processes), and `/sys` read-only. Nothing
+//! per-run exists before the job arrives (CLAUDE.md: a Lambda snapshot captures memory as well as disk). Then, in
+//! order:
+//!
+//! 1. it reads the input disk `/dev/vdb` once, closes it, and removes the device node (mode 0 if the removal
+//!    fails), so no later process can read the per-launch token (05-RESEARCH Pitfall 1, Assumption A1);
+//! 2. it mounts a tmpfs on `/scratch` capped at the job's scratch size, with no devices and no setuid;
+//! 3. it calls [`run_job`] with a [`ReadJobSource`] over what it read, a [`ChunkSink`] over [`VsockConnector`],
+//!    a [`LinuxExecutor`], and a [`LinuxHandover`], which bind-mounts `/scratch/tmp` on `/tmp` and
+//!    `/scratch/out` on `/out` as it hands them over, so a stage can write only scratch (the root image is
+//!    read-only `SquashFS`);
+//! 4. it writes one console line saying what was sent, syncs, and powers off.
+//!
+//! A PID 1 panic is a kernel panic; with `panic=-1` the VM ends without any authenticated output, which the
+//! host classifies as `Crashed` (02-SPIKE-EVIDENCE.md P-PANIC).
+//!
+//! **The trampoline** ([`trampoline`]) is `/init --minos-stage <limits> -- <argv>`, spawned by PID 1 already as
+//! the stage uid. It refuses to run as PID 1 or as root, sets every stage rlimit with the current and maximum
+//! value equal, and `exec`s the command; a limit it cannot set ends it with 126 before any candidate code runs
+//! (D-08; 05-RESEARCH Pattern 5). No pre-exec hook is used: std's is `unsafe`, which is forbidden here.
+//!
+//! **A stage** runs as uid and gid 64000 with no supplementary groups, the environment cleared to
+//! [`STAGE_ENV`], stdin from `/dev/null`, stdout and stderr on one pipe drained into a capped buffer, and its own
+//! process group. PID 1 waits for that one child by pid, never for any child while the stage runs, and at the
+//! stage's deadline records `TimedOut`. Then it always kills every process but itself with `kill(-1, SIGKILL)`,
+//! which also reaches a process that left the group with `setsid`, and reaps until no child remains, so nothing
+//! the candidate started can race the packer (05-RESEARCH Patterns 5 and 6, Pitfalls 7 and 12).
 
-use std::ffi::CStr;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::net::{Shutdown, TcpStream};
-use std::os::fd::AsFd;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::path::Path;
+use std::ffi::{CString, OsString};
+use std::fs::{self, File};
+use std::io::{self, BufReader, PipeReader, PipeWriter, Read, Write};
+use std::net::Shutdown;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
-use minos_core::chunk::ChunkStream as ChunkEncoder;
-use minos_guest::job::{
-    ChunkStream, ConsoleFlood, ScratchRoundtrip, Step, VsockConnect, VsockStream,
+use minos_core::guest::{OUTPUT_VSOCK_PORT, StageEnd};
+use minos_guest::pack::LOG_CAP_BYTES;
+use minos_guest::run::{Handover, JobEnd, StageCommand, StageExecutor, StageRun, run_job};
+use minos_guest::sink::{ChunkSink, Connector};
+use minos_guest::source::{DiskJobSource, GuestInput, JobSource, ReadJobSource, SourceFailure};
+use minos_guest::stage::{
+    GUEST_GID, GUEST_UID, OUT_MOUNT, SCRATCH_MOUNT, SCRATCH_OUT_DIR, SCRATCH_TMP_DIR, STAGE_ENV,
+    TMP_MOUNT, parse_trampoline, scratch_mount_data, trampoline_argv,
 };
-use minos_guest::job::{Connect, Finish, Job, JobError, Run, read_job};
-use minos_guest::pattern::{fill_pattern, pattern_byte};
-use minos_guest::report::{
-    BootResult, ChunkStreamResult, ConnectAttempt, ConnectResult, ConsoleFloodResult, Report,
-    RunResult, ScratchResult, StepResult, VsockConnectResult, VsockStreamResult, encode_frame,
-};
-use minos_guest::{BOOT_MARKER, FRAME_SENT_MARKER, JOB_ERROR_MARKER, POWEROFF_MARKER};
-use rustix::fs::{OFlags, fcntl_setfl};
+use minos_guest::{BOOT_MARKER, OUTPUT_SENT_MARKER, POWEROFF_MARKER, SETUP_ERROR_MARKER};
+use rustix::fs::{AtFlags, CWD, Gid, Mode, OFlags, Uid, chmod, chownat, fcntl_setfl, sync, unlink};
 use rustix::io::Errno;
-use rustix::mount::{MountFlags, mount};
-use rustix::process::{Pid, Signal, WaitOptions, kill_process_group, wait};
+use rustix::mount::{MountFlags, mount, mount_bind};
+use rustix::process::{
+    Pid, Resource, Rlimit, Signal, WaitOptions, WaitStatus, geteuid, getpid, kill_process_group,
+    setrlimit, wait, waitpid,
+};
 use rustix::system::{RebootCommand, reboot};
-use vsock::{VMADDR_CID_HOST, VsockStream as Vsock};
+use vsock::{VMADDR_CID_HOST, VsockStream};
 
-/// The job disk: the second virtio-blk device, attached read-only by the launcher.
-const JOB_DISK: &str = "/dev/vdb";
-/// The scratch disk: the third virtio-blk device, the only writable one.
-const SCRATCH_DISK: &str = "/dev/vdc";
-/// Chunk size for pattern writes and reads.
-const CHUNK: usize = 64 * 1024;
-/// Most bytes read from any one small kernel file (`/proc/cmdline` and the like).
-const SMALL_FILE_CAP: u64 = 64 * 1024;
-/// Console lines from `console_flood` are 79 printable bytes and a newline.
-const FLOOD_LINE: u64 = 80;
-/// Pause between polls of a running command's pipes and exit status.
-const RUN_POLL: Duration = Duration::from_millis(5);
+/// Where the trampoline lives: PID 1's own binary.
+const INIT_PATH: &str = "/init";
+/// The input disk: the second virtio-blk device, attached read-only by the launcher. Read once, then removed.
+const INPUT_DISK: &str = "/dev/vdb";
 /// Flags on `/proc` and `/sys`: nothing on either is a device, setuid, or executable. `/sys` is also read-only,
-/// so a command cannot write `/sys/power/state` and turn its own failure into an unexplained power-off that the
-/// host would classify as `Crashed` rather than attribute to the command.
+/// so a stage cannot write `/sys/power/state` and turn its own failure into an unexplained power-off.
 const PSEUDO_FLAGS: MountFlags = MountFlags::NOSUID
     .union(MountFlags::NODEV)
     .union(MountFlags::NOEXEC);
-/// Flags on the `/tmp` tmpfs: no devices and no setuid. Execution stays allowed, because build-time checks
-/// compile and run small programs in a temporary directory.
-const TMP_FLAGS: MountFlags = MountFlags::NOSUID.union(MountFlags::NODEV);
-/// Size cap of the `/tmp` tmpfs, as a share of guest memory. The root is read-only `SquashFS`, so this and the
-/// scratch disk are the only writable paths; the cap keeps a command from filling guest memory through `/tmp`.
-const TMP_SIZE: &CStr = c"size=25%";
+/// `/proc` hides every process the reader cannot ptrace, PID 1 included, from a stage.
+const PROC_DATA: &std::ffi::CStr = c"hidepid=invisible";
+/// Flags on the scratch tmpfs: no devices and no setuid. Execution stays allowed, because builds run the programs
+/// they compile there. The `/tmp` and `/out` bind mounts inherit these flags from it.
+const SCRATCH_FLAGS: MountFlags = MountFlags::NOSUID.union(MountFlags::NODEV);
+/// The trampoline's exit code when it refuses to run or cannot set a limit: no candidate code ran.
+const TRAMPOLINE_REFUSED: u8 = 126;
+/// The trampoline's exit code when `exec` of the stage command failed.
+const TRAMPOLINE_EXEC_FAILED: u8 = 127;
+/// How often PID 1 polls the stage child while it runs.
+const STAGE_POLL: Duration = Duration::from_millis(10);
+/// How often the drain thread looks at an empty pipe.
+const DRAIN_POLL: Duration = Duration::from_millis(5);
+/// Read size of the drain thread.
+const DRAIN_BUF: usize = 64 * 1024;
+/// Most time PID 1 spends killing and reaping after a stage.
+const REAP_BOUND: Duration = Duration::from_secs(5);
+/// How often PID 1 repeats the kill while children remain.
+const REAP_POLL: Duration = Duration::from_millis(10);
 
-/// Runs the guest as PID 1.
-pub fn run() -> ExitCode {
+// ---------------------------------------------------------------------------------------------------------------
+// PID 1
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Runs the guest as PID 1. Never returns: it powers off.
+pub fn pid1() -> ! {
     console_line(BOOT_MARKER);
-    mount_at("proc", "/proc", "proc", PSEUDO_FLAGS, None);
+    mount_at("proc", "/proc", "proc", PSEUDO_FLAGS, Some(PROC_DATA));
     mount_at(
         "sysfs",
         "/sys",
@@ -75,620 +107,438 @@ pub fn run() -> ExitCode {
         PSEUDO_FLAGS.union(MountFlags::RDONLY),
         None,
     );
-    mount_at("tmpfs", "/tmp", "tmpfs", TMP_FLAGS, Some(TMP_SIZE));
 
-    let job = match load_job() {
-        Ok(job) => job,
-        Err(error) => {
-            console_line(&format!("{JOB_ERROR_MARKER} {error}"));
-            power_off()
+    // Per-run work starts here. Nothing above depends on the job.
+    let read = read_input();
+    protect_input_disk();
+    let Some(read) = read else { power_off() };
+    let token = match &read {
+        Ok(input) => input.token().clone(),
+        Err(failure) => {
+            if let Some(token) = failure.token() {
+                token.clone()
+            } else {
+                console_line(&format!("{SETUP_ERROR_MARKER} {}", chain(failure.error())));
+                power_off()
+            }
         }
     };
-
-    let mut report = Report::new();
-    for step in job.steps() {
-        reap_orphans();
-        let result = match step {
-            Step::ReportBoot(_) => StepResult::ReportBoot(report_boot()),
-            Step::Connect(step) => StepResult::Connect(connect(step)),
-            Step::VsockConnect(step) => StepResult::VsockConnect(vsock_connect(*step)),
-            Step::VsockStream(step) => {
-                StepResult::VsockStream(vsock_stream(job.vsock_port(), *step))
-            }
-            Step::ScratchRoundtrip(step) => StepResult::ScratchRoundtrip(scratch_roundtrip(*step)),
-            Step::Run(step) => StepResult::Run(run_command(step)),
-            Step::ConsoleFlood(step) => StepResult::ConsoleFlood(console_flood(*step)),
-            Step::Hang(_) => hang(),
-            Step::ChunkStream(step) => {
-                StepResult::ChunkStream(chunk_stream(job.vsock_port(), step))
-            }
-        };
-        report.push(result);
+    if let Ok(input) = &read {
+        mount_scratch(input.job().scratch_mib());
     }
 
-    match encode_frame(&report) {
-        Ok(frame) => match send_frame(job.vsock_port(), &frame) {
-            Ok(()) => console_line(&format!("{FRAME_SENT_MARKER} {} bytes", frame.len())),
-            Err(error) => console_line(&format!("minos-guest: sending the status frame: {error}")),
-        },
-        Err(error) => console_line(&format!("minos-guest: encoding the status frame: {error}")),
-    }
+    let mut source = ReadJobSource::new(read);
+    let mut sink = ChunkSink::new(VsockConnector, token);
+    let mut executor = LinuxExecutor;
+    let mut handover = LinuxHandover::default();
+    let end = run_job(
+        &mut source,
+        &mut sink,
+        &mut executor,
+        &mut handover,
+        Path::new(SCRATCH_MOUNT),
+    );
+    report_end(&end);
+    sync();
+    power_off()
+}
 
-    match job.finish() {
-        Finish::Return => ExitCode::SUCCESS,
-        Finish::Poweroff => power_off(),
+/// Opens the input disk, reads it once through a [`DiskJobSource`], and closes it. `None` when it cannot be
+/// opened, after a setup-error console line: without the disk there is no token, so nothing can be sent.
+fn read_input() -> Option<Result<GuestInput, SourceFailure>> {
+    let disk = match File::open(INPUT_DISK) {
+        Ok(disk) => disk,
+        Err(error) => {
+            console_line(&format!(
+                "{SETUP_ERROR_MARKER} open {INPUT_DISK}: {}",
+                error.kind()
+            ));
+            return None;
+        }
+    };
+    // The source and the file it owns are dropped at the end of this statement, so the disk is closed before
+    // its node is removed.
+    Some(DiskJobSource::new(BufReader::new(disk)).read_input())
+}
+
+/// Removes the input disk's device node, or makes it mode 0 if the removal fails, so no later process can open
+/// it and read the token. The stage uid could not open the node anyway (devtmpfs makes block devices root-owned
+/// and not world-readable); this keeps the token unreadable even to a process that gained a group.
+fn protect_input_disk() {
+    if let Err(errno) = unlink(INPUT_DISK) {
+        console_line(&format!("minos-guest: unlink {INPUT_DISK}: {errno}"));
+        if let Err(errno) = chmod(INPUT_DISK, Mode::empty()) {
+            console_line(&format!("minos-guest: chmod {INPUT_DISK}: {errno}"));
+        }
     }
 }
 
-/// Writes one line to the console (stdout is `/dev/console`, which is hvc0). A console write error has
-/// nowhere to be reported, so it is dropped rather than allowed to panic the way `println!` would.
+/// Mounts the scratch tmpfs. A failure is a console line; `run_job` then cannot create its directories on the
+/// read-only root and sends an authenticated `setup: failed {mount}` status.
+fn mount_scratch(scratch_mib: u16) {
+    match CString::new(scratch_mount_data(scratch_mib)) {
+        Ok(data) => mount_at(
+            "tmpfs",
+            SCRATCH_MOUNT,
+            "tmpfs",
+            SCRATCH_FLAGS,
+            Some(data.as_c_str()),
+        ),
+        Err(_) => console_line("minos-guest: the scratch mount data holds a NUL"),
+    }
+}
+
+/// Writes what [`run_job`] did as console lines: the output-sent marker with the connection count, or why
+/// nothing was sent, then the first setup error, if any.
+fn report_end(end: &JobEnd) {
+    match end.sent() {
+        Some(Ok(report)) => console_line(&format!("{OUTPUT_SENT_MARKER} {}", report.connections())),
+        Some(Err(error)) => console_line(&format!("minos-guest: output not sent: {error}")),
+        None => console_line(&format!("{SETUP_ERROR_MARKER} no output was packed")),
+    }
+    if let Some(error) = end.error() {
+        console_line(&format!("minos-guest: {}", chain(error)));
+    }
+}
+
+/// `error` and its sources, joined by `": "`. Every guest error message is fixed text and numbers.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(next) = source {
+        text.push_str(": ");
+        text.push_str(&next.to_string());
+        source = next.source();
+    }
+    text
+}
+
+/// Writes one line to the console (stdout is `/dev/console`). A console write error has nowhere to be reported,
+/// so it is dropped rather than allowed to panic the way `println!` would.
 fn console_line(text: &str) {
     let mut out = io::stdout().lock();
     let written = writeln!(out, "{text}").and_then(|()| out.flush());
     drop(written);
 }
 
-/// Mounts `fstype` at `target`. A failure is printed on the console and the boot goes on: the packer creates
-/// every mount point, and a step that needs the mount reports its own error.
-fn mount_at(source: &str, target: &str, fstype: &str, flags: MountFlags, data: Option<&CStr>) {
-    if let Err(error) = mount(source, target, fstype, flags, data) {
-        console_line(&format!("minos-guest: mount {target}: {error}"));
+/// Mounts `fstype` at `target`. A failure is printed on the console; the step that needs the mount fails on its
+/// own and reports it.
+fn mount_at(
+    source: &str,
+    target: &str,
+    fstype: &str,
+    flags: MountFlags,
+    data: Option<&std::ffi::CStr>,
+) {
+    if let Err(errno) = mount(source, target, fstype, flags, data) {
+        console_line(&format!("minos-guest: mount {target}: {errno}"));
     }
 }
 
-fn load_job() -> Result<Job, JobError> {
-    let mut disk = File::open(JOB_DISK).map_err(JobError::Io)?;
-    read_job(&mut disk)
-}
-
-/// Asks the kernel to power off. PID 1 must not exit unless the job said `return`, so if the call fails the
-/// guest prints the error and sleeps until the host deadline ends the VM.
+/// Asks the kernel to power off. PID 1 must never exit, so if the call fails the guest prints the error and
+/// sleeps until the host deadline ends the VM.
 fn power_off() -> ! {
     console_line(POWEROFF_MARKER);
-    if let Err(error) = reboot(RebootCommand::PowerOff) {
-        console_line(&format!("minos-guest: power off: {error}"));
+    if let Err(errno) = reboot(RebootCommand::PowerOff) {
+        console_line(&format!("minos-guest: power off: {errno}"));
     }
-    hang()
-}
-
-fn hang() -> ! {
     loop {
-        std::thread::sleep(Duration::from_hours(1));
+        thread::sleep(Duration::from_hours(1));
     }
 }
 
-fn lossy(text: &std::ffi::OsStr) -> String {
-    text.to_string_lossy().into_owned()
-}
+// ---------------------------------------------------------------------------------------------------------------
+// The trampoline
+// ---------------------------------------------------------------------------------------------------------------
 
-/// Reads a small kernel-provided file, trimmed. An unreadable file becomes a marked string in the report.
-fn read_trimmed(path: &Path) -> String {
-    let mut bytes = Vec::new();
-    match File::open(path).and_then(|file| file.take(SMALL_FILE_CAP).read_to_end(&mut bytes)) {
-        Ok(_) => String::from_utf8_lossy(&bytes).trim().to_owned(),
-        Err(error) => format!("<unreadable: {error}>"),
+/// Runs as `/init --minos-stage <limits> -- <argv>`: sets the stage's limits, then `exec`s the command.
+///
+/// Exits 126 without `exec` when it is PID 1 or root, when its argv is not the one PID 1 writes, or when any
+/// limit cannot be set, so no candidate code ever runs without its limits. Exits 127 when `exec` fails.
+pub fn trampoline() -> ExitCode {
+    if getpid().is_init() || geteuid().is_root() {
+        stderr_line(
+            "minos-guest: the stage trampoline runs only as the stage uid, never as PID 1 or root",
+        );
+        return ExitCode::from(TRAMPOLINE_REFUSED);
     }
-}
-
-/// Sorted entry names of a directory. An unreadable directory becomes one marked entry.
-fn dir_names(path: &str) -> Vec<String> {
-    match fs::read_dir(path) {
-        Ok(entries) => {
-            let mut names: Vec<String> = entries
-                .map(|entry| match entry {
-                    Ok(entry) => lossy(&entry.file_name()),
-                    Err(error) => format!("<unreadable entry: {error}>"),
-                })
-                .collect();
-            names.sort();
-            names
+    let args: Vec<OsString> = std::env::args_os().collect();
+    let (limits, argv) = match parse_trampoline(&args) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            stderr_line(&format!("minos-guest: {error}"));
+            return ExitCode::from(TRAMPOLINE_REFUSED);
         }
-        Err(error) => vec![format!("<unreadable: {error}>")],
+    };
+    let wanted = [
+        (Resource::As, "RLIMIT_AS", limits.address_space_bytes()),
+        (Resource::Fsize, "RLIMIT_FSIZE", limits.file_size_bytes()),
+        (Resource::Nproc, "RLIMIT_NPROC", limits.processes()),
+        (Resource::Cpu, "RLIMIT_CPU", limits.cpu_seconds()),
+        (Resource::Nofile, "RLIMIT_NOFILE", limits.open_files()),
+        (Resource::Core, "RLIMIT_CORE", 0),
+    ];
+    for (resource, name, value) in wanted {
+        let limit = Rlimit {
+            current: Some(value),
+            maximum: Some(value),
+        };
+        if let Err(errno) = setrlimit(resource, limit) {
+            stderr_line(&format!("minos-guest: setting {name}: {errno}"));
+            return ExitCode::from(TRAMPOLINE_REFUSED);
+        }
+    }
+    let mut argv = argv.into_iter();
+    let Some(program) = argv.next() else {
+        stderr_line("minos-guest: the stage has no command");
+        return ExitCode::from(TRAMPOLINE_REFUSED);
+    };
+    let error = Command::new(program).args(argv).exec();
+    stderr_line(&format!("minos-guest: exec: {}", error.kind()));
+    ExitCode::from(TRAMPOLINE_EXEC_FAILED)
+}
+
+/// Writes one line to stderr, which for a stage is the captured log. A write error is dropped.
+fn stderr_line(text: &str) {
+    drop(writeln!(io::stderr(), "{text}"));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The trait implementations
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Opens one vsock connection per output chunk to the host CID on [`OUTPUT_VSOCK_PORT`].
+#[derive(Debug, Clone, Copy)]
+pub struct VsockConnector;
+
+impl Connector for VsockConnector {
+    type Stream = VsockStream;
+
+    fn connect(&mut self) -> io::Result<VsockStream> {
+        VsockStream::connect_with_cid_port(VMADDR_CID_HOST, OUTPUT_VSOCK_PORT)
+    }
+
+    fn close(&mut self, stream: VsockStream) -> io::Result<()> {
+        stream.shutdown(Shutdown::Write)?;
+        drop(stream);
+        Ok(())
     }
 }
 
-fn report_boot() -> BootResult {
-    let cmdline = read_trimmed(Path::new("/proc/cmdline"));
-    let osrelease = read_trimmed(Path::new("/proc/sys/kernel/osrelease"));
-    let args: Vec<String> = std::env::args_os().map(|arg| lossy(&arg)).collect();
-    let mut env: Vec<(String, String)> = std::env::vars_os()
-        .map(|(key, value)| (lossy(&key), lossy(&value)))
-        .collect();
-    env.sort();
-    let net_ifaces = dir_names("/sys/class/net");
-    let virtio_devices: Vec<String> = dir_names("/sys/bus/virtio/devices")
-        .into_iter()
-        .map(|entry| {
-            let device = read_trimmed(
-                &Path::new("/sys/bus/virtio/devices")
-                    .join(&entry)
-                    .join("device"),
-            );
-            format!("{entry}:{device}")
-        })
-        .collect();
-
-    console_line(&format!("minos-guest: cmdline {cmdline}"));
-    console_line(&format!("minos-guest: osrelease {osrelease}"));
-    console_line(&format!("minos-guest: args {}", args.join(" ")));
-    let env_line: Vec<String> = env
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect();
-    console_line(&format!("minos-guest: env {}", env_line.join(" ")));
-    console_line(&format!("minos-guest: net_ifaces {}", net_ifaces.join(" ")));
-    console_line(&format!(
-        "minos-guest: virtio_devices {}",
-        virtio_devices.join(" ")
-    ));
-
-    BootResult::new(cmdline, osrelease, args, env, net_ifaces, virtio_devices)
+/// Hands a directory tree to the stage uid, and bind-mounts the scratch `tmp` and `out` directories on `/tmp`
+/// and `/out` the first time each is handed over. [`run_job`] calls it after creating the directories and before
+/// the first stage.
+#[derive(Debug, Default)]
+pub struct LinuxHandover {
+    bound_tmp: bool,
+    bound_out: bool,
 }
 
-fn connect(step: &Connect) -> ConnectResult {
-    let results = step
-        .targets()
-        .iter()
-        .map(
-            |target| match TcpStream::connect_timeout(target, step.timeout()) {
-                Ok(stream) => {
-                    drop(stream);
-                    ConnectAttempt {
-                        target: target.to_string(),
-                        ok: true,
-                        error: None,
-                        raw_os_error: None,
-                    }
-                }
-                Err(error) => ConnectAttempt {
-                    target: target.to_string(),
-                    ok: false,
-                    error: Some(error.to_string()),
-                    raw_os_error: error.raw_os_error(),
-                },
-            },
-        )
-        .collect();
-    ConnectResult { results }
+impl Handover for LinuxHandover {
+    fn hand_over(&mut self, dir: &Path) -> io::Result<()> {
+        chown_tree(dir)?;
+        if dir == Path::new(SCRATCH_TMP_DIR) && !self.bound_tmp {
+            mount_bind(dir, TMP_MOUNT)?;
+            self.bound_tmp = true;
+        }
+        if dir == Path::new(SCRATCH_OUT_DIR) && !self.bound_out {
+            mount_bind(dir, OUT_MOUNT)?;
+            self.bound_out = true;
+        }
+        Ok(())
+    }
 }
 
-fn vsock_connect(step: VsockConnect) -> VsockConnectResult {
-    match Vsock::connect_with_cid_port(VMADDR_CID_HOST, step.port()) {
-        Ok(stream) => {
-            drop(stream);
-            VsockConnectResult {
-                port: step.port(),
-                ok: true,
-                error: None,
-                raw_os_error: None,
+/// Changes the owner of `root` and everything under it to the stage uid and gid, never following a link: each
+/// entry is examined with `symlink_metadata` and changed with `fchownat(AT_SYMLINK_NOFOLLOW)`, and only a real
+/// directory is descended into. No stage has run yet, so nothing else changes the tree meanwhile.
+fn chown_tree(root: &Path) -> io::Result<()> {
+    let uid = Some(Uid::from_raw(GUEST_UID));
+    let gid = Some(Gid::from_raw(GUEST_GID));
+    let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        let meta = fs::symlink_metadata(&path)?;
+        chownat(CWD, &path, uid, gid, AtFlags::SYMLINK_NOFOLLOW)?;
+        if meta.file_type().is_dir() {
+            for entry in fs::read_dir(&path)? {
+                pending.push(entry?.path());
             }
         }
-        Err(error) => VsockConnectResult {
-            port: step.port(),
-            ok: false,
-            error: Some(error.to_string()),
-            raw_os_error: error.raw_os_error(),
-        },
+    }
+    Ok(())
+}
+
+/// Runs each stage through the trampoline as the stage uid, under its deadline, then kills and reaps every
+/// process but PID 1.
+#[derive(Debug, Clone, Copy)]
+pub struct LinuxExecutor;
+
+impl StageExecutor for LinuxExecutor {
+    fn run_stage(&mut self, command: &StageCommand) -> StageRun {
+        let (reader, writer) = match io::pipe() {
+            Ok(pipe) => pipe,
+            Err(error) => return spawn_failed("pipe", &error),
+        };
+        if let Err(errno) = fcntl_setfl(&reader, OFlags::NONBLOCK) {
+            return spawn_failed("pipe", &errno.into());
+        }
+        let stop = AtomicBool::new(false);
+        thread::scope(|scope| {
+            let stop = &stop;
+            let drain = match thread::Builder::new()
+                .name("minos-drain".to_owned())
+                .spawn_scoped(scope, move || drain(reader, stop))
+            {
+                Ok(drain) => drain,
+                Err(error) => return spawn_failed("drain thread", &error),
+            };
+            let end = match spawn_stage(command, writer) {
+                Ok(child) => wait_stage(child, command.deadline()),
+                Err(error) => {
+                    console_line(&format!("minos-guest: spawn stage: {}", error.kind()));
+                    StageEnd::SpawnFailed
+                }
+            };
+            kill_all_and_reap();
+            stop.store(true, Ordering::Release);
+            let log = drain.join().unwrap_or_default();
+            StageRun::new(end, log)
+        })
     }
 }
 
-/// Bytes of the next chunk: `CHUNK`, or fewer at the end.
-fn chunk_len(remaining: u64) -> usize {
-    usize::try_from(remaining).map_or(CHUNK, |remaining| remaining.min(CHUNK))
+/// A stage that could not be started because PID 1 could not set up `what`.
+fn spawn_failed(what: &str, error: &io::Error) -> StageRun {
+    console_line(&format!("minos-guest: stage {what}: {}", error.kind()));
+    StageRun::new(StageEnd::SpawnFailed, Vec::new())
 }
 
-fn to_u64(len: usize) -> u64 {
-    u64::try_from(len).unwrap_or(u64::MAX)
+/// Spawns the trampoline for `command` as the stage uid, with `writer` as its stdout and stderr. The command and
+/// with it PID 1's copies of the write end are dropped before this returns, so the drain sees the end of the
+/// pipe once every stage process is gone.
+fn spawn_stage(command: &StageCommand, writer: PipeWriter) -> io::Result<Pid> {
+    let stderr = writer.try_clone()?;
+    let argv = trampoline_argv(Path::new(INIT_PATH), &command.limits(), command.argv());
+    let mut argv = argv.into_iter();
+    let program = argv.next().unwrap_or_else(|| OsString::from(INIT_PATH));
+    let mut spawn = Command::new(program);
+    spawn
+        .args(argv)
+        // std drops supplementary groups (setgroups(0)) when a root parent sets a uid.
+        .uid(GUEST_UID)
+        .gid(GUEST_GID)
+        .env_clear()
+        .envs(STAGE_ENV)
+        .current_dir(command.cwd())
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(stderr);
+    let child = spawn.spawn();
+    drop(spawn);
+    child.map(|child| Pid::from_child(&child))
 }
 
-/// Writes `data`, counting every byte accepted, and stops at the first error. Unlike `write_all`, the count
-/// is exact even when the error arrives partway through.
-fn write_counted(out: &mut impl Write, data: &[u8]) -> (u64, Option<io::Error>) {
-    let mut rest = data;
-    let mut written = 0_u64;
-    while !rest.is_empty() {
-        match out.write(rest) {
-            Ok(0) => return (written, Some(io::Error::from(io::ErrorKind::WriteZero))),
-            Ok(n) => {
-                written = written.saturating_add(to_u64(n));
-                rest = rest.get(n..).unwrap_or_default();
+/// Waits for the stage child `child`, by its pid only, until it ends or `deadline` passes. Never waits for any
+/// other child, so an orphan the stage left cannot be reaped in its place.
+fn wait_stage(child: Pid, deadline: Duration) -> StageEnd {
+    let started = Instant::now();
+    let mut reported = false;
+    loop {
+        match waitpid(Some(child), WaitOptions::NOHANG) {
+            Ok(Some((_, status))) => {
+                if let Some(end) = end_of(status) {
+                    return end;
+                }
+            }
+            Ok(None) | Err(Errno::INTR) => {}
+            Err(errno) => {
+                // Not expected for PID 1's own unreaped child. The stage is then treated as running until its
+                // deadline, and killed with everything else.
+                if !reported {
+                    console_line(&format!("minos-guest: waitpid: {errno}"));
+                    reported = true;
+                }
+            }
+        }
+        if started.elapsed() >= deadline {
+            return StageEnd::TimedOut;
+        }
+        thread::sleep(STAGE_POLL);
+    }
+}
+
+/// How a stage that changed state ended, or `None` for a state that is not an end.
+fn end_of(status: WaitStatus) -> Option<StageEnd> {
+    if let Some(code) = status.exit_status() {
+        return Some(StageEnd::Exited { code });
+    }
+    status
+        .terminating_signal()
+        .map(|signal| StageEnd::Signaled { signal })
+}
+
+/// Kills every process but PID 1 with `kill(-1, SIGKILL)` and reaps until no child remains, repeating the kill
+/// while children remain, for at most [`REAP_BOUND`].
+fn kill_all_and_reap() {
+    let started = Instant::now();
+    loop {
+        match kill_process_group(Pid::INIT, Signal::KILL) {
+            Ok(()) | Err(Errno::SRCH) => {}
+            Err(errno) => console_line(&format!("minos-guest: kill every process: {errno}")),
+        }
+        loop {
+            match wait(WaitOptions::NOHANG) {
+                Ok(Some(_)) | Err(Errno::INTR) => {}
+                Ok(None) => break,
+                Err(Errno::CHILD) => return,
+                Err(errno) => {
+                    console_line(&format!("minos-guest: reap: {errno}"));
+                    return;
+                }
+            }
+        }
+        if started.elapsed() >= REAP_BOUND {
+            console_line("minos-guest: processes remain after the kill");
+            return;
+        }
+        thread::sleep(REAP_POLL);
+    }
+}
+
+/// Drains the stage pipe into a buffer of at most [`LOG_CAP_BYTES`] plus one byte, so the packer can tell that
+/// the log was cut. Bytes beyond the cap are read and discarded, so a stage never stalls on a full pipe.
+///
+/// The pipe is non-blocking. The drain ends at the end of the pipe, on a read error, or once `stop` is set and
+/// one more pass finds the pipe empty: PID 1 sets `stop` after every stage process is gone, and the extra pass
+/// collects whatever they wrote before dying.
+fn drain(mut reader: PipeReader, stop: &AtomicBool) -> Vec<u8> {
+    let cap = LOG_CAP_BYTES.saturating_add(1);
+    let mut kept = Vec::new();
+    let mut buf = vec![0_u8; DRAIN_BUF];
+    let mut last_pass = false;
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(read) => {
+                let room = cap.saturating_sub(kept.len());
+                if let Some(part) = buf.get(..read.min(room)) {
+                    kept.extend_from_slice(part);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if last_pass {
+                    break;
+                }
+                if stop.load(Ordering::Acquire) {
+                    last_pass = true;
+                } else {
+                    thread::sleep(DRAIN_POLL);
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return (written, Some(error)),
+            Err(_) => break,
         }
     }
-    (written, None)
-}
-
-fn vsock_stream(port: u32, step: VsockStream) -> VsockStreamResult {
-    let requested = step.bytes();
-    let mut stream = match Vsock::connect_with_cid_port(VMADDR_CID_HOST, port) {
-        Ok(stream) => stream,
-        Err(error) => {
-            return VsockStreamResult {
-                requested,
-                written: 0,
-                error: Some(error.to_string()),
-                raw_os_error: error.raw_os_error(),
-            };
-        }
-    };
-    let mut buf = vec![0_u8; CHUNK];
-    let mut written = 0_u64;
-    let mut failure = None;
-    while written < requested {
-        let Some(chunk) = buf.get_mut(..chunk_len(requested.saturating_sub(written))) else {
-            break;
-        };
-        fill_pattern(written, chunk);
-        let (count, error) = write_counted(&mut stream, chunk);
-        written = written.saturating_add(count);
-        if error.is_some() {
-            failure = error;
-            break;
-        }
-    }
-    // The host may already have closed its end after its cap; a shutdown error adds nothing to the report.
-    drop(stream.shutdown(Shutdown::Write));
-    drop(stream);
-    VsockStreamResult {
-        requested,
-        written,
-        raw_os_error: failure.as_ref().and_then(io::Error::raw_os_error),
-        error: failure.map(|error| error.to_string()),
-    }
-}
-
-/// First delay before retrying a refused or reset chunk connect.
-const CHUNK_RETRY_FIRST: Duration = Duration::from_millis(1);
-/// Longest delay between chunk connect retries; the delay doubles from [`CHUNK_RETRY_FIRST`] up to this.
-const CHUNK_RETRY_MAX: Duration = Duration::from_millis(64);
-/// Most connect attempts for one chunk before the step gives up.
-const CHUNK_CONNECT_ATTEMPTS: u32 = 200;
-
-/// Connects to the host for one chunk, retrying a refused or reset connect with delays of 1, 2, 4, ... up to 64 ms,
-/// at most [`CHUNK_CONNECT_ATTEMPTS`] times. Adds every retry to `retries`.
-fn connect_chunk(port: u32, retries: &mut u32) -> io::Result<Vsock> {
-    let mut delay = CHUNK_RETRY_FIRST;
-    let mut attempt = 1_u32;
-    loop {
-        match Vsock::connect_with_cid_port(VMADDR_CID_HOST, port) {
-            Ok(stream) => return Ok(stream),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::ConnectionRefused | io::ErrorKind::ConnectionReset
-                ) && attempt < CHUNK_CONNECT_ATTEMPTS =>
-            {
-                *retries = retries.saturating_add(1);
-                attempt = attempt.saturating_add(1);
-                std::thread::sleep(delay);
-                delay = delay.saturating_mul(2).min(CHUNK_RETRY_MAX);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-/// Sends `bytes` pattern bytes as authenticated chunks, one fresh vsock connection per chunk (S03-ANSWER): connect,
-/// write the whole chunk, shut down the write side, close. Spike-only (05-03 Wave 0); the first failure stops it.
-fn chunk_stream(port: u32, step: &ChunkStream) -> ChunkStreamResult {
-    let started = Instant::now();
-    let mut result = ChunkStreamResult {
-        bytes_sent: 0,
-        connections: 0,
-        connect_retries: 0,
-        elapsed_ms: 0,
-        error: None,
-    };
-    let Ok(len) = usize::try_from(step.bytes()) else {
-        result.error = Some("payload length does not fit this guest's address space".to_owned());
-        return result;
-    };
-    let mut payload = vec![0_u8; len];
-    fill_pattern(0, &mut payload);
-    let token = step.token();
-    for chunk in ChunkEncoder::new(&token, &payload) {
-        let sent = connect_chunk(port, &mut result.connect_retries).and_then(|mut stream| {
-            stream.write_all(&chunk)?;
-            stream.shutdown(Shutdown::Write)?;
-            drop(stream);
-            Ok(())
-        });
-        if let Err(error) = sent {
-            result.error = Some(format!("chunk {}: {error}", result.connections));
-            break;
-        }
-        result.connections = result.connections.saturating_add(1);
-        result.bytes_sent = result.bytes_sent.saturating_add(to_u64(chunk.len()));
-    }
-    result.elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    console_line(&format!(
-        "minos-guest: chunk_stream {} connections, {} retries, {} ms",
-        result.connections, result.connect_retries, result.elapsed_ms
-    ));
-    result
-}
-
-/// Writes the pattern to the scratch disk, syncs, reads it back, and compares. `Ok(Some(..))` describes a
-/// mismatch.
-fn scratch_check(bytes: u64) -> io::Result<Option<String>> {
-    let mut disk = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(SCRATCH_DISK)?;
-    let mut buf = vec![0_u8; CHUNK];
-    let mut done = 0_u64;
-    while done < bytes {
-        let Some(chunk) = buf.get_mut(..chunk_len(bytes.saturating_sub(done))) else {
-            break;
-        };
-        fill_pattern(done, chunk);
-        disk.write_all(chunk)?;
-        done = done.saturating_add(to_u64(chunk.len()));
-    }
-    disk.sync_all()?;
-    disk.seek(SeekFrom::Start(0))?;
-    let mut expected = vec![0_u8; CHUNK];
-    done = 0;
-    while done < bytes {
-        let len = chunk_len(bytes.saturating_sub(done));
-        let (Some(got), Some(want)) = (buf.get_mut(..len), expected.get_mut(..len)) else {
-            break;
-        };
-        disk.read_exact(got)?;
-        fill_pattern(done, want);
-        if let Some(at) = got.iter().zip(want.iter()).position(|(a, b)| a != b) {
-            return Ok(Some(format!(
-                "read-back mismatch at byte {}",
-                done.saturating_add(to_u64(at))
-            )));
-        }
-        done = done.saturating_add(to_u64(len));
-    }
-    Ok(None)
-}
-
-fn scratch_roundtrip(step: ScratchRoundtrip) -> ScratchResult {
-    let bytes = step.bytes();
-    match scratch_check(bytes) {
-        Ok(None) => ScratchResult {
-            bytes,
-            ok: true,
-            error: None,
-        },
-        Ok(Some(mismatch)) => ScratchResult {
-            bytes,
-            ok: false,
-            error: Some(mismatch),
-        },
-        Err(error) => ScratchResult {
-            bytes,
-            ok: false,
-            error: Some(error.to_string()),
-        },
-    }
-}
-
-/// Output captured from one child pipe.
-struct Captured {
-    text: String,
-    truncated: bool,
-}
-
-/// One child pipe drained without blocking: up to `cap` bytes are kept, the rest is read and discarded so the
-/// child never stalls on a full pipe, and a pipe closed by its last writer or a read error ends the capture.
-struct Capture<R> {
-    pipe: Option<R>,
-    bytes: Vec<u8>,
-    cap: usize,
-    truncated: bool,
-    error: Option<io::Error>,
-}
-
-impl<R: Read + AsFd> Capture<R> {
-    /// Takes the pipe and makes it non-blocking. If that fails, the pipe is dropped and the failure recorded,
-    /// so the child meets a closed stream rather than one nobody drains.
-    fn new(pipe: Option<R>, cap: u64) -> Self {
-        let mut capture = Self {
-            pipe: None,
-            bytes: Vec::new(),
-            cap: usize::try_from(cap).unwrap_or(usize::MAX),
-            truncated: false,
-            error: None,
-        };
-        if let Some(pipe) = pipe {
-            match fcntl_setfl(&pipe, OFlags::NONBLOCK) {
-                Ok(()) => capture.pipe = Some(pipe),
-                Err(errno) => capture.error = Some(errno.into()),
-            }
-        }
-        capture
-    }
-
-    /// Reads everything ready now, returning once the pipe would block, is closed, or fails.
-    fn pump(&mut self, buf: &mut [u8]) {
-        while let Some(pipe) = self.pipe.as_mut() {
-            match pipe.read(buf) {
-                Ok(0) => self.pipe = None,
-                Ok(read) => {
-                    let room = self.cap.saturating_sub(self.bytes.len());
-                    if read > room {
-                        self.truncated = true;
-                    }
-                    if let Some(kept) = buf.get(..read.min(room)) {
-                        self.bytes.extend_from_slice(kept);
-                    }
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                Err(error) => {
-                    self.error = Some(error);
-                    self.pipe = None;
-                }
-            }
-        }
-    }
-
-    fn finish(self) -> Captured {
-        let mut text = String::from_utf8_lossy(&self.bytes).into_owned();
-        if let Some(error) = self.error {
-            text.push_str("\n<read error: ");
-            text.push_str(&error.to_string());
-            text.push('>');
-        }
-        Captured {
-            text,
-            truncated: self.truncated,
-        }
-    }
-}
-
-/// Kills every process in `group`. An empty group (`ESRCH`) is the normal case after a clean exit.
-fn kill_group(group: Pid) {
-    match kill_process_group(group, Signal::KILL) {
-        Ok(()) | Err(Errno::SRCH) => {}
-        Err(errno) => console_line(&format!("minos-guest: kill process group: {errno}")),
-    }
-}
-
-fn run_command(step: &Run) -> RunResult {
-    let argv = step.argv();
-    let spawned = Command::new(step.program())
-        .args(step.args())
-        .env_clear()
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Its own group, so the deadline can kill everything the command started, not only the leader.
-        .process_group(0)
-        .spawn();
-    let mut child = match spawned {
-        Ok(child) => child,
-        Err(error) => {
-            return RunResult {
-                argv,
-                status: None,
-                signal: None,
-                timed_out: false,
-                stdout: String::new(),
-                stdout_truncated: false,
-                stderr: String::new(),
-                stderr_truncated: false,
-                error: Some(error.to_string()),
-            };
-        }
-    };
-    let group = Pid::from_child(&child);
-    let cap = step.stdout_cap();
-    let mut stdout = Capture::new(child.stdout.take(), cap);
-    let mut stderr = Capture::new(child.stderr.take(), cap);
-    let deadline = Instant::now().checked_add(step.timeout());
-    let mut buf = vec![0_u8; CHUNK];
-    let mut timed_out = false;
-    let waited = loop {
-        stdout.pump(&mut buf);
-        stderr.pump(&mut buf);
-        match child.try_wait() {
-            // The leader is gone: take what it left queued and stop. A daemon that kept a pipe open does not
-            // keep the step open.
-            Ok(Some(status)) => {
-                stdout.pump(&mut buf);
-                stderr.pump(&mut buf);
-                break Ok(status);
-            }
-            Ok(None) => {}
-            Err(error) => break Err(error),
-        }
-        if deadline.is_none_or(|deadline| Instant::now() >= deadline) {
-            timed_out = true;
-            // The leader is unreaped, so the group id is still its own.
-            kill_group(group);
-            let waited = child.wait();
-            stdout.pump(&mut buf);
-            stderr.pump(&mut buf);
-            break waited;
-        }
-        std::thread::sleep(RUN_POLL);
-    };
-    // Whatever the command left behind in its group dies with the step. The guest forks nothing between the
-    // reap and this kill, so the group id has not been reused.
-    kill_group(group);
-    reap_orphans();
-    let stdout = stdout.finish();
-    let stderr = stderr.finish();
-    match waited {
-        Ok(status) => RunResult {
-            argv,
-            status: status.code(),
-            signal: status.signal(),
-            timed_out,
-            stdout: stdout.text,
-            stdout_truncated: stdout.truncated,
-            stderr: stderr.text,
-            stderr_truncated: stderr.truncated,
-            error: None,
-        },
-        Err(error) => RunResult {
-            argv,
-            status: None,
-            signal: None,
-            timed_out,
-            stdout: stdout.text,
-            stdout_truncated: stdout.truncated,
-            stderr: stderr.text,
-            stderr_truncated: stderr.truncated,
-            error: Some(error.to_string()),
-        },
-    }
-}
-
-/// PID 1 inherits every orphan. Reap whatever has exited, without blocking. `wait` (any child) rather than
-/// `waitpid(None, ..)`, which in rustix 1.x waits only for children in the caller's process group and would
-/// miss an orphan that changed its group. Called before every step and after a `run`, so a daemon one step
-/// left behind is reaped before the next step starts.
-fn reap_orphans() {
-    while let Ok(Some(_)) = wait(WaitOptions::NOHANG) {}
-}
-
-fn console_flood(step: ConsoleFlood) -> ConsoleFloodResult {
-    let requested = step.bytes();
-    let mut out = io::stdout().lock();
-    let mut buf = vec![0_u8; CHUNK];
-    let mut written = 0_u64;
-    let mut failure = None;
-    while written < requested {
-        let Some(chunk) = buf.get_mut(..chunk_len(requested.saturating_sub(written))) else {
-            break;
-        };
-        for (byte, index) in chunk.iter_mut().zip(written..=u64::MAX) {
-            *byte = if index % FLOOD_LINE == FLOOD_LINE - 1 {
-                b'\n'
-            } else {
-                b'a' + pattern_byte(index) % 26
-            };
-        }
-        let (count, error) = write_counted(&mut out, chunk);
-        written = written.saturating_add(count);
-        if error.is_some() {
-            failure = error;
-            break;
-        }
-    }
-    if failure.is_none() {
-        failure = out.flush().err();
-    }
-    ConsoleFloodResult {
-        requested,
-        written,
-        error: failure.map(|error| error.to_string()),
-    }
-}
-
-fn send_frame(port: u32, frame: &[u8]) -> io::Result<()> {
-    let mut stream = Vsock::connect_with_cid_port(VMADDR_CID_HOST, port)?;
-    stream.write_all(frame)?;
-    stream.shutdown(Shutdown::Write)?;
-    drop(stream);
-    Ok(())
+    kept
 }

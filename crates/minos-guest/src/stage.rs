@@ -164,6 +164,13 @@ impl StageLimits {
     }
 }
 
+/// The mount data of the scratch tmpfs for a job whose scratch cap is `scratch_mib`: its size cap and a root
+/// directory of mode 0755, so only PID 1 creates entries at the top of [`SCRATCH_MOUNT`] (D-05).
+#[must_use]
+pub fn scratch_mount_data(scratch_mib: u16) -> String {
+    format!("size={scratch_mib}m,mode=0755")
+}
+
 /// The flag that makes `/init` act as the stage trampoline instead of PID 1.
 pub const TRAMPOLINE_FLAG: &str = "--minos-stage";
 
@@ -275,7 +282,7 @@ mod tests {
     use super::{
         GUEST_GID, GUEST_UID, HOME_DIR, MAX_ADDRESS_SPACE_BYTES, MAX_CPU_SECONDS,
         MAX_FILE_SIZE_BYTES, MAX_OPEN_FILES, MAX_PROCESSES, MIB, STAGE_ENV, StageLimits, TMP_MOUNT,
-        TRAMPOLINE_FLAG, TrampolineError, parse_trampoline, trampoline_argv,
+        TRAMPOLINE_FLAG, TrampolineError, parse_trampoline, scratch_mount_data, trampoline_argv,
     };
     use crate::test_fixture::{candidate_job, judge_job};
     use minos_core::outcome::Stage;
@@ -307,6 +314,18 @@ mod tests {
     }
 
     const GOOD: [&str; 5] = ["805306368", "1073741824", "512", "121", "4096"];
+
+    #[test]
+    fn scratch_mount_data_names_the_cap_and_mode() -> TestResult {
+        let job = candidate_job()?;
+
+        assert_eq!(
+            scratch_mount_data(job.scratch_mib()),
+            "size=1024m,mode=0755"
+        );
+        assert_eq!(scratch_mount_data(64), "size=64m,mode=0755");
+        Ok(())
+    }
 
     #[test]
     fn guest_identity_is_fixed_and_unprivileged() {
