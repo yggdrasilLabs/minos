@@ -217,11 +217,343 @@ pub fn run_job<S: JobSource, O: OutputSink, E: StageExecutor, H: Handover>(
     handover: &mut H,
     root: &Path,
 ) -> JobEnd {
-    let _ = (source, sink, executor, handover, root);
-    JobEnd {
-        status: None,
-        sent: None,
-        error: None,
+    let input = match source.read_input() {
+        Ok(input) => input,
+        Err(failure) => {
+            let (token, error) = failure.into_parts();
+            let error = JobError::Source(error);
+            if token.is_none() {
+                return JobEnd {
+                    status: None,
+                    sent: None,
+                    error: Some(error),
+                };
+            }
+            // The job may not have parsed, so its role is unknown. The status claims a candidate with no diff
+            // applied (the form core's own golden test uses); the host reads a failed setup as an infrastructure
+            // failure and consults neither field.
+            return setup_failed(
+                sink,
+                GuestRole::Candidate,
+                ApplyStatus::Baseline,
+                SetupStep::Input,
+                error,
+            );
+        }
+    };
+    // The sink already holds the token; this copy is dropped here, unbound.
+    let (_, job, base, diff, judge_data, candidate_out) = input.into_parts();
+    let mut parts = Parts {
+        sink,
+        executor,
+        handover,
+        root,
+        job: &job,
+    };
+    match job.role() {
+        GuestRole::Candidate => parts.candidate(base, diff),
+        GuestRole::Judge => parts.judge(judge_data, candidate_out),
+    }
+}
+
+/// The traits, the scratch root, and the job one [`run_job`] works with.
+struct Parts<'a, O, E, H> {
+    sink: &'a mut O,
+    executor: &'a mut E,
+    handover: &'a mut H,
+    root: &'a Path,
+    job: &'a GuestJob,
+}
+
+impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
+    /// A candidate: unpack, apply, hand over, build and run, pack `/out`.
+    fn candidate(&mut self, base: Option<Vec<u8>>, diff: Option<String>) -> JobEnd {
+        let role = GuestRole::Candidate;
+        let no_diff = ApplyStatus::Baseline;
+        let Some(base) = base else {
+            return setup_failed(
+                self.sink,
+                role,
+                no_diff,
+                SetupStep::Input,
+                JobError::MissingInput,
+            );
+        };
+        if let Err(error) = make_dirs(self.root, &[SRC, OUT, HOME, TMP]) {
+            return setup_failed(
+                self.sink,
+                role,
+                no_diff,
+                SetupStep::Mount,
+                JobError::Directories(error),
+            );
+        }
+        let src = self.root.join(SRC);
+        let unpacked = unpack_tar(&base, &src, &UnpackCaps::BASE);
+        drop(base);
+        if let Err(error) = unpacked {
+            return setup_failed(
+                self.sink,
+                role,
+                no_diff,
+                SetupStep::Unpack,
+                JobError::Unpack(error),
+            );
+        }
+        let apply = match diff {
+            None => ApplyStatus::Baseline,
+            Some(text) => {
+                let applied = apply_diff(&src, &text, self.job);
+                drop(text);
+                match applied {
+                    Ok(ApplyOutcome::Applied) => ApplyStatus::Applied,
+                    Ok(ApplyOutcome::Failed { path, hunk }) => ApplyStatus::Failed { path, hunk },
+                    Err(error) => {
+                        return setup_failed(
+                            self.sink,
+                            role,
+                            no_diff,
+                            SetupStep::Apply,
+                            JobError::Apply(error),
+                        );
+                    }
+                }
+            }
+        };
+
+        let applied = !matches!(apply, ApplyStatus::Failed { .. });
+        if applied && let Err(error) = self.hand_over(&[SRC, OUT, HOME, TMP]) {
+            return setup_failed(
+                self.sink,
+                role,
+                apply,
+                SetupStep::Mount,
+                JobError::Handover(error),
+            );
+        }
+        let (stages, logs) = self.stages(&src, applied);
+
+        let out_dir = self.root.join(OUT);
+        let (output, out) = walk_out(&out_dir, out_budget(&logs));
+        let status = match GuestStatus::new(role, SetupStatus::Ok, apply.clone(), stages, output) {
+            Ok(status) => status,
+            Err(error) => {
+                return setup_failed(
+                    self.sink,
+                    role,
+                    apply,
+                    SetupStep::Output,
+                    JobError::Status(error),
+                );
+            }
+        };
+        send(self.sink, status, &logs, &out, None)
+    }
+
+    /// A judge: unpack its data and the candidate's output, hand over, judge, pack the scorecard.
+    fn judge(&mut self, judge_data: Option<Vec<u8>>, candidate_out: Option<Vec<u8>>) -> JobEnd {
+        let role = GuestRole::Judge;
+        let apply = ApplyStatus::NotApplicable;
+        let (Some(judge_data), Some(candidate_out)) = (judge_data, candidate_out) else {
+            return setup_failed(
+                self.sink,
+                role,
+                apply,
+                SetupStep::Input,
+                JobError::MissingInput,
+            );
+        };
+        if let Err(error) = make_dirs(self.root, &[JUDGE, CANDIDATE, OUT, HOME, TMP]) {
+            return setup_failed(
+                self.sink,
+                role,
+                apply,
+                SetupStep::Mount,
+                JobError::Directories(error),
+            );
+        }
+        let judge_dir = self.root.join(JUDGE);
+        let unpacked = unpack_tar(&judge_data, &judge_dir, &UnpackCaps::JUDGE);
+        drop(judge_data);
+        let unpacked = unpacked.and_then(|_| {
+            unpack_tar(
+                &candidate_out,
+                &self.root.join(CANDIDATE),
+                &UnpackCaps::CANDIDATE_OUT,
+            )
+        });
+        drop(candidate_out);
+        if let Err(error) = unpacked {
+            return setup_failed(
+                self.sink,
+                role,
+                apply,
+                SetupStep::Unpack,
+                JobError::Unpack(error),
+            );
+        }
+        // `judge` and `candidate` stay root-owned: the judge reads its inputs but cannot change them.
+        if let Err(error) = self.hand_over(&[OUT, HOME, TMP]) {
+            return setup_failed(
+                self.sink,
+                role,
+                apply,
+                SetupStep::Mount,
+                JobError::Handover(error),
+            );
+        }
+        let (stages, logs) = self.stages(&judge_dir, true);
+
+        let scorecard = read_scorecard(&self.root.join(OUT));
+        let content_bytes = scorecard
+            .as_ref()
+            .map_or(0, |card| u64::try_from(card.len()).unwrap_or(u64::MAX));
+        let output = OutputStatus::Packed {
+            files: u32::from(scorecard.is_some()),
+            content_bytes,
+        };
+        let status = match GuestStatus::new(role, SetupStatus::Ok, apply.clone(), stages, output) {
+            Ok(status) => status,
+            Err(error) => {
+                return setup_failed(
+                    self.sink,
+                    role,
+                    apply,
+                    SetupStep::Output,
+                    JobError::Status(error),
+                );
+            }
+        };
+        send(self.sink, status, &logs, &[], scorecard.as_deref())
+    }
+
+    /// Hands each of `dirs`, under the root, to the stage uid.
+    fn hand_over(&mut self, dirs: &[&str]) -> io::Result<()> {
+        for dir in dirs {
+            self.handover.hand_over(&self.root.join(dir))?;
+        }
+        Ok(())
+    }
+
+    /// Runs the job's stages in order in `cwd`, each only while every earlier one exited 0 and `go` holds; the
+    /// rest are skipped. Returns the reports and the log of each stage that ran.
+    fn stages(&mut self, cwd: &Path, go: bool) -> (Vec<StageReport>, BTreeMap<Stage, Vec<u8>>) {
+        let mut reports = Vec::new();
+        let mut logs = BTreeMap::new();
+        let mut proceed = go;
+        for spec in self.job.stages() {
+            if !proceed {
+                reports.push(StageReport::new(spec.stage(), StageEnd::Skipped));
+                continue;
+            }
+            let command = StageCommand {
+                stage: spec.stage(),
+                argv: spec.argv().to_vec(),
+                cwd: cwd.to_path_buf(),
+                limits: StageLimits::for_stage(self.job, spec),
+                deadline: Duration::from_millis(spec.budget_ms()),
+            };
+            let run = self.executor.run_stage(&command);
+            proceed = run.end == StageEnd::Exited { code: 0 };
+            reports.push(StageReport::new(spec.stage(), run.end));
+            logs.insert(spec.stage(), run.log);
+        }
+        (reports, logs)
+    }
+}
+
+/// Creates each of `dirs` under `root`, mode 0755, refusing one that already exists.
+fn make_dirs(root: &Path, dirs: &[&str]) -> io::Result<()> {
+    for dir in dirs {
+        let path = root.join(dir);
+        DirBuilder::new().mode(0o755).create(&path)?;
+        fs::set_permissions(&path, Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Sends the status of a failed setup `step`: no stage ran and nothing was packed but the status.
+fn setup_failed<O: OutputSink>(
+    sink: &mut O,
+    role: GuestRole,
+    apply: ApplyStatus,
+    step: SetupStep,
+    error: JobError,
+) -> JobEnd {
+    match GuestStatus::new(
+        role,
+        SetupStatus::Failed { step },
+        apply,
+        Vec::new(),
+        OutputStatus::NotPacked,
+    ) {
+        Ok(status) => send_with(sink, status, &BTreeMap::new(), &[], None, Some(error)),
+        Err(_) => JobEnd {
+            status: None,
+            sent: None,
+            error: Some(error),
+        },
+    }
+}
+
+/// Packs and sends a run that set up cleanly.
+fn send<O: OutputSink>(
+    sink: &mut O,
+    status: GuestStatus,
+    logs: &BTreeMap<Stage, Vec<u8>>,
+    out: &[(minos_core::path::RelPath, Vec<u8>)],
+    scorecard: Option<&[u8]>,
+) -> JobEnd {
+    send_with(sink, status, logs, out, scorecard, None)
+}
+
+/// Packs and sends `status` with its files. If the tar cannot be built, sends a `setup: failed {output}` status
+/// alone instead, keeping the stage reports.
+fn send_with<O: OutputSink>(
+    sink: &mut O,
+    status: GuestStatus,
+    logs: &BTreeMap<Stage, Vec<u8>>,
+    out: &[(minos_core::path::RelPath, Vec<u8>)],
+    scorecard: Option<&[u8]>,
+    error: Option<JobError>,
+) -> JobEnd {
+    let pack_error = match build_output(&status, logs, out, scorecard) {
+        Ok(tar) => {
+            return JobEnd {
+                sent: Some(sink.send(&tar)),
+                status: Some(status),
+                error,
+            };
+        }
+        Err(pack_error) => pack_error,
+    };
+    let error = error.or(Some(JobError::Pack(pack_error)));
+    let fallback = GuestStatus::new(
+        status.role(),
+        SetupStatus::Failed {
+            step: SetupStep::Output,
+        },
+        status.apply().clone(),
+        status.stages().to_vec(),
+        OutputStatus::NotPacked,
+    )
+    .ok()
+    .and_then(|fallback| {
+        build_output(&fallback, &BTreeMap::new(), &[], None)
+            .ok()
+            .map(|tar| (fallback, tar))
+    });
+    match fallback {
+        Some((fallback, tar)) => JobEnd {
+            sent: Some(sink.send(&tar)),
+            status: Some(fallback),
+            error,
+        },
+        None => JobEnd {
+            status: None,
+            sent: None,
+            error,
+        },
     }
 }
 
@@ -370,7 +702,7 @@ mod tests {
         disk(&sections)
     }
 
-    /// What one run_job sent.
+    /// What one `run_job` sent.
     struct Sent {
         end: JobEnd,
         connections: usize,

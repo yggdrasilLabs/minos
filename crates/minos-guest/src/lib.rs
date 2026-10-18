@@ -7,9 +7,15 @@
 //! command runner. Every stage command runs as one fixed unprivileged uid under the D-05 limits, through the
 //! `/init --minos-stage` trampoline whose argv [`stage`] encodes and parses (D-08).
 //!
+//! [`run::run_job`] runs one job for either role in a fixed order: read the job, create the per-run directories,
+//! unpack the inputs ([`workspace::unpack_tar`]) and apply the diff with core's strict applier
+//! ([`workspace::apply_diff`]), drop the input buffers, hand the writable directories to the stage uid, run each
+//! stage until one does not exit 0, pack the output tar without following a link ([`pack`]), and send it. Its
+//! source, sink, stage executor, and handover are traits, so the host tests the whole flow with fakes.
+//!
 //! This library holds the parts the host can compile and test: the source and sink traits and their
-//! implementations over generic readers and connectors, the stage limits and trampoline argv, and the Phase 2
-//! spike protocol, which is the job decoder ([`job`]), the report and status-frame encoder ([`report`]), and the
+//! implementations over generic readers and connectors, the stage limits and trampoline argv, the workspace,
+//! the packer, and `run_job`, and the Phase 2 spike protocol, which is the job decoder ([`job`]), the report and status-frame encoder ([`report`]), and the
 //! deterministic byte pattern ([`pattern`]). The Linux-only PID 1 path lives in the binary's `linux` module
 //! (02-CONTEXT.md D-03), and only it names `/dev/vdb` and the vsock socket. The spike modules and markers stay
 //! until plan 05-12 replaces that path.
