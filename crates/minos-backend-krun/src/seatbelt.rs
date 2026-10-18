@@ -25,7 +25,8 @@ pub const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 /// SHA-256 of [`PROFILE`], as 64 lowercase hex characters.
 #[must_use]
 pub fn profile_sha256() -> String {
-    String::new()
+    let digest: [u8; 32] = Sha256::digest(PROFILE.as_bytes()).into();
+    base16ct::lower::encode_string(&digest)
 }
 
 /// Why a set of profile parameters was refused.
@@ -116,8 +117,21 @@ fn checked(name: &'static str, path: &Path) -> Result<PathBuf, SeatbeltError> {
 /// `-D NAME=value` pair per parameter in ascending name order, then `program` and `args`.
 #[must_use]
 pub fn argv(params: &ProfileParams, program: &Path, args: &[&OsStr]) -> Vec<OsString> {
-    let _ = (params, program, args);
-    Vec::new()
+    let pairs = params.pairs();
+    let mut line = Vec::with_capacity(3 + 2 * pairs.len() + 1 + args.len());
+    line.push(OsString::from(SANDBOX_EXEC));
+    line.push(OsString::from("-p"));
+    line.push(OsString::from(PROFILE));
+    for (name, value) in pairs {
+        let mut pair = OsString::from(name);
+        pair.push("=");
+        pair.push(value);
+        line.push(OsString::from("-D"));
+        line.push(pair);
+    }
+    line.push(program.as_os_str().to_owned());
+    line.extend(args.iter().map(|arg| (*arg).to_owned()));
+    line
 }
 
 #[cfg(test)]
@@ -132,7 +146,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn Error>>;
 
     /// Recompute after any profile edit with `shasum -a 256 crates/minos-backend-krun/src/minos-vmm.sb`.
-    const PROFILE_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+    const PROFILE_SHA256: &str = "cda08b0f6f5f40385f13b682b36cba30167d7d70d50caea9043912bd08b08490";
 
     fn sample() -> Result<ProfileParams, SeatbeltError> {
         ProfileParams::new(
@@ -218,9 +232,18 @@ mod tests {
         let config = OsStr::new("/private/tmp/job/vmm.json");
         let line = argv(&sample()?, program, &[config]);
         let mut items = line.iter();
-        assert_eq!(items.next().map(OsString::as_os_str), Some(OsStr::new(SANDBOX_EXEC)));
-        assert_eq!(items.next().map(OsString::as_os_str), Some(OsStr::new("-p")));
-        assert_eq!(items.next().map(OsString::as_os_str), Some(OsStr::new(PROFILE)));
+        assert_eq!(
+            items.next().map(OsString::as_os_str),
+            Some(OsStr::new(SANDBOX_EXEC))
+        );
+        assert_eq!(
+            items.next().map(OsString::as_os_str),
+            Some(OsStr::new("-p"))
+        );
+        assert_eq!(
+            items.next().map(OsString::as_os_str),
+            Some(OsStr::new(PROFILE))
+        );
         let expected = [
             "CONFIG=/private/tmp/job/vmm.json",
             "INPUT_IMG=/private/tmp/job/input.img",
@@ -231,10 +254,19 @@ mod tests {
             "VMM=/opt/minos/bin/minos-vmm",
         ];
         for pair in expected {
-            assert_eq!(items.next().map(OsString::as_os_str), Some(OsStr::new("-D")));
-            assert_eq!(items.next().map(OsString::as_os_str), Some(OsStr::new(pair)));
+            assert_eq!(
+                items.next().map(OsString::as_os_str),
+                Some(OsStr::new("-D"))
+            );
+            assert_eq!(
+                items.next().map(OsString::as_os_str),
+                Some(OsStr::new(pair))
+            );
         }
-        assert_eq!(items.next().map(OsString::as_os_str), Some(program.as_os_str()));
+        assert_eq!(
+            items.next().map(OsString::as_os_str),
+            Some(program.as_os_str())
+        );
         assert_eq!(items.next().map(OsString::as_os_str), Some(config));
         assert_eq!(items.next(), None);
         let names = argv_param_names(&line)?;
@@ -265,10 +297,16 @@ mod tests {
             );
         }
         let empty = ProfileParams::new(Path::new(""), abs, abs, abs, abs, abs, abs);
-        assert!(matches!(empty, Err(SeatbeltError::RelativePath { name: "VMM" })));
+        assert!(matches!(
+            empty,
+            Err(SeatbeltError::RelativePath { name: "VMM" })
+        ));
         let dotted = Path::new("/private/tmp/job/../other/o.sock");
         let parent = ProfileParams::new(abs, abs, abs, abs, abs, abs, dotted);
-        assert!(matches!(parent, Err(SeatbeltError::ParentComponent { name: "SOCK" })));
+        assert!(matches!(
+            parent,
+            Err(SeatbeltError::ParentComponent { name: "SOCK" })
+        ));
         assert!(ProfileParams::new(abs, abs, abs, abs, abs, abs, abs).is_ok());
     }
 }
