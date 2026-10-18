@@ -19,6 +19,7 @@ pub mod nofollow;
 pub mod pack;
 pub mod pattern;
 pub mod report;
+pub mod run;
 pub mod sink;
 pub mod source;
 pub mod stage;
