@@ -58,10 +58,18 @@ const EXIT_VMM: u8 = 70;
 /// The watchdog thread could not be started, so the VM was never entered.
 const EXIT_WATCHDOG: u8 = 71;
 
-/// The helper's open-file limit: the VMM's two disks, the vsock route, its threads, and its pipes need well
-/// under this. Lowered to the inherited hard limit if that is smaller, because an unprivileged process cannot
-/// raise its hard limit.
-const NOFILE_LIMIT: u64 = 1024;
+/// The helper's open-file limit. Lowered to the inherited hard limit if that is smaller, because an unprivileged
+/// process cannot raise its hard limit.
+///
+/// The VMM's two disks, its threads, and its pipes need a few dozen descriptors, but the guest's chunked output
+/// needs far more: the pinned `msb_krun_devices` 0.1.41 vsock reaper keeps every released connection's proxy,
+/// and with it the host socket, for 5 s after the connection closes (`virtio/vsock/reaper.rs`, `TIMEOUT`), and a
+/// full output stream is about 4353 connections of one chunk each (`MAX_OUTPUT_STREAM_BYTES` over
+/// `MAX_CHUNK_PAYLOAD`, plus the END). At the earlier 1024, every thousand or so connections exhausted the
+/// table, PID 1's connects were reset until the reaper freed them, and a 16 MiB output took 20.5 s instead of
+/// 0.9 s (05-EVIDENCE.md "05-17 helper `RLIMIT_NOFILE` and the vsock reaper"). 8192 holds a whole stream inside one
+/// reaper window with room to spare, and still bounds the helper's descriptors.
+const NOFILE_LIMIT: u64 = 8192;
 
 /// The usage line printed for exit code 64.
 const USAGE: &str = "minos-vmm: usage: minos-vmm <config.json>";
