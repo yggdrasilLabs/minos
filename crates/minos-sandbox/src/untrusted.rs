@@ -11,13 +11,14 @@
 //!
 //! # Layout
 //!
-//! The constants here are the layout Phase 5's guest writes into its output tar. The run's result travels in the
-//! status frame over vsock (02-SPIKE-EVIDENCE.md K7); these files carry only data: the judge's scorecard, the
-//! stage logs, the diffs a proposer sandbox submits, and the artifacts under [`OUT_DIR`].
+//! The constants here are the layout Phase 5's guest writes into its output tar: PID 1's own status at
+//! [`STATUS_PATH`], which leaves only through [`Untrusted::take_status`], the judge's scorecard, the stage logs, the
+//! diffs a proposer sandbox submits, and the artifacts under [`OUT_DIR`].
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
+use minos_core::guest::{GuestRole, GuestStatus, GuestStatusError, MAX_STATUS_BYTES};
 use minos_core::limits::Limits;
 use minos_core::metric::{Scorecard, ScorecardError};
 use minos_core::outcome::Reason;
@@ -25,7 +26,9 @@ use minos_core::path::RelPath;
 use minos_core::text::LogExcerpt;
 
 use crate::output::{MAX_DIFF_TEXTS, OutputCap, OutputFault, OutputInvalid};
-use crate::role::{Judge, Role};
+use crate::role::{Judge, Role, RoleKind};
+
+pub use minos_core::guest::STATUS_PATH;
 
 /// The judge's scorecard, read by `Untrusted::<GuestOutput<Judge>>::into_scorecard`.
 pub const SCORECARD_PATH: &str = ".minos/scorecard.json";
@@ -101,6 +104,42 @@ impl ScorecardFault {
     }
 }
 
+/// Why the guest's status file did not yield a [`GuestStatus`]. A candidate fault: the status came from inside the
+/// VM, so a missing, malformed, or wrong-role status rejects the experiment and is never retried.
+///
+/// No variant carries a byte of the file: [`GuestStatusError`] keeps only a line and column.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum StatusFault {
+    /// The output has no file at [`STATUS_PATH`].
+    #[error("the guest wrote no status")]
+    Missing,
+    /// The status file is over [`MAX_STATUS_BYTES`] or did not parse as a guest status.
+    #[error("the guest's status is invalid")]
+    Invalid(#[source] GuestStatusError),
+    /// The status parsed but names a role other than the sandbox's own.
+    #[error("the guest's status names another role")]
+    WrongRole,
+}
+
+impl StatusFault {
+    /// The ledger reason: [`Reason::OutputInvalid`] for every variant.
+    #[must_use]
+    pub const fn reason(&self) -> Reason {
+        match self {
+            Self::Missing | Self::Invalid(_) | Self::WrongRole => Reason::OutputInvalid,
+        }
+    }
+}
+
+/// The status role a sandbox of role kind `kind` must report.
+const fn guest_role(kind: RoleKind) -> GuestRole {
+    match kind {
+        RoleKind::Candidate => GuestRole::Candidate,
+        RoleKind::Judge => GuestRole::Judge,
+    }
+}
+
 /// Whether `path` lies under [`DIFFS_DIR`].
 fn is_diff(path: &RelPath) -> bool {
     path.as_str()
@@ -136,6 +175,37 @@ impl<R: Role> Untrusted<GuestOutput<R>> {
                 role: PhantomData,
             })
         })
+    }
+
+    /// Removes PID 1's status, the file at [`STATUS_PATH`], and returns it validated: the only exit for that file.
+    ///
+    /// The status is authenticated by the chunk token, but a guest that exploited its kernel could forge it, so it
+    /// is parsed as hostile: refused over [`MAX_STATUS_BYTES`] before the parser sees a byte, parsed by
+    /// [`GuestStatus::parse_json`] (unknown fields refused, every check of [`GuestStatus::new`] applied), and
+    /// refused when its role is not `R`. The file is removed whether or not it validates, so a later call
+    /// returns [`StatusFault::Missing`].
+    ///
+    /// # Errors
+    ///
+    /// [`StatusFault::Missing`] when there is no status file; [`StatusFault::Invalid`] when it is over the cap or
+    /// not a guest status; [`StatusFault::WrongRole`] when it names a role other than `R`.
+    pub fn take_status(&mut self) -> Result<GuestStatus, StatusFault> {
+        let path = self
+            .0
+            .files
+            .keys()
+            .find(|path| path.as_str() == STATUS_PATH)
+            .cloned()
+            .ok_or(StatusFault::Missing)?;
+        let bytes = self.0.files.remove(&path).ok_or(StatusFault::Missing)?;
+        if bytes.len() > MAX_STATUS_BYTES {
+            return Err(StatusFault::Invalid(GuestStatusError::TooLarge));
+        }
+        let status = GuestStatus::parse_json(&bytes).map_err(StatusFault::Invalid)?;
+        if status.role() != guest_role(R::KIND) {
+            return Err(StatusFault::WrongRole);
+        }
+        Ok(status)
     }
 
     /// The diff texts under [`DIFFS_DIR`], in path order. Files elsewhere are ignored.

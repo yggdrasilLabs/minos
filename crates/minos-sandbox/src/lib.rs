@@ -18,9 +18,9 @@
 //!    hostile stream, and the hostile console, whose only exit is [`Finished::console_excerpt`]. The `Finished` is
 //!    built by [`Finished::new`], which consumes the launch's `Cleared`.
 //! 6. [`Finished::into_output`] reads the stream under caps into an [`Untrusted`] [`GuestOutput`] of role `R`.
-//! 7. The exits: [`Untrusted::take`] projects one file, whose only exit is [`Untrusted::into_log_excerpt`];
-//!    [`Untrusted::into_diff_texts`] returns the submitted diffs; and [`Untrusted::into_scorecard`] exists only on
-//!    judge output.
+//! 7. The exits: [`Untrusted::take_status`] returns PID 1's validated status; [`Untrusted::take`] projects one
+//!    file, whose only exit is [`Untrusted::into_log_excerpt`]; [`Untrusted::into_diff_texts`] returns the
+//!    submitted diffs; and [`Untrusted::into_scorecard`] exists only on judge output.
 
 pub mod backend;
 pub mod blob_source;
@@ -42,5 +42,5 @@ pub use role::{Candidate, Judge, Role, RoleKind};
 pub use spec::{InputDisk, JudgeData, LaunchPlan, Machine, SandboxSpec, SpecError};
 pub use untrusted::{
     BUILD_LOG_PATH, DIFFS_DIR, GuestOutput, JUDGE_LOG_PATH, OUT_DIR, OutputFile, RUN_LOG_PATH,
-    SCORECARD_PATH, ScorecardFault, Untrusted,
+    SCORECARD_PATH, STATUS_PATH, ScorecardFault, StatusFault, Untrusted,
 };
