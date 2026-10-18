@@ -20,3 +20,6 @@ tar.workspace = true
 sha2.workspace = true
 base16ct.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+minos-core.workspace = true
