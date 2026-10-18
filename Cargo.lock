@@ -767,6 +767,7 @@ dependencies = [
  "serde",
  "sha2",
  "tar",
+ "tempfile",
  "toml",
  "tracing",
  "tracing-subscriber",
