@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Completed 05-08-PLAN.md
-last_updated: "2026-10-18T20:14:09.935Z"
+stopped_at: Completed 05-09-PLAN.md
+last_updated: "2026-10-18T20:25:04.686Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 46
+  completed_plans: 47
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 9 of 22
+Plan: 10 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -104,6 +104,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P06 | 8 min | 3 tasks | 13 files |
 | Phase 05 P07 | 14 min | 3 tasks | 16 files |
 | Phase 05 P08 | 10min | 2 tasks | 8 files |
+| Phase 05 P09 | 20 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -233,6 +234,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-07: the helper sets RLIMIT_CORE 0, RLIMIT_NOFILE min(1024, hard), and RLIMIT_FSIZE 0 before reading its config, so its stdout and stderr must be pipes (a regular-file stderr dies by SIGXFSZ)
 - [Phase 05]: 05-08: ChunkSink refuses a tar over MAX_OUTPUT_STREAM_BYTES before connecting (SinkError::TooLarge); a failed close is SinkError::Write
 - [Phase 05]: 05-08: parse_trampoline refuses 0, leading zeros, signs, over-cap limits, and an empty program; stages run as uid and gid 64000 with STAGE_ENV PATH, HOME, TMPDIR, LANG
+- [Phase 05]: 05-09: Seatbelt profile moved to crates/minos-backend-krun/src/minos-vmm.sb, embedded with include_str!, passed with sandbox-exec -p, SHA-256 cda08b0f pinned; console rule is write-only on the /dev/fd/1 literal; ROOT_IMG ancestor rule kept; no scratch image
+- [Phase 05]: 05-09: root images carry seven mount points (dev, mnt, out, proc, scratch, sys, tmp); check_guest_elf refuses non-ELF, non-64-bit, big-endian, non-aarch64, PT_INTERP, and unwalkable program header tables
 
 ### Pending Todos
 
@@ -263,6 +266,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T20:14:09.929Z
-Stopped at: Completed 05-08-PLAN.md
+Last session: 2026-10-18T20:25:04.681Z
+Stopped at: Completed 05-09-PLAN.md
 Resume file: None
