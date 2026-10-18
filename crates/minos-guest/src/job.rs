@@ -867,4 +867,67 @@ mod tests {
         assert_eq!(parse(job)??.finish(), Finish::Return);
         Ok(())
     }
+
+    /// The 64-character lowercase hex of 32 bytes of 0x5a, the wave0 test token.
+    const TEST_TOKEN_HEX: &str = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+
+    fn chunk_stream_step(bytes: u64, token: &str) -> String {
+        with_step(&format!(
+            r#"{{"chunk_stream":{{"bytes":{bytes},"token":"{token}"}}}}"#
+        ))
+    }
+
+    #[test]
+    fn job_chunk_stream_step() -> TestResult {
+        let job = parse(&chunk_stream_step(16_777_216, TEST_TOKEN_HEX))??;
+        let [Step::ChunkStream(step)] = job.steps() else {
+            return Err("expected one chunk_stream step".into());
+        };
+        assert_eq!(step.bytes(), 16_777_216);
+        assert!(step.token().ct_eq(&[0x5a_u8; 32]));
+        let max = parse(&chunk_stream_step(1_073_741_824, TEST_TOKEN_HEX))?;
+        assert!(max.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn job_chunk_stream_refuses_bad_bytes_and_tokens() -> TestResult {
+        let short = TEST_TOKEN_HEX.get(1..).ok_or("token too short")?;
+        let upper = TEST_TOKEN_HEX.replacen('a', "A", 1);
+        let not_hex = TEST_TOKEN_HEX.replacen('a', "g", 1);
+        let long = format!("{TEST_TOKEN_HEX}5");
+        let cases = [
+            (
+                chunk_stream_step(0, TEST_TOKEN_HEX),
+                "steps.chunk_stream.bytes",
+            ),
+            (
+                chunk_stream_step(1_073_741_825, TEST_TOKEN_HEX),
+                "steps.chunk_stream.bytes",
+            ),
+            (chunk_stream_step(1, short), "steps.chunk_stream.token"),
+            (chunk_stream_step(1, &long), "steps.chunk_stream.token"),
+            (chunk_stream_step(1, &upper), "steps.chunk_stream.token"),
+            (chunk_stream_step(1, &not_hex), "steps.chunk_stream.token"),
+            (chunk_stream_step(1, ""), "steps.chunk_stream.token"),
+        ];
+        for (json, field) in &cases {
+            assert_eq!(invalid_field(&parse(json)?), Some(*field), "{json}");
+        }
+        let extra = with_step(&format!(
+            r#"{{"chunk_stream":{{"bytes":1,"token":"{TEST_TOKEN_HEX}","extra":1}}}}"#
+        ));
+        assert!(matches!(parse(&extra)?, Err(JobError::Json(_))));
+        Ok(())
+    }
+
+    /// The step's Debug never prints the token bytes.
+    #[test]
+    fn job_chunk_stream_debug_hides_the_token() -> TestResult {
+        let job = parse(&chunk_stream_step(1, TEST_TOKEN_HEX))??;
+        let shown = format!("{job:?}");
+        assert!(!shown.contains("5a5a"), "{shown}");
+        assert!(!shown.contains("90, 90"), "{shown}");
+        Ok(())
+    }
 }

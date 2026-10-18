@@ -263,7 +263,8 @@ mod tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{PreflightError, check_environment, regular_file};
+    use super::{PreflightError, check_environment, check_files, console_ok, regular_file};
+    use crate::config;
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -312,5 +313,48 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// A v1 config with every host path under a job directory that does not exist, and console `/dev/fd/1`.
+    const STDOUT_CONSOLE_CONFIG: &str = r#"{"v":1,"kernel":{"krunfw":"/private/tmp/mns00000000/libkrunfw.5.dylib","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"boot":"root_disk","disks":{"root":"/private/tmp/mns00000000/root.img","input":"/private/tmp/mns00000000/input.img","scratch":{"path":"/private/tmp/mns00000000/scratch.img","cap_bytes":67108864}},"vsock":{"port":1024,"socket":"/private/tmp/mns00000000/o.sock"},"console":{"path":"/dev/fd/1","cap_bytes":1048576},"max_duration_ms":60000,"machine":{"vcpus":1,"memory_mib":256}}"#;
+
+    /// The stdout literal skips only the console-absent and parent checks; every other file is still checked.
+    #[test]
+    fn preflight_allows_stdout_console() -> TestResult {
+        console_ok(Path::new("/dev/fd/1"))?;
+        let config = config::parse(STDOUT_CONSOLE_CONFIG.as_bytes())?;
+        let refused = check_files(&config);
+        assert!(
+            matches!(
+                refused,
+                Err(PreflightError::Inspect {
+                    field: "kernel.krunfw",
+                    ..
+                })
+            ),
+            "a missing libkrunfw was not refused"
+        );
+        Ok(())
+    }
+
+    /// Only the exact literal `/dev/fd/1` is the helper's stdout. Other descriptors and the `/dev/stdout`
+    /// spelling, and any existing file, are still refused as an existing console.
+    #[test]
+    fn preflight_still_refuses_existing_console_file() -> TestResult {
+        let this_binary = std::env::current_exe()?;
+        for path in [
+            Path::new("/dev/stdout"),
+            Path::new("/dev/fd/2"),
+            Path::new("/dev/fd/0"),
+            this_binary.as_path(),
+        ] {
+            let refused = console_ok(path);
+            assert!(
+                matches!(&refused, Err(PreflightError::ConsoleExists { path: found }) if found == path),
+                "{} was not refused as an existing console",
+                path.display()
+            );
+        }
+        Ok(())
     }
 }

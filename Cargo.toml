@@ -97,7 +97,7 @@ ignore       = "=0.4.33"
 regex        = "=1.13.1"
 rand_chacha  = { version = "=0.10.0", default-features = false }
 rand_core    = "=0.10.1"
-rustix       = { version = "=1.1.5", features = ["fs", "mount", "process", "system"] }
+rustix       = { version = "=1.1.5", features = ["event", "fs", "mount", "process", "system"] }
 vsock        = "=0.5.4"
 # Bumping this pin requires re-running the VM spike `spike_boot::boot_root_disk` by hand (02-SPIKE-EVIDENCE.md
 # S01-CMDLINE): minos-vmm smuggles `root=/dev/vda` through `KernelBuilder::init_path`, which only works while

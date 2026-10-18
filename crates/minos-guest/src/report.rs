@@ -237,8 +237,8 @@ pub fn encode_frame(report: &Report) -> Result<Vec<u8>, FrameError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BootResult, ConnectAttempt, ConnectResult, FrameError, Report, RunResult, StepResult,
-        encode_frame,
+        BootResult, ChunkStreamResult, ConnectAttempt, ConnectResult, FrameError, Report,
+        RunResult, StepResult, encode_frame,
     };
     use crate::test_hex;
 
@@ -312,6 +312,25 @@ mod tests {
         assert_eq!(json, expected);
         let frame = encode_frame(&report)?;
         assert_eq!(frame.get(20..), Some(json.as_bytes()));
+        Ok(())
+    }
+
+    #[test]
+    fn chunk_stream_result_serializes_in_declared_field_order() -> TestResult {
+        let mut report = Report::new();
+        report.push(StepResult::ChunkStream(ChunkStreamResult {
+            bytes_sent: 4189,
+            connections: 2,
+            connect_retries: 1,
+            elapsed_ms: 7,
+            error: None,
+        }));
+        let json = serde_json::to_string(&report)?;
+        let expected = concat!(
+            r#"{"v":1,"steps":[{"chunk_stream":{"bytes_sent":4189,"connections":2,"#,
+            r#""connect_retries":1,"elapsed_ms":7,"error":null}}],"job_error":null}"#,
+        );
+        assert_eq!(json, expected);
         Ok(())
     }
 }

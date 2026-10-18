@@ -132,17 +132,18 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use std::os::unix::process::parent_id;
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     use super::{LAUNCHD_PID, Limits, Trip, parent_gone};
+    use crate::config::STDOUT_CONSOLE;
 
     fn limits(deadline: Duration, console_cap_bytes: u64) -> Limits {
-        Limits {
+        Limits::new(
             deadline,
-            console: PathBuf::from("/private/tmp/mns00000000/console.log"),
+            Path::new("/private/tmp/mns00000000/console.log"),
             console_cap_bytes,
-        }
+        )
     }
 
     #[test]
@@ -196,5 +197,34 @@ mod tests {
     fn parent_gone_when_the_current_parent_is_launchd() {
         assert!(parent_gone(LAUNCHD_PID, LAUNCHD_PID));
         assert!(parent_gone(4242, LAUNCHD_PID));
+    }
+
+    /// A console file longer than its cap trips the console cap.
+    #[test]
+    fn watchdog_trips_on_console_file_over_cap() -> Result<(), Box<dyn std::error::Error>> {
+        let this_binary = std::env::current_exe()?;
+        let tripped = Limits::new(Duration::from_hours(1), &this_binary, 1)
+            .tripped(Instant::now(), parent_id());
+        assert_eq!(tripped, Some(Trip::ConsoleCap));
+        Ok(())
+    }
+
+    /// With the console on the helper's stdout pipe, the parent enforces the cap, so the watchdog never trips
+    /// console-cap; the deadline and parent-gone still trip.
+    #[test]
+    fn watchdog_ignores_stdout_console_length() {
+        let stdout = |deadline| Limits::new(deadline, Path::new(STDOUT_CONSOLE), 1);
+        assert_eq!(
+            stdout(Duration::from_hours(1)).tripped(Instant::now(), parent_id()),
+            None
+        );
+        assert_eq!(
+            stdout(Duration::ZERO).tripped(Instant::now(), parent_id()),
+            Some(Trip::Deadline)
+        );
+        assert_eq!(
+            stdout(Duration::from_hours(1)).tripped(Instant::now(), parent_id().wrapping_add(1)),
+            Some(Trip::ParentGone)
+        );
     }
 }

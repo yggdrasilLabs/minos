@@ -493,7 +493,9 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use super::{Boot, ConfigError, MAX_CONFIG_BYTES, PathReason, VmmConfig, parse};
+    use super::{
+        Boot, ConfigError, MAX_CONFIG_BYTES, PathReason, STDOUT_CONSOLE, VmmConfig, parse,
+    };
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -937,6 +939,20 @@ mod tests {
             r#""memory_mib":16385"#,
             "machine.memory_mib",
         )
+    }
+
+    /// KRUN-01: the console may be the helper's own stdout, named by exactly one literal path.
+    #[test]
+    fn config_accepts_stdout_console() -> TestResult {
+        let text = edit(
+            E1,
+            r#""/private/tmp/mns00000000/console.log""#,
+            r#""/dev/fd/1""#,
+        )?;
+        let config = parse(text.as_bytes())?;
+        assert_eq!(config.console(), Path::new(STDOUT_CONSOLE));
+        assert_eq!(STDOUT_CONSOLE, "/dev/fd/1");
+        Ok(())
     }
 
     #[test]
