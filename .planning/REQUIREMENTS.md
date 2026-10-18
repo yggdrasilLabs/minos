@@ -69,7 +69,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 - [ ] **GUEST-01**: `minos-guest` is a static `aarch64-unknown-linux-musl` binary that runs as PID 1, reaps children, and creates nothing per-run at startup
 - [ ] **GUEST-02**: The guest reads the job (base tarball, canonical diff, manifest subset) from a read-only input disk, applies the diff with the core applier, and fails the job as `Rejected` on any mismatch
-- [ ] **GUEST-03**: Manifest commands run as argv arrays under a non-root uid with rlimits on CPU, memory, processes, and file size, writing only to the scratch disk
+- [ ] **GUEST-03**: Manifest commands run as argv arrays under a non-root uid with rlimits on CPU, memory, processes, and file size, writing only to scratch space. *Superseded wording (2026-10-18): "writing only to the scratch disk". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [ ] **GUEST-04**: Guest output is a tar stream over vsock capped by bytes; the judge scorecard is only accepted from the judge-role channel
 - [ ] **GUEST-05**: The guest environment contains no host variables, verified by a test that reads `env` and `/proc/cmdline` inside the VM
 
@@ -78,7 +78,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **KRUN-01**: Each VM runs in its own `minos-vmm` helper process, spawned with a cleared environment, stdin from `/dev/null`, and a capped console pipe; only this binary links the VMM crate and carries the hypervisor entitlement
 - [ ] **KRUN-02**: Every launch disables implicit vsock and adds a plain vsock with no socket proxying; the hijack and host-directory-sharing APIs are banned by clippy `disallowed-methods`
 - [ ] **KRUN-03**: A permanent integration test proves guest egress to loopback and to a public IP fails closed
-- [ ] **KRUN-04**: Inputs are a shared read-only root disk, a per-job read-only input disk, and a size-capped scratch disk, all raw images; no host directory is ever shared; scratch is deleted unread
+- [ ] **KRUN-04**: Inputs are a shared read-only root disk and a per-job read-only input disk, both raw images; the candidate's scratch is size-capped space in guest memory; no host directory is ever shared; scratch is deleted unread. *Superseded wording (2026-10-18): "a size-capped scratch disk, all raw images". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [ ] **KRUN-05**: The supervisor enforces the hard maximum duration by killing the helper's process group; a parent-death watchdog and pidfile sweep ensure `kill -9` on `minos run` leaves no VM running
 - [ ] **KRUN-06**: Preflight checks the entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, and active confinement layers, and refuses with a reason for each failure
 - [ ] **KRUN-07**: The run records which confinement layers were active (dedicated user, Seatbelt, rlimits) in `BackendInfo`, and never falls back silently

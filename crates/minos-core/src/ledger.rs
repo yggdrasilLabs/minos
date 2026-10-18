@@ -359,7 +359,11 @@ pub enum ConfinementLayer {
     Seatbelt,
     /// The dedicated unprivileged `_minos` user.
     DedicatedUser,
-    /// Resource limits on the helper process.
+    /// Resource limits on both sides of the VM boundary, as 05-CONTEXT D-01 names the active layer
+    /// ("in-guest rlimits"): the helper's own limits at start (no core files, bounded open files and file size)
+    /// and the guest's per-stage limits on the candidate (address space, file size, processes, CPU, open files,
+    /// no core files). Both halves fail closed (the helper exits 66 without its limits; the trampoline never
+    /// execs a stage it could not limit), so a recorded `Rlimits` means both were applied.
     Rlimits,
 }
 
