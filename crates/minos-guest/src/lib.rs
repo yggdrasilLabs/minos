@@ -1,13 +1,27 @@
 //! Host-compilable half of the guest that runs as PID 1 inside every VM.
 //!
-//! The guest reads one job from its input disk (`/dev/vdb`), runs the job's steps in order, and sends one
-//! status frame to the host over vsock. This library holds the parts the host can compile and test: the job
-//! decoder ([`job`]), the report and status-frame encoder ([`report`]), and the deterministic byte pattern
-//! ([`pattern`]). The Linux-only PID 1 path lives in the binary's `linux` module (02-CONTEXT.md D-03).
+//! PID 1 reads one job through a [`source::JobSource`] and sends one output tar through a [`sink::OutputSink`]
+//! (05-CONTEXT D-07). Locally the source is the read-only input disk ([`source::DiskJobSource`]) and the sink is
+//! a sequence of short authenticated vsock connections ([`sink::ChunkSink`]); the AWS milestone adds a
+//! lifecycle-hook pair implementing the same two traits, without touching the decoders, the applier, or the
+//! command runner. Every stage command runs as one fixed unprivileged uid under the D-05 limits, through the
+//! `/init --minos-stage` trampoline whose argv [`stage`] encodes and parses (D-08).
+//!
+//! This library holds the parts the host can compile and test: the source and sink traits and their
+//! implementations over generic readers and connectors, the stage limits and trampoline argv, and the Phase 2
+//! spike protocol, which is the job decoder ([`job`]), the report and status-frame encoder ([`report`]), and the
+//! deterministic byte pattern ([`pattern`]). The Linux-only PID 1 path lives in the binary's `linux` module
+//! (02-CONTEXT.md D-03), and only it names `/dev/vdb` and the vsock socket. The spike modules and markers stay
+//! until plan 05-12 replaces that path.
 
 pub mod job;
 pub mod pattern;
 pub mod report;
+pub mod sink;
+pub mod source;
+
+#[cfg(test)]
+pub(crate) mod test_fixture;
 
 /// First line the guest prints on the console, before anything else, so a boot is visible even if the job
 /// is bad.
