@@ -254,7 +254,7 @@ Plans:
   4. `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` written in by the trusted packer (*superseded wording, 2026-10-09: "a root image and an initramfs"; 02-CONTEXT.md D-18*) and writes its digests to `minos.lock`, from a build context with no judge data and no secrets. `minos host doctor` runs the launch preflight (entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, active confinement layers) and prints every refusal with an explanation and a fix. The active confinement layers are recorded in `BackendInfo`, with no silent fallback (KRUN-06, KRUN-07, KRUN-09, CLI-02, CLI-03)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 3/22 plans executed
+**Plans**: 4/22 plans executed
 Plans:
 **Wave 1**
 
@@ -265,7 +265,7 @@ Plans:
 
 - [ ] 05-03-PLAN.md — Wave 0 VM proofs (chunks at 16 MiB with the S03-ANSWER measurement, console on `/dev/fd/1` under Seatbelt, store-path root image) recorded in 05-EVIDENCE.md with mechanism selections and fallbacks (conditional stop: `chunks: stop` ends at a user checkpoint)
 - [x] 05-04-PLAN.md — Core guest wire: `GuestJob`, `GuestStatus`, input disk v2 codec with the token (D-15); each role's inputs bound to half the guest reserve
-- [ ] 05-05-PLAN.md — Store `put_reader` streaming put and `FileStore::verified_path` (D-09, D-14)
+- [x] 05-05-PLAN.md — Store `put_reader` streaming put and `FileStore::verified_path` (D-09, D-14)
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -376,7 +376,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
-| 5. Guest, krun Backend, and Environment Build | 3/22 | In Progress|  |
+| 5. Guest, krun Backend, and Environment Build | 4/22 | In Progress|  |
 | 6. Proposers | 0/TBD | Not started | - |
 | 7. Runner and Loop | 0/TBD | Not started | - |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
