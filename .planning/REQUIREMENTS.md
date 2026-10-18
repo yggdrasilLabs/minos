@@ -75,10 +75,10 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 ### Backend (KRUN)
 
-- [ ] **KRUN-01**: Each VM runs in its own `minos-vmm` helper process, spawned with a cleared environment, stdin from `/dev/null`, and a capped console pipe; only this binary links the VMM crate and carries the hypervisor entitlement
+- [x] **KRUN-01**: Each VM runs in its own `minos-vmm` helper process, spawned with a cleared environment, stdin from `/dev/null`, and a capped console pipe; only this binary links the VMM crate and carries the hypervisor entitlement
 - [ ] **KRUN-02**: Every launch disables implicit vsock and adds a plain vsock with no socket proxying; the hijack and host-directory-sharing APIs are banned by clippy `disallowed-methods`
 - [ ] **KRUN-03**: A permanent integration test proves guest egress to loopback and to a public IP fails closed
-- [ ] **KRUN-04**: Inputs are a shared read-only root disk and a per-job read-only input disk, both raw images; the candidate's scratch is size-capped space in guest memory; no host directory is ever shared; scratch is deleted unread. *Superseded wording (2026-10-18): "a size-capped scratch disk, all raw images". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
+- [x] **KRUN-04**: Inputs are a shared read-only root disk and a per-job read-only input disk, both raw images; the candidate's scratch is size-capped space in guest memory; no host directory is ever shared; scratch is deleted unread. *Superseded wording (2026-10-18): "a size-capped scratch disk, all raw images". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [ ] **KRUN-05**: The supervisor enforces the hard maximum duration by killing the helper's process group; a parent-death watchdog and pidfile sweep ensure `kill -9` on `minos run` leaves no VM running
 - [ ] **KRUN-06**: Preflight checks the entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, and active confinement layers, and refuses with a reason for each failure
 - [ ] **KRUN-07**: The run records which confinement layers were active (dedicated user, Seatbelt, rlimits) in `BackendInfo`, and never falls back silently
@@ -239,10 +239,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GUEST-03 | Phase 5 | Pending |
 | GUEST-04 | Phase 5 | Pending |
 | GUEST-05 | Phase 5 | Pending |
-| KRUN-01 | Phase 5 | Pending |
+| KRUN-01 | Phase 5 | Complete |
 | KRUN-02 | Phase 5 | Pending |
 | KRUN-03 | Phase 5 | Pending |
-| KRUN-04 | Phase 5 | Pending |
+| KRUN-04 | Phase 5 | Complete |
 | KRUN-05 | Phase 5 | Pending |
 | KRUN-06 | Phase 5 | Pending |
 | KRUN-07 | Phase 5 | Pending |
