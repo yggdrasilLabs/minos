@@ -793,6 +793,7 @@ name = "minos-guest"
 version = "0.1.0"
 dependencies = [
  "minos-core",
+ "proptest",
  "rustix",
  "serde",
  "serde_json",
