@@ -1,21 +1,26 @@
 //! Per-VM launcher: the only binary that links the VMM crate.
 //!
-//! `minos-vmm <config.json>` reads a launch config (02-CONTEXT.md D-04), checks the environment and the host files
-//! it names, builds the VM with `msb_krun`, starts a watchdog, and hands the process to the VMM, which exits it
-//! when the guest stops. stdin is never read; the parent gives the helper `/dev/null` (KRUN-01).
+//! `minos-vmm <config.json>` sets its own resource limits, installs its capped stderr logger, reads a launch
+//! config (02-CONTEXT.md D-04; v2, `golden/config-v2.json`), checks the environment, its stdout, and the host
+//! files the config names, builds the VM with `msb_krun`, starts a watchdog, and hands the process to the VMM,
+//! which exits it when the guest stops. stdin is never read; the parent gives the helper `/dev/null`, its stdout
+//! is the console pipe, and its stderr is a second pipe (KRUN-01).
 //!
-//! Exit codes (02-03-PLAN.md E-3):
+//! Exit codes (02-03-PLAN.md E-3, as amended by 05-07):
 //!
 //! | Code | Meaning |
 //! |---|---|
 //! | 0 | the VMM exited on its own (guest power-off, guest reboot or panic, SIGTERM) |
 //! | 64 | not exactly one argument |
 //! | 65 | config unreadable, too large, not JSON, an unknown field, or a failed rule |
-//! | 66 | preflight: a named file missing, not canonical, or the wrong type; scratch over its cap; console path exists; a forbidden environment variable |
-//! | 67 | libkrunfw or initramfs SHA-256 does not match the config |
+//! | 66 | setting its own rlimits or installing its logger; preflight: a forbidden environment variable, stdout not a pipe, or a named file missing, not canonical, or the wrong type |
+//! | 67 | libkrunfw SHA-256 does not match the config |
 //! | 70 | `msb_krun` refused to build or start the VM before takeover |
 //! | 71 | the watchdog thread could not be started (a host thread or memory limit), so the VM was never entered |
-//! | 124, 125, 126 | watchdog: deadline, console cap, parent gone |
+//! | 124, 126 | watchdog: deadline, parent gone |
+//!
+//! The helper no longer exits 125: the console is its stdout pipe, and the supervisor enforces the console cap on
+//! its side of the pipe and kills the helper on overflow (05-EVIDENCE.md W0-CONSOLE).
 //!
 //! A guest exit code is never visible here: with no virtio-fs device the guest has no way to set one, so the
 //! status of a run comes from its vsock status frame, not from this process (02-RESEARCH.md Pattern 3).
@@ -35,6 +40,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
+use rustix::process::{Resource, Rlimit};
+
 use crate::config::{ConfigError, MAX_CONFIG_BYTES, VmmConfig};
 use crate::preflight::PreflightError;
 
@@ -42,14 +49,19 @@ use crate::preflight::PreflightError;
 const EXIT_USAGE: u8 = 64;
 /// The config could not be read or failed validation.
 const EXIT_CONFIG: u8 = 65;
-/// A preflight check failed.
+/// The helper could not confine itself, or a preflight check failed.
 const EXIT_PREFLIGHT: u8 = 66;
-/// A libkrunfw or initramfs digest did not match.
+/// The libkrunfw digest did not match.
 const EXIT_HASH: u8 = 67;
 /// `msb_krun` refused to build or start the VM before takeover.
 const EXIT_VMM: u8 = 70;
 /// The watchdog thread could not be started, so the VM was never entered.
 const EXIT_WATCHDOG: u8 = 71;
+
+/// The helper's open-file limit: the VMM's two disks, the vsock route, its threads, and its pipes need well
+/// under this. Lowered to the inherited hard limit if that is smaller, because an unprivileged process cannot
+/// raise its hard limit.
+const NOFILE_LIMIT: u64 = 1024;
 
 /// The usage line printed for exit code 64.
 const USAGE: &str = "minos-vmm: usage: minos-vmm <config.json>";
@@ -78,9 +90,13 @@ enum LaunchError {
         #[source]
         source: ConfigError,
     },
-    /// A preflight check failed.
+    /// The helper could not set its own rlimits, or a preflight check failed.
     #[error("preflight")]
     Preflight(#[source] PreflightError),
+    /// The stderr logger could not be installed. `log` builds `SetLoggerError` without its `Error` impl here
+    /// (the `std` feature is off), so it is shown, not chained.
+    #[error("installing the stderr logger: {0}")]
+    Logger(::log::SetLoggerError),
     /// `msb_krun` refused to build the VM.
     #[error("building the VM")]
     Build(#[source] msb_krun::Error),
@@ -99,7 +115,7 @@ impl LaunchError {
             Self::Usage => EXIT_USAGE,
             Self::Read { .. } | Self::Config { .. } => EXIT_CONFIG,
             Self::Preflight(PreflightError::Hash { .. }) => EXIT_HASH,
-            Self::Preflight(_) => EXIT_PREFLIGHT,
+            Self::Preflight(_) | Self::Logger(_) => EXIT_PREFLIGHT,
             Self::Build(_) | Self::Enter(_) => EXIT_VMM,
             Self::Watchdog(_) => EXIT_WATCHDOG,
         }
@@ -127,7 +143,12 @@ fn main() -> ExitCode {
 
 /// Everything up to and including `enter`, which never returns on success. `parent` and `started` are the parent
 /// PID and the instant recorded at `main` entry.
+///
+/// The helper confines itself first, before it reads its arguments or its config: its own rlimits, then the
+/// logger, so `msb_krun`'s warnings reach stderr capped and sanitized from the first VMM call on.
 fn run(parent: u32, started: Instant) -> Result<Infallible, LaunchError> {
+    apply_rlimits().map_err(LaunchError::Preflight)?;
+    crate::log::install().map_err(LaunchError::Logger)?;
     let path = config_path()?;
     let config = read_config(path)?;
     preflight::check(&config).map_err(LaunchError::Preflight)?;
@@ -144,6 +165,41 @@ fn run(parent: u32, started: Instant) -> Result<Infallible, LaunchError> {
     )
     .map_err(LaunchError::Watchdog)?;
     vm.enter().map_err(LaunchError::Enter)
+}
+
+/// Sets the helper's own resource limits, each with its current and maximum value equal, so nothing it runs can
+/// raise them again (D-01, the host half of `ConfinementLayer::Rlimits`; the guest half is the trampoline's
+/// per-stage limits on the candidate):
+///
+/// - `RLIMIT_CORE` 0: a crash leaves no core file of the entitled process on the host.
+/// - `RLIMIT_NOFILE` [`NOFILE_LIMIT`], or the inherited hard limit if smaller.
+/// - `RLIMIT_FSIZE` 0: the helper writes no regular file. Its console and stderr are pipes, which the limit does
+///   not cover, and `msb_krun` creates no file of its own (05-EVIDENCE.md W0-CONSOLE, assumption A4). A write to
+///   a regular file would raise `SIGXFSZ` and kill the helper, which the supervisor classifies as an
+///   infrastructure failure, so the limit fails closed.
+///
+/// # Errors
+///
+/// [`PreflightError::Rlimit`] naming the first limit that could not be set.
+fn apply_rlimits() -> Result<(), PreflightError> {
+    let nofile = rustix::process::getrlimit(Resource::Nofile)
+        .maximum
+        .map_or(NOFILE_LIMIT, |hard| hard.min(NOFILE_LIMIT));
+    for (resource, name, value) in [
+        (Resource::Core, "RLIMIT_CORE", 0),
+        (Resource::Nofile, "RLIMIT_NOFILE", nofile),
+        (Resource::Fsize, "RLIMIT_FSIZE", 0),
+    ] {
+        let limit = Rlimit {
+            current: Some(value),
+            maximum: Some(value),
+        };
+        rustix::process::setrlimit(resource, limit).map_err(|errno| PreflightError::Rlimit {
+            resource: name,
+            source: io::Error::from(errno),
+        })?;
+    }
+    Ok(())
 }
 
 /// The only argument: the launch config path.

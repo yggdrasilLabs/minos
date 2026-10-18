@@ -17,4 +17,8 @@ disallowed-methods = [
   { path = "msb_krun::api::builders::ExecBuilder::envs", reason = "no host environment in the guest" },
   { path = "msb_krun::api::builders::ConsoleBuilder::port", reason = "hands host file descriptors to the guest console" },
   { path = "msb_krun::api::builders::ConsoleBuilder::port_tty", reason = "hands the host TTY to the guest" },
+  { path = "msb_krun::api::builders::ConsoleBuilder::custom", reason = "a custom console backend hands host code a guest-facing port" },
+  { path = "msb_krun::api::builders::ConsoleBuilder::custom_with_options", reason = "a custom console backend hands host code a guest-facing port" },
+  { path = "msb_krun::api::builders::VsockBuilder::custom", reason = "only the unix_connect route may carry guest bytes" },
+  { path = "msb_krun::api::builders::VsockBuilder::custom_dgram", reason = "only the unix_connect route may carry guest bytes" },
 ]

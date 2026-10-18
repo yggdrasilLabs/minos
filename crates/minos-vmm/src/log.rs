@@ -28,7 +28,7 @@ pub const TRUNCATED_LINE: &str = "minos-vmm: log truncated";
 const PREFIX: &str = "minos-vmm: log ";
 /// The most verbose level written.
 const MAX_LEVEL: Level = Level::Warn;
-/// Most message characters rendered. A longer line could never fit under [`LOG_CAP_BYTES`] anyway.
+/// Most message characters kept. A longer line could never fit under [`LOG_CAP_BYTES`] anyway.
 const MAX_MESSAGE_CHARS: usize = 65_536;
 /// [`LineBudget`]'s state once [`TRUNCATED_LINE`] has been admitted.
 const CLOSED: u64 = u64::MAX;
@@ -44,14 +44,75 @@ pub enum Admit {
     Drop,
 }
 
-/// One log line for `level` and `message`: the prefix, the level word, and the sanitized message, no newline.
+/// One log line for `level` and `message`: the prefix, the level word, and the message with every character
+/// outside printable ASCII replaced by `?`, at most [`MAX_MESSAGE_CHARS`] message characters, no newline.
 pub fn format_line(level: Level, message: &str) -> String {
-    drop((level, message));
-    String::new()
+    let word = level_word(level);
+    let mut line = String::with_capacity(
+        PREFIX
+            .len()
+            .saturating_add(word.len())
+            .saturating_add(2)
+            .saturating_add(message.len().min(MAX_MESSAGE_CHARS)),
+    );
+    line.push_str(PREFIX);
+    line.push_str(word);
+    line.push_str(": ");
+    line.extend(message.chars().take(MAX_MESSAGE_CHARS).map(|character| {
+        if matches!(character, ' '..='~') {
+            character
+        } else {
+            '?'
+        }
+    }));
+    line
+}
+
+/// The record's message, formatted into a string of at most [`MAX_MESSAGE_CHARS`] characters, so a huge message
+/// is never held whole.
+fn message_text(message: fmt::Arguments<'_>) -> String {
+    let mut text = Bounded {
+        text: String::new(),
+        room: MAX_MESSAGE_CHARS,
+    };
+    // A full writer stops formatting with `fmt::Error`; what was written so far is the message.
+    text.write_fmt(message).unwrap_or(());
+    text.text
+}
+
+/// The lowercase word for `level`.
+fn level_word(level: Level) -> &'static str {
+    match level {
+        Level::Error => "error",
+        Level::Warn => "warn",
+        Level::Info => "info",
+        Level::Debug => "debug",
+        Level::Trace => "trace",
+    }
+}
+
+/// A `fmt::Write` sink that stops after `room` characters.
+struct Bounded {
+    text: String,
+    room: usize,
+}
+
+impl fmt::Write for Bounded {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        for character in text.chars() {
+            let Some(room) = self.room.checked_sub(1) else {
+                return Err(fmt::Error);
+            };
+            self.room = room;
+            self.text.push(character);
+        }
+        Ok(())
+    }
 }
 
 /// The byte budget shared by every logged line.
 pub struct LineBudget {
+    /// Bytes admitted so far, or [`CLOSED`] once the truncated line was admitted.
     used: AtomicU64,
 }
 
@@ -63,10 +124,27 @@ impl LineBudget {
         }
     }
 
-    /// Whether a line of `len` bytes, its newline included, may be written.
+    /// Whether a line of `len` bytes, its newline included, may be written: [`Admit::Line`] while the total stays
+    /// within [`LOG_CAP_BYTES`], [`Admit::Truncated`] once for the first line that would pass it, and
+    /// [`Admit::Drop`] for everything after.
     pub fn admit(&self, len: u64) -> Admit {
-        drop((len, self.used.load(Ordering::SeqCst), CLOSED, LOG_CAP_BYTES));
-        Admit::Drop
+        let mut used = self.used.load(Ordering::SeqCst);
+        loop {
+            if used == CLOSED {
+                return Admit::Drop;
+            }
+            let (next, verdict) = match used.checked_add(len) {
+                Some(total) if total <= LOG_CAP_BYTES => (total, Admit::Line),
+                _ => (CLOSED, Admit::Truncated),
+            };
+            match self
+                .used
+                .compare_exchange_weak(used, next, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => return verdict,
+                Err(actual) => used = actual,
+            }
+        }
     }
 }
 
@@ -82,12 +160,20 @@ static LOGGER: Logger = Logger {
 
 impl Log for Logger {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        drop((metadata, MAX_LEVEL));
-        true
+        metadata.level() <= MAX_LEVEL
     }
 
     fn log(&self, record: &Record<'_>) {
-        drop(record);
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let line = format_line(record.level(), &message_text(*record.args()));
+        let len = u64::try_from(line.len().saturating_add(1)).unwrap_or(u64::MAX);
+        match self.budget.admit(len) {
+            Admit::Line => crate::say(format_args!("{line}")),
+            Admit::Truncated => crate::say(format_args!("{TRUNCATED_LINE}")),
+            Admit::Drop => {}
+        }
     }
 
     fn flush(&self) {}
@@ -108,7 +194,10 @@ pub fn install() -> Result<(), SetLoggerError> {
 mod tests {
     use ::log::{Level, Log, Metadata};
 
-    use super::{Admit, LOG_CAP_BYTES, LOGGER, LineBudget, TRUNCATED_LINE, format_line};
+    use super::{
+        Admit, LOG_CAP_BYTES, LOGGER, LineBudget, MAX_MESSAGE_CHARS, TRUNCATED_LINE, format_line,
+        message_text,
+    };
 
     /// A message that tries to start a new line holding a watchdog marker, then a carriage return and an ANSI
     /// escape, stays one line under the log prefix.
@@ -169,6 +258,20 @@ mod tests {
         let budget = LineBudget::new();
         assert_eq!(budget.admit(LOG_CAP_BYTES + 1), Admit::Truncated);
         assert_eq!(budget.admit(0), Admit::Drop);
+    }
+
+    /// A message is formatted into at most `MAX_MESSAGE_CHARS` characters, and a line never carries more.
+    #[test]
+    fn log_message_is_bounded() {
+        let long = "a".repeat(MAX_MESSAGE_CHARS + 10);
+        let text = message_text(format_args!("{long}"));
+        assert_eq!(text.chars().count(), MAX_MESSAGE_CHARS);
+        let line = format_line(Level::Warn, &long);
+        assert_eq!(
+            line.len(),
+            "minos-vmm: log warn: ".len() + MAX_MESSAGE_CHARS
+        );
+        assert_eq!(message_text(format_args!("{} {}", 1, "two")), "1 two");
     }
 
     #[test]

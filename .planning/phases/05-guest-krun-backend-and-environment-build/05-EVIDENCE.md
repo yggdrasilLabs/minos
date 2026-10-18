@@ -940,3 +940,113 @@ cap + 1 (the file console with the 50 ms watchdog and a cap + 65536 host budget,
 the rule run boots and the no-rule run exits 66 with the denial (W0-ROOT, W0-ROOT-DENY), so the backend boots the
 verified store path directly and keeps the ROOT_IMG ancestor-metadata rule (no hardlink). chunks: 16 MiB reassembled
 exactly with no fault in about 247 ms, under the 15 s bound, so the protocol, caps, and dependencies stay as they are.
+
+## 05-07 clippy bans fire
+
+Requirement: KRUN-02 (05-RESEARCH Open Question 5), T-05-07-02
+
+Edit: four entries added to `crates/minos-vmm/clippy.toml`: `msb_krun::api::builders::ConsoleBuilder::custom`,
+`ConsoleBuilder::custom_with_options`, `VsockBuilder::custom`, and `VsockBuilder::custom_dgram`, each written with the
+definition path, as D-PROBE did. To prove each fires, a throwaway `#[cfg(test)] mod disallowed_probe` with one
+`#[test] fn every_new_banned_method_fires()` was appended to `crates/minos-vmm/src/launch.rs`. It binds each banned
+method as a path expression through the `msb_krun::` root re-exports, with no call (the form D-PROBE showed fires for
+`FsBuilder::custom`), and passes the four to `std::hint::black_box`: `let console_custom =
+msb_krun::ConsoleBuilder::custom;`, `let console_custom_with_options =
+msb_krun::ConsoleBuilder::custom_with_options;`, `let vsock_custom = msb_krun::VsockBuilder::custom;`, and `let
+vsock_custom_dgram = msb_krun::VsockBuilder::custom_dgram;`. The probe uses no unwrap, expect, indexing, unsafe, or
+allow. `cargo clippy --version`: clippy 0.1.97 (8bab26f4f6 2026-07-14).
+
+Command: `cargo clippy -p minos-vmm --all-targets -- -D warnings > "$S/probe0507.txt" 2>&1; echo "exit: $?"; grep '^error' "$S/probe0507.txt" | sort | uniq -c`
+
+Exit code: 101
+
+```text
+exit: 101
+   1 error: could not compile `minos-vmm` (bin "minos-vmm" test) due to 4 previous errors
+   1 error: use of a disallowed method `msb_krun::api::builders::ConsoleBuilder::custom_with_options`
+   1 error: use of a disallowed method `msb_krun::api::builders::ConsoleBuilder::custom`
+   1 error: use of a disallowed method `msb_krun::api::builders::VsockBuilder::custom_dgram`
+   1 error: use of a disallowed method `msb_krun::api::builders::VsockBuilder::custom`
+```
+
+Four distinct paths, one error each, and no other error. Each error in full, with the reason text from `clippy.toml`:
+
+Command: `grep -A6 '^error: use of a disallowed' "$S/probe0507.txt"`
+
+Exit code: 0
+
+```text
+error: use of a disallowed method `msb_krun::api::builders::ConsoleBuilder::custom`
+   --> crates/minos-vmm/src/launch.rs:135:30
+    |
+135 |         let console_custom = msb_krun::ConsoleBuilder::custom;
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: a custom console backend hands host code a guest-facing port
+--
+error: use of a disallowed method `msb_krun::api::builders::ConsoleBuilder::custom_with_options`
+   --> crates/minos-vmm/src/launch.rs:136:43
+    |
+136 |         let console_custom_with_options = msb_krun::ConsoleBuilder::custom_with_options;
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: a custom console backend hands host code a guest-facing port
+--
+error: use of a disallowed method `msb_krun::api::builders::VsockBuilder::custom`
+   --> crates/minos-vmm/src/launch.rs:137:28
+    |
+137 |         let vsock_custom = msb_krun::VsockBuilder::custom;
+    |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: only the unix_connect route may carry guest bytes
+--
+error: use of a disallowed method `msb_krun::api::builders::VsockBuilder::custom_dgram`
+   --> crates/minos-vmm/src/launch.rs:138:34
+    |
+138 |         let vsock_custom_dgram = msb_krun::VsockBuilder::custom_dgram;
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: only the unix_connect route may carry guest bytes
+```
+
+Revert: `git checkout -- crates/minos-vmm/src/launch.rs`, then `git diff --quiet -- crates/minos-vmm/src/launch.rs`
+(exit 0).
+
+Command: `cargo clippy -p minos-vmm --all-targets -- -D warnings`
+
+Exit code: 0
+
+`ConsoleBuilder::custom` delegates to `custom_with_options` inside `msb_krun`; clippy lints only this crate's uses, so
+banning both closes the console route whichever one a future edit reaches for.
+
+### 05-07 helper rlimits: stderr must be a pipe
+
+Requirement: KRUN-07 (D-01; 05-RESEARCH Assumption A4), T-05-07-03
+
+The helper sets `RLIMIT_CORE` 0, `RLIMIT_NOFILE` 1024, and `RLIMIT_FSIZE` 0 before it reads its arguments. No VM was
+run (the backend's serializer still writes v1 until 05-21); these runs only exercise the rlimit and error path on this
+host. `S` is the session scratch directory.
+
+Command: `bash -c 'target/debug/minos-vmm /nonexistent.json 2>&1 | cat; echo "exit: ${PIPESTATUS[0]}"'`
+
+Exit code: 0 (the helper's own exit is the printed one)
+
+```text
+minos-vmm: error: reading launch config /nonexistent.json: No such file or directory (os error 2)
+exit: 65
+```
+
+Command: `bash -c 'target/debug/minos-vmm /nonexistent.json 2>"$S/stderr.txt" | cat; echo "exit: ${PIPESTATUS[0]}"; wc -c < "$S/stderr.txt"'`
+
+Exit code: 0 (the helper's own exit is the printed one)
+
+```text
+exit: 153
+       0
+```
+
+With stderr on a pipe, every limit is set and the config error reaches the parent with exit 65. With stderr on a
+regular file, the first stderr write passes `RLIMIT_FSIZE` 0 and the helper dies by `SIGXFSZ` (153 = 128 + 25),
+writing nothing. That fails closed (the supervisor counts a signal it did not send as an infrastructure failure), but
+it loses the diagnostic, so the supervisor (05-15) must give the helper stderr on a pipe, as 05-RESEARCH Pattern 7
+already requires; anyone running the helper by hand must pipe its stderr too.
