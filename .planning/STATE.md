@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-10-18T20:03:11.553Z"
+stopped_at: Completed 05-08-PLAN.md
+last_updated: "2026-10-18T20:14:09.935Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 45
+  completed_plans: 46
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 8 of 22
+Plan: 9 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -103,6 +103,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P03 | 13min | 3 tasks | 16 files |
 | Phase 05 P06 | 8 min | 3 tasks | 13 files |
 | Phase 05 P07 | 14 min | 3 tasks | 16 files |
+| Phase 05 P08 | 10min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-06: Capabilities carries layers and kernel; a krun host without Seatbelt clears no plan (D-03); DedicatedUser is recorded missing, never refused (D-01)
 - [Phase 05]: 05-07: minos-vmm launch config v2 has no scratch, boot, or console field; the console is the constant /dev/fd/1 and preflight refuses a non-pipe fd 1
 - [Phase 05]: 05-07: the helper sets RLIMIT_CORE 0, RLIMIT_NOFILE min(1024, hard), and RLIMIT_FSIZE 0 before reading its config, so its stdout and stderr must be pipes (a regular-file stderr dies by SIGXFSZ)
+- [Phase 05]: 05-08: ChunkSink refuses a tar over MAX_OUTPUT_STREAM_BYTES before connecting (SinkError::TooLarge); a failed close is SinkError::Write
+- [Phase 05]: 05-08: parse_trampoline refuses 0, leading zeros, signs, over-cap limits, and an empty program; stages run as uid and gid 64000 with STAGE_ENV PATH, HOME, TMPDIR, LANG
 
 ### Pending Todos
 
@@ -260,6 +263,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T20:03:11.549Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-10-18T20:14:09.929Z
+Stopped at: Completed 05-08-PLAN.md
 Resume file: None
