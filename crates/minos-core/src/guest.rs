@@ -14,16 +14,20 @@
 //! so the AWS milestone's lifecycle-hook source reuses them unchanged. Core does no I/O of its own; the caller owns
 //! every reader and writer.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::io::{self, Read, Write};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
+use crate::chunk::{ChunkToken, TOKEN_BYTES};
 use crate::id::{BlobId, ExperimentId, TreeId};
 use crate::job::JobRequest;
 use crate::limits::{
-    MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_MEMORY_MIB, MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES,
-    MAX_SCRATCH_MIB, MAX_STAGE_MS, MAX_TRIALS, MAX_WRITABLE, MIN_MEMORY_MIB, MIN_SCRATCH_MIB,
-    MIN_STAGE_MS, candidate_allowance_mib,
+    MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_DIFF_BYTES, MAX_MEMORY_MIB, MAX_OUTPUT_CONTENT_BYTES,
+    MAX_OUTPUT_ENTRIES, MAX_OUTPUT_STREAM_BYTES, MAX_SCRATCH_MIB, MAX_STAGE_MS, MAX_TRIALS,
+    MAX_WRITABLE, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, MIN_STAGE_MS, candidate_allowance_mib,
 };
 use crate::manifest::{CommandArgv, JudgeVersion, Manifest};
 use crate::outcome::Stage;
@@ -842,5 +846,550 @@ impl From<GuestStatus> for RawGuestStatus {
             stages: status.stages,
             output: status.output,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Input disk (05-CONTEXT D-15)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Magic bytes at the start of the input disk.
+pub const DISK_MAGIC: [u8; 8] = *b"MINOSJB2";
+
+/// The input disk layout version this code reads and writes.
+pub const DISK_VERSION: u32 = 2;
+
+/// Length of the disk header: the magic, the `u32` version, the `u32` section count, and the 32-byte per-launch
+/// output token.
+pub const DISK_HEADER_BYTES: usize = 48;
+
+/// Length of one section table entry: the `u32` kind, the `u64` offset, the `u64` length, and the section's
+/// SHA-256.
+pub const SECTION_ENTRY_BYTES: usize = 52;
+
+/// Every section starts on a boundary of this many bytes, and the disk is a whole number of them.
+pub const SECTOR_BYTES: u64 = 512;
+
+/// Most bytes in the BASE section: 80 MiB, above the source snapshot's largest tarball, which is 64 MiB of
+/// content plus at most 1 KiB of header and padding for each of 10,000 files, plus the two end blocks (a test in
+/// `minos-source` checks the bound against the snapshot caps).
+pub const MAX_BASE_TAR_BYTES: u64 = 83_886_080;
+
+/// Most bytes in the `JUDGE_DATA` section: 96 MiB. Judge data is pushed by `minos judge push` in Phase 7, which
+/// must refuse larger data.
+pub const MAX_JUDGE_DATA_BYTES: u64 = 100_663_296;
+
+/// Most bytes in the `CANDIDATE_OUT` section: the candidate's whole output stream, as the judge receives it.
+pub const MAX_CANDIDATE_OUT_BYTES: u64 = MAX_OUTPUT_STREAM_BYTES;
+
+/// Most sections on one disk: one of each kind.
+const MAX_SECTIONS: u32 = 5;
+
+const _: () = assert!(
+    DISK_HEADER_BYTES == DISK_MAGIC.len() + 4 + 4 + TOKEN_BYTES,
+    "the header is the magic, the version, the count, and the token"
+);
+const _: () = assert!(
+    SECTION_ENTRY_BYTES == 4 + 8 + 8 + 32,
+    "an entry is the kind, the offset, the length, and the digest"
+);
+const _: () = assert!(
+    usize::BITS <= u64::BITS,
+    "a usize widens to a u64 without loss"
+);
+
+/// `n` as a `u64`. Lossless: a `usize` is at most 64 bits (asserted above).
+const fn widen(n: usize) -> u64 {
+    n as u64
+}
+
+/// A sector of zeros, for padding.
+const ZEROS: [u8; 512] = [0; 512];
+
+/// What one input disk section holds. The discriminant is the kind's code in the section table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SectionKind {
+    /// The guest job JSON.
+    Job = 1,
+    /// The base tarball a candidate unpacks.
+    Base = 2,
+    /// The canonical cumulative diff a candidate applies.
+    Diff = 3,
+    /// The judge's private data.
+    JudgeData = 4,
+    /// The candidate's output stream, which the judge scores.
+    CandidateOut = 5,
+}
+
+impl SectionKind {
+    /// Most bytes a section of this kind may hold.
+    #[must_use]
+    pub const fn cap(self) -> u64 {
+        match self {
+            Self::Job => widen(MAX_GUEST_JOB_BYTES),
+            Self::Base => MAX_BASE_TAR_BYTES,
+            Self::Diff => widen(MAX_DIFF_BYTES),
+            Self::JudgeData => MAX_JUDGE_DATA_BYTES,
+            Self::CandidateOut => MAX_CANDIDATE_OUT_BYTES,
+        }
+    }
+
+    /// The kind's code in the section table.
+    #[must_use]
+    pub const fn code(self) -> u32 {
+        self as u32
+    }
+
+    /// The kind with table code `code`, or `None` for an unknown code.
+    #[must_use]
+    pub const fn from_u32(code: u32) -> Option<Self> {
+        match code {
+            1 => Some(Self::Job),
+            2 => Some(Self::Base),
+            3 => Some(Self::Diff),
+            4 => Some(Self::JudgeData),
+            5 => Some(Self::CandidateOut),
+            _ => None,
+        }
+    }
+}
+
+/// Why an input disk could not be written or read.
+///
+/// The backend writes the disk from blob bytes it has already checked, so every `DiskError` is a host bug or a
+/// corrupted disk: an infrastructure failure, never a candidate fault (05-RESEARCH Pattern 4). Payloads are
+/// numbers only.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum DiskError {
+    /// The disk does not start with [`DISK_MAGIC`].
+    #[error("the input disk does not start with the disk magic")]
+    Magic,
+    /// The disk's version is not [`DISK_VERSION`].
+    #[error("the input disk version is {found}, not {DISK_VERSION}")]
+    Version {
+        /// The version found.
+        found: u32,
+    },
+    /// The section count is 0 or more than one section of each kind.
+    #[error("the input disk has {count} sections; it holds 1 to {MAX_SECTIONS}")]
+    SectionCount {
+        /// The count found.
+        count: u32,
+    },
+    /// A section kind this code does not know.
+    #[error("the input disk has a section of unknown kind {kind}")]
+    UnknownKind {
+        /// The kind's code.
+        kind: u32,
+    },
+    /// Two sections of one kind.
+    #[error("the input disk has two sections of one kind")]
+    DuplicateKind,
+    /// The table is not in ascending kind order, a section does not start where the canonical layout puts it
+    /// (on the first sector boundary after the table or the section before), or padding is not zero.
+    #[error("the input disk layout is not the canonical layout")]
+    Layout,
+    /// A section is longer than its kind's cap.
+    #[error("the input disk section of kind {kind} is {length} bytes; the cap is {cap}")]
+    TooLarge {
+        /// The kind's code.
+        kind: u32,
+        /// The section's length.
+        length: u64,
+        /// The kind's cap.
+        cap: u64,
+    },
+    /// A section's bytes do not hash to its table digest.
+    #[error("the input disk section of kind {kind} does not match its digest")]
+    Digest {
+        /// The kind's code.
+        kind: u32,
+    },
+    /// A section the disk or the job's role needs is missing.
+    #[error("the input disk has no section of kind {kind}")]
+    MissingSection {
+        /// The kind's code.
+        kind: u32,
+    },
+    /// A section the job's role must not see is present.
+    #[error("the input disk has a section of kind {kind} that the job's role must not see")]
+    UnexpectedSection {
+        /// The kind's code.
+        kind: u32,
+    },
+    /// The BASE section is not the job's base tree.
+    #[error("the base section is not the job's base tree")]
+    BaseMismatch,
+    /// The DIFF section is not the job's diff blob.
+    #[error("the diff section is not the job's diff")]
+    DiffMismatch,
+    /// Reading or writing failed, or the disk ended early.
+    #[error("input disk I/O failed")]
+    Io(#[source] io::Error),
+}
+
+/// `n` rounded up to a whole sector, or `None` on overflow.
+const fn round_up(n: u64) -> Option<u64> {
+    n.checked_next_multiple_of(SECTOR_BYTES)
+}
+
+/// Where the first section starts on a disk of `count` sections: the first sector boundary after the table.
+fn first_offset(count: usize) -> Option<u64> {
+    let table = SECTION_ENTRY_BYTES.checked_mul(count)?;
+    round_up(widen(DISK_HEADER_BYTES.checked_add(table)?))
+}
+
+/// Writes `length` zero bytes.
+fn write_zeros<W: Write>(out: &mut W, mut length: u64) -> Result<(), DiskError> {
+    while length > 0 {
+        let step = length.min(widen(ZEROS.len()));
+        let chunk = usize::try_from(step)
+            .ok()
+            .and_then(|step| ZEROS.get(..step))
+            .ok_or(DiskError::Layout)?;
+        out.write_all(chunk).map_err(DiskError::Io)?;
+        length -= step;
+    }
+    Ok(())
+}
+
+/// Writes the input disk of `sections` under `token` to `out`, and returns its length in bytes.
+///
+/// The sections are written in ascending kind order, whatever order they are given in, each on the first sector
+/// boundary after the table or the section before, with zero padding between them and after the last to a whole
+/// sector. Every check runs before the first byte is written, so a refused disk writes nothing. Core does no file
+/// I/O: the caller owns the writer (05-CONTEXT D-15: the backend writes the disk into the job directory, and the
+/// disk is never stored as a blob).
+///
+/// # Errors
+///
+/// [`DiskError::SectionCount`] for no sections, [`DiskError::DuplicateKind`], [`DiskError::TooLarge`] for a
+/// section over its kind's cap, [`DiskError::MissingSection`] without a JOB section, and [`DiskError::Io`] when
+/// writing fails.
+pub fn write_input_disk<W: Write>(
+    out: &mut W,
+    token: &ChunkToken,
+    sections: &[(SectionKind, &[u8])],
+) -> Result<u64, DiskError> {
+    if sections.is_empty() {
+        return Err(DiskError::SectionCount { count: 0 });
+    }
+    let mut sorted: BTreeMap<SectionKind, &[u8]> = BTreeMap::new();
+    for &(kind, bytes) in sections {
+        let length = widen(bytes.len());
+        if length > kind.cap() {
+            return Err(DiskError::TooLarge {
+                kind: kind.code(),
+                length,
+                cap: kind.cap(),
+            });
+        }
+        if sorted.insert(kind, bytes).is_some() {
+            return Err(DiskError::DuplicateKind);
+        }
+    }
+    if !sorted.contains_key(&SectionKind::Job) {
+        return Err(DiskError::MissingSection {
+            kind: SectionKind::Job.code(),
+        });
+    }
+    let count = u32::try_from(sorted.len()).map_err(|_| DiskError::Layout)?;
+    let mut head = Vec::with_capacity(DISK_HEADER_BYTES + SECTION_ENTRY_BYTES * sorted.len());
+    head.extend_from_slice(&DISK_MAGIC);
+    head.extend_from_slice(&DISK_VERSION.to_be_bytes());
+    head.extend_from_slice(&count.to_be_bytes());
+    head.extend_from_slice(token.as_bytes());
+    let mut offsets = Vec::with_capacity(sorted.len());
+    let mut next = first_offset(sorted.len()).ok_or(DiskError::Layout)?;
+    for (&kind, bytes) in &sorted {
+        let length = widen(bytes.len());
+        let digest: [u8; 32] = Sha256::digest(bytes).into();
+        head.extend_from_slice(&kind.code().to_be_bytes());
+        head.extend_from_slice(&next.to_be_bytes());
+        head.extend_from_slice(&length.to_be_bytes());
+        head.extend_from_slice(&digest);
+        offsets.push(next);
+        next = next
+            .checked_add(length)
+            .and_then(round_up)
+            .ok_or(DiskError::Layout)?;
+    }
+    out.write_all(&head).map_err(DiskError::Io)?;
+    let mut position = widen(head.len());
+    for (bytes, offset) in sorted.values().zip(offsets) {
+        let gap = offset.checked_sub(position).ok_or(DiskError::Layout)?;
+        write_zeros(out, gap)?;
+        out.write_all(bytes).map_err(DiskError::Io)?;
+        position = offset
+            .checked_add(widen(bytes.len()))
+            .ok_or(DiskError::Layout)?;
+    }
+    let total = round_up(position).ok_or(DiskError::Layout)?;
+    write_zeros(out, total - position)?;
+    Ok(total)
+}
+
+/// Fixed-width big-endian fields read off the front of a byte slice.
+struct Fields<'a>(&'a [u8]);
+
+impl Fields<'_> {
+    fn take<const N: usize>(&mut self) -> Result<[u8; N], DiskError> {
+        let (head, rest) = self.0.split_first_chunk::<N>().ok_or(DiskError::Layout)?;
+        self.0 = rest;
+        Ok(*head)
+    }
+
+    fn u32(&mut self) -> Result<u32, DiskError> {
+        Ok(u32::from_be_bytes(self.take()?))
+    }
+
+    fn u64(&mut self) -> Result<u64, DiskError> {
+        Ok(u64::from_be_bytes(self.take()?))
+    }
+}
+
+/// One validated section table entry.
+struct Entry {
+    kind: SectionKind,
+    offset: u64,
+    length: u64,
+    digest: [u8; 32],
+}
+
+/// The validated section table of a disk of `count` sections, read from `table`.
+///
+/// Every entry is checked here, before any section byte is read: its kind is known and appears once, the kinds
+/// ascend, its length is within its kind's cap, and its offset is the canonical one. The table must have a JOB
+/// entry.
+fn parse_table(count: usize, table: &[u8]) -> Result<Vec<Entry>, DiskError> {
+    let mut entries: Vec<Entry> = Vec::with_capacity(count);
+    let mut seen = BTreeSet::new();
+    let mut expected = first_offset(count).ok_or(DiskError::Layout)?;
+    for raw in table.chunks_exact(SECTION_ENTRY_BYTES) {
+        let mut fields = Fields(raw);
+        let code = fields.u32()?;
+        let offset = fields.u64()?;
+        let length = fields.u64()?;
+        let digest = fields.take::<32>()?;
+        let kind = SectionKind::from_u32(code).ok_or(DiskError::UnknownKind { kind: code })?;
+        if !seen.insert(kind) {
+            return Err(DiskError::DuplicateKind);
+        }
+        if entries.last().is_some_and(|previous| previous.kind > kind) {
+            return Err(DiskError::Layout);
+        }
+        if length > kind.cap() {
+            return Err(DiskError::TooLarge {
+                kind: code,
+                length,
+                cap: kind.cap(),
+            });
+        }
+        if offset != expected {
+            return Err(DiskError::Layout);
+        }
+        expected = offset
+            .checked_add(length)
+            .and_then(round_up)
+            .ok_or(DiskError::Layout)?;
+        entries.push(Entry {
+            kind,
+            offset,
+            length,
+            digest,
+        });
+    }
+    if !seen.contains(&SectionKind::Job) {
+        return Err(DiskError::MissingSection {
+            kind: SectionKind::Job.code(),
+        });
+    }
+    Ok(entries)
+}
+
+/// The error for a disk that ended early.
+fn truncated() -> DiskError {
+    DiskError::Io(io::Error::from(io::ErrorKind::UnexpectedEof))
+}
+
+/// Reads an input disk from `input`: the header and the table first, then each section in order.
+///
+/// The header and the whole table are read and every entry is validated (known, unique, ascending, within its
+/// kind's cap, at its canonical offset) before any section byte is read. Each section is then read whole after
+/// checking that the padding before it is zero, and hashed against its table digest. The reader never reads past
+/// the end of the last section, so the trailing padding is left unread.
+///
+/// # Errors
+///
+/// [`DiskError::Magic`], [`DiskError::Version`], [`DiskError::SectionCount`], [`DiskError::UnknownKind`],
+/// [`DiskError::DuplicateKind`], [`DiskError::Layout`], [`DiskError::TooLarge`], [`DiskError::MissingSection`]
+/// without a JOB section, [`DiskError::Digest`], and [`DiskError::Io`] for a failed read or a disk that ends
+/// early.
+pub fn read_input_disk<R: Read>(input: &mut R) -> Result<InputSections, DiskError> {
+    let mut header = [0_u8; DISK_HEADER_BYTES];
+    input.read_exact(&mut header).map_err(DiskError::Io)?;
+    let mut fields = Fields(&header);
+    if fields.take::<8>()? != DISK_MAGIC {
+        return Err(DiskError::Magic);
+    }
+    let version = fields.u32()?;
+    if version != DISK_VERSION {
+        return Err(DiskError::Version { found: version });
+    }
+    let count = fields.u32()?;
+    if !(1..=MAX_SECTIONS).contains(&count) {
+        return Err(DiskError::SectionCount { count });
+    }
+    let token = ChunkToken::from_bytes(fields.take::<TOKEN_BYTES>()?);
+    // count <= MAX_SECTIONS, so neither conversion nor product can overflow; checked anyway.
+    let count = usize::try_from(count).map_err(|_| DiskError::Layout)?;
+    let table_bytes = SECTION_ENTRY_BYTES
+        .checked_mul(count)
+        .ok_or(DiskError::Layout)?;
+    let mut table = vec![0_u8; table_bytes];
+    input.read_exact(&mut table).map_err(DiskError::Io)?;
+    let entries = parse_table(count, &table)?;
+
+    let mut position = widen(DISK_HEADER_BYTES + table_bytes);
+    let mut padding = ZEROS;
+    let mut sections = BTreeMap::new();
+    for entry in entries {
+        // A canonical offset is the next sector boundary, so the gap is under one sector.
+        let gap = entry
+            .offset
+            .checked_sub(position)
+            .and_then(|gap| usize::try_from(gap).ok())
+            .ok_or(DiskError::Layout)?;
+        let pad = padding.get_mut(..gap).ok_or(DiskError::Layout)?;
+        input.read_exact(pad).map_err(DiskError::Io)?;
+        if pad.iter().any(|byte| *byte != 0) {
+            return Err(DiskError::Layout);
+        }
+        let length = usize::try_from(entry.length).map_err(|_| DiskError::Layout)?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length)
+            .map_err(|_| DiskError::Io(io::Error::from(io::ErrorKind::OutOfMemory)))?;
+        Read::take(&mut *input, entry.length)
+            .read_to_end(&mut bytes)
+            .map_err(DiskError::Io)?;
+        if bytes.len() != length {
+            return Err(truncated());
+        }
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        if digest != entry.digest {
+            return Err(DiskError::Digest {
+                kind: entry.kind.code(),
+            });
+        }
+        sections.insert(entry.kind, bytes);
+        position = entry
+            .offset
+            .checked_add(entry.length)
+            .ok_or(DiskError::Layout)?;
+    }
+    Ok(InputSections { token, sections })
+}
+
+/// The sections of one input disk, read and checked against the table, and the per-launch output token.
+///
+/// `Debug` shows the section kinds and lengths only, never their bytes, and the token stays redacted.
+pub struct InputSections {
+    token: ChunkToken,
+    sections: BTreeMap<SectionKind, Vec<u8>>,
+}
+
+impl InputSections {
+    /// The per-launch output token from the disk header. It travels nowhere else: not in the job JSON, not in any
+    /// blob.
+    #[must_use]
+    pub const fn token(&self) -> &ChunkToken {
+        &self.token
+    }
+
+    /// Removes and returns the bytes of the section of `kind`, if the disk has one. PID 1 takes each section once
+    /// and drops it after unpacking, so its memory returns to the guest reserve before the stages run.
+    pub fn take(&mut self, kind: SectionKind) -> Option<Vec<u8>> {
+        self.sections.remove(&kind)
+    }
+
+    /// Whether the disk still holds a section of `kind`.
+    #[must_use]
+    pub fn contains(&self, kind: SectionKind) -> bool {
+        self.sections.contains_key(&kind)
+    }
+
+    /// Checks that the sections are exactly what `job`'s role needs, before any is taken.
+    ///
+    /// A candidate needs BASE, hashing to the job's base tree, and DIFF exactly when the job has a diff, hashing
+    /// to the job's diff blob; it must not see `JUDGE_DATA` or `CANDIDATE_OUT`. A judge needs `JUDGE_DATA` and
+    /// `CANDIDATE_OUT` and must not see BASE or DIFF; those two are bound by their table digests only, since the
+    /// job names no ID for them.
+    ///
+    /// # Errors
+    ///
+    /// [`DiskError::UnexpectedSection`], [`DiskError::MissingSection`], [`DiskError::BaseMismatch`], or
+    /// [`DiskError::DiffMismatch`] for the first failed check.
+    pub fn check_role(&self, job: &GuestJob) -> Result<(), DiskError> {
+        let (forbidden, needed) = match job.role() {
+            GuestRole::Candidate => (
+                [SectionKind::JudgeData, SectionKind::CandidateOut],
+                [SectionKind::Base].as_slice(),
+            ),
+            GuestRole::Judge => (
+                [SectionKind::Base, SectionKind::Diff],
+                [SectionKind::JudgeData, SectionKind::CandidateOut].as_slice(),
+            ),
+        };
+        if let Some(kind) = forbidden.into_iter().find(|kind| self.contains(*kind)) {
+            return Err(DiskError::UnexpectedSection { kind: kind.code() });
+        }
+        if let Some(kind) = needed.iter().find(|kind| !self.contains(**kind)) {
+            return Err(DiskError::MissingSection { kind: kind.code() });
+        }
+        if job.role() == GuestRole::Judge {
+            return Ok(());
+        }
+        let base = self
+            .sections
+            .get(&SectionKind::Base)
+            .ok_or(DiskError::MissingSection {
+                kind: SectionKind::Base.code(),
+            })?;
+        if job.base() != Some(TreeId::of(base)) {
+            return Err(DiskError::BaseMismatch);
+        }
+        match (job.diff(), self.sections.get(&SectionKind::Diff)) {
+            (Some(expected), Some(diff)) if BlobId::of(diff) == expected => Ok(()),
+            (Some(_), Some(_)) => Err(DiskError::DiffMismatch),
+            (Some(_), None) => Err(DiskError::MissingSection {
+                kind: SectionKind::Diff.code(),
+            }),
+            (None, Some(_)) => Err(DiskError::UnexpectedSection {
+                kind: SectionKind::Diff.code(),
+            }),
+            (None, None) => Ok(()),
+        }
+    }
+}
+
+/// The section lengths of an [`InputSections`], by kind.
+struct SectionLengths<'a>(&'a BTreeMap<SectionKind, Vec<u8>>);
+
+impl fmt::Debug for SectionLengths<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.0.iter().map(|(kind, bytes)| (kind, bytes.len())))
+            .finish()
+    }
+}
+
+impl fmt::Debug for InputSections {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InputSections")
+            .field("token", &self.token)
+            .field("sections", &SectionLengths(&self.sections))
+            .finish()
     }
 }

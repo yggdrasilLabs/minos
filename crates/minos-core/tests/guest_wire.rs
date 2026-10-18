@@ -14,14 +14,14 @@ use minos_core::chunk::ChunkToken;
 use minos_core::diff::Diff;
 use minos_core::experiment::Experiment;
 use minos_core::guest::{
-    DISK_HEADER_BYTES, DISK_MAGIC, DISK_VERSION, DiskError, InputSections, MAX_BASE_TAR_BYTES,
-    MAX_CANDIDATE_OUT_BYTES, MAX_JUDGE_DATA_BYTES, SECTION_ENTRY_BYTES, SECTOR_BYTES, SectionKind,
-    read_input_disk, write_input_disk,
-};
-use minos_core::guest::{
     ApplyStatus, GUEST_JOB_VERSION, GUEST_STATUS_VERSION, GuestJob, GuestJobError, GuestRole,
     GuestStatus, GuestStatusError, MAX_GUEST_JOB_BYTES, MAX_STATUS_BYTES, OUTPUT_VSOCK_PORT,
     OutputStatus, STATUS_PATH, SetupStatus, SetupStep, StageEnd, StageReport, StageSpec,
+};
+use minos_core::guest::{
+    DISK_HEADER_BYTES, DISK_MAGIC, DISK_VERSION, DiskError, InputSections, MAX_BASE_TAR_BYTES,
+    MAX_CANDIDATE_OUT_BYTES, MAX_JUDGE_DATA_BYTES, SECTION_ENTRY_BYTES, SECTOR_BYTES, SectionKind,
+    read_input_disk, write_input_disk,
 };
 use minos_core::id::{BlobId, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
@@ -985,7 +985,10 @@ fn disk_constants() {
     assert_eq!(MAX_CANDIDATE_OUT_BYTES, MAX_OUTPUT_STREAM_BYTES);
     assert_eq!(SectionKind::Job.cap(), 1_048_576);
     assert_eq!(SectionKind::Base.cap(), MAX_BASE_TAR_BYTES);
-    assert_eq!(SectionKind::Diff.cap(), u64::try_from(MAX_DIFF_BYTES).unwrap_or(0));
+    assert_eq!(
+        SectionKind::Diff.cap(),
+        u64::try_from(MAX_DIFF_BYTES).unwrap_or(0)
+    );
     assert_eq!(SectionKind::JudgeData.cap(), MAX_JUDGE_DATA_BYTES);
     assert_eq!(SectionKind::CandidateOut.cap(), MAX_CANDIDATE_OUT_BYTES);
     for (code, kind) in [
@@ -1017,7 +1020,8 @@ fn disk_layout() -> TestResult {
     assert_eq!(bytes.get(16..48), Some(&TOKEN[..]));
     // Ascending kind order, whatever the order given; the first section starts on the sector after the table
     // (48 + 3 * 52 = 204 bytes), and each later one on the sector after the one before.
-    let expected: [(u32, u64, &[u8]); 3] = [(1, 512, job_bytes()), (2, 1024, &base), (3, 2048, &diff)];
+    let expected: [(u32, u64, &[u8]); 3] =
+        [(1, 512, job_bytes()), (2, 1024, &base), (3, 2048, &diff)];
     for (index, (kind, offset, content)) in expected.into_iter().enumerate() {
         let at = entry_at(index);
         assert_eq!(u32_at(&bytes, at)?, kind);
@@ -1061,7 +1065,10 @@ fn disk_golden() -> TestResult {
     let base = vec![0_u8; 600];
     let bytes = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, &base)])?;
     assert_eq!(bytes.len(), 2048);
-    assert_eq!(sha256_hex(&bytes), "unpinned");
+    assert_eq!(
+        sha256_hex(&bytes),
+        "f59100e4e4233be146f65fb87860ebea5942b30b426eb3cc4fd90953bc0ef83c"
+    );
     Ok(())
 }
 
@@ -1088,7 +1095,8 @@ proptest! {
         prop_assert!(read.token().ct_eq(&token_bytes));
         for (kind, content) in &sections {
             prop_assert!(read.contains(*kind));
-            prop_assert_eq!(read.take(*kind).as_deref(), Some(*content));
+            let taken = read.take(*kind);
+            prop_assert_eq!(taken.as_deref(), Some(*content));
             prop_assert!(!read.contains(*kind));
         }
         for kind in kinds {
@@ -1122,7 +1130,7 @@ fn disk_sections_debug_shows_no_bytes() -> TestResult {
 }
 
 #[test]
-fn disk_writer_refusals() -> TestResult {
+fn disk_writer_refusals() {
     let mut out = Vec::new();
     assert!(matches!(
         write_input_disk(&mut out, &token(), &[]),
@@ -1132,7 +1140,10 @@ fn disk_writer_refusals() -> TestResult {
         write_input_disk(
             &mut out,
             &token(),
-            &[(SectionKind::Job, job_bytes()), (SectionKind::Job, job_bytes())]
+            &[
+                (SectionKind::Job, job_bytes()),
+                (SectionKind::Job, job_bytes())
+            ]
         ),
         Err(DiskError::DuplicateKind)
     ));
@@ -1143,10 +1154,13 @@ fn disk_writer_refusals() -> TestResult {
     let oversized = vec![0_u8; 1_048_577];
     assert!(matches!(
         write_input_disk(&mut out, &token(), &[(SectionKind::Job, &oversized)]),
-        Err(DiskError::TooLarge { kind: 1, length: 1_048_577, cap: 1_048_576 })
+        Err(DiskError::TooLarge {
+            kind: 1,
+            length: 1_048_577,
+            cap: 1_048_576
+        })
     ));
     assert!(out.is_empty(), "a refused disk writes nothing");
-    Ok(())
 }
 
 #[test]
@@ -1160,7 +1174,10 @@ fn disk_refusals_header() -> TestResult {
 
     let mut version = good.clone();
     patch(&mut version, 8, &1_u32.to_be_bytes())?;
-    assert!(matches!(refused(&version)?, DiskError::Version { found: 1 }));
+    assert!(matches!(
+        refused(&version)?,
+        DiskError::Version { found: 1 }
+    ));
 
     for count in [0_u32, 6] {
         let mut wrong = good.clone();
@@ -1185,11 +1202,17 @@ fn disk_refusals_table() -> TestResult {
 
     let mut unknown = good.clone();
     patch(&mut unknown, entry_at(1), &9_u32.to_be_bytes())?;
-    assert!(matches!(refused(&unknown)?, DiskError::UnknownKind { kind: 9 }));
+    assert!(matches!(
+        refused(&unknown)?,
+        DiskError::UnknownKind { kind: 9 }
+    ));
 
     let mut zero_kind = good.clone();
     patch(&mut zero_kind, entry_at(0), &0_u32.to_be_bytes())?;
-    assert!(matches!(refused(&zero_kind)?, DiskError::UnknownKind { kind: 0 }));
+    assert!(matches!(
+        refused(&zero_kind)?,
+        DiskError::UnknownKind { kind: 0 }
+    ));
 
     let mut duplicate = good.clone();
     patch(&mut duplicate, entry_at(1), &1_u32.to_be_bytes())?;
@@ -1203,31 +1226,55 @@ fn disk_refusals_table() -> TestResult {
 
     // Offsets: overlapping the header and table, misaligned, overlapping the section before, out of order, and
     // leaving a gap.
-    for (index, offset) in [(0, 0_u64), (0, 48), (0, 513), (1, 512), (1, 0), (1, 1536), (1, 1025)] {
+    for (index, offset) in [
+        (0, 0_u64),
+        (0, 48),
+        (0, 513),
+        (1, 512),
+        (1, 0),
+        (1, 1536),
+        (1, 1025),
+    ] {
         let mut wrong = good.clone();
         patch(&mut wrong, entry_at(index) + 4, &offset.to_be_bytes())?;
-        assert!(matches!(refused(&wrong)?, DiskError::Layout), "{index} {offset}");
+        assert!(
+            matches!(refused(&wrong)?, DiskError::Layout),
+            "{index} {offset}"
+        );
     }
 
     // A length over its kind's cap is refused from the table alone: there are no section bytes to read.
     let job_cap = header_and_table(1, &[(1, 512, 1_048_577)]);
     assert!(matches!(
         refused(&job_cap)?,
-        DiskError::TooLarge { kind: 1, length: 1_048_577, cap: 1_048_576 }
+        DiskError::TooLarge {
+            kind: 1,
+            length: 1_048_577,
+            cap: 1_048_576
+        }
     ));
     let base_cap = header_and_table(2, &[(1, 512, 7), (2, 1024, MAX_BASE_TAR_BYTES + 1)]);
-    assert!(matches!(refused(&base_cap)?, DiskError::TooLarge { kind: 2, .. }));
+    assert!(matches!(
+        refused(&base_cap)?,
+        DiskError::TooLarge { kind: 2, .. }
+    ));
 
     // No JOB section.
     let mut no_job = write(&[(SectionKind::Job, job_bytes())])?;
     patch(&mut no_job, entry_at(0), &3_u32.to_be_bytes())?;
-    assert!(matches!(refused(&no_job)?, DiskError::MissingSection { kind: 1 }));
+    assert!(matches!(
+        refused(&no_job)?,
+        DiskError::MissingSection { kind: 1 }
+    ));
     Ok(())
 }
 
 #[test]
 fn disk_refusals_sections() -> TestResult {
-    let good = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, b"tree")])?;
+    let good = write(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Base, b"tree"),
+    ])?;
 
     // A flipped byte in the base section.
     let mut flipped = good.clone();
@@ -1272,7 +1319,10 @@ fn check_role_candidate() -> TestResult {
     ])?;
     good.check_role(&job)?;
 
-    let no_base = sections_of(&[(SectionKind::Job, job_bytes()), (SectionKind::Diff, diff_bytes)])?;
+    let no_base = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Diff, diff_bytes),
+    ])?;
     assert!(matches!(
         no_base.check_role(&job),
         Err(DiskError::MissingSection { kind: 2 })
@@ -1287,13 +1337,19 @@ fn check_role_candidate() -> TestResult {
         (SectionKind::Base, b"u"),
         (SectionKind::Diff, diff_bytes),
     ])?;
-    assert!(matches!(other_base.check_role(&job), Err(DiskError::BaseMismatch)));
+    assert!(matches!(
+        other_base.check_role(&job),
+        Err(DiskError::BaseMismatch)
+    ));
     let other_diff = sections_of(&[
         (SectionKind::Job, job_bytes()),
         (SectionKind::Base, b"t"),
         (SectionKind::Diff, b"another diff"),
     ])?;
-    assert!(matches!(other_diff.check_role(&job), Err(DiskError::DiffMismatch)));
+    assert!(matches!(
+        other_diff.check_role(&job),
+        Err(DiskError::DiffMismatch)
+    ));
     for kind in [SectionKind::JudgeData, SectionKind::CandidateOut] {
         let extra = sections_of(&[
             (SectionKind::Job, job_bytes()),
