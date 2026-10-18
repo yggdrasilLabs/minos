@@ -408,3 +408,16 @@ fn read_same(abs: &Path, rel: &Path, seen: &Metadata) -> Result<Option<FileEntry
         executable: opened.permissions().mode() & 0o111 != 0,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_FILES};
+
+    /// The largest tarball a snapshot can pack fits the guest's base section: every byte of content, plus one
+    /// 512-byte header and at most 511 padding bytes for each file (rounded up to 1 KiB), plus the two end blocks.
+    #[test]
+    fn snapshot_tarball_fits_guest_base_cap() {
+        let overhead = (MAX_SNAPSHOT_FILES + 2) * 1024;
+        assert!(MAX_SNAPSHOT_BYTES + overhead <= minos_core::guest::MAX_BASE_TAR_BYTES);
+    }
+}

@@ -8,9 +8,16 @@
 //! golden text with one SHA-256 literal.
 
 use std::error::Error;
+use std::io::Cursor;
 
+use minos_core::chunk::ChunkToken;
 use minos_core::diff::Diff;
 use minos_core::experiment::Experiment;
+use minos_core::guest::{
+    DISK_HEADER_BYTES, DISK_MAGIC, DISK_VERSION, DiskError, InputSections, MAX_BASE_TAR_BYTES,
+    MAX_CANDIDATE_OUT_BYTES, MAX_JUDGE_DATA_BYTES, SECTION_ENTRY_BYTES, SECTOR_BYTES, SectionKind,
+    read_input_disk, write_input_disk,
+};
 use minos_core::guest::{
     ApplyStatus, GUEST_JOB_VERSION, GUEST_STATUS_VERSION, GuestJob, GuestJobError, GuestRole,
     GuestStatus, GuestStatusError, MAX_GUEST_JOB_BYTES, MAX_STATUS_BYTES, OUTPUT_VSOCK_PORT,
@@ -18,10 +25,11 @@ use minos_core::guest::{
 };
 use minos_core::id::{BlobId, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
-use minos_core::limits::Limits;
+use minos_core::limits::{Limits, MAX_DIFF_BYTES, MAX_OUTPUT_STREAM_BYTES};
 use minos_core::manifest::{JudgeVersion, Manifest};
 use minos_core::outcome::Stage;
 use minos_core::path::RelPath;
+use proptest::prelude::*;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -885,5 +893,475 @@ fn guest_wire_golden_bytes_pinned() -> TestResult {
         sha256_hex(all.as_bytes()),
         "cfae3d32369d3ef720e2afc455327bcd30f106a7050227bbc4663aee922b3a4a"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Input disk
+// ---------------------------------------------------------------------------------------------------------------
+
+const TOKEN: [u8; 32] = [0x5a; 32];
+
+fn token() -> ChunkToken {
+    ChunkToken::from_bytes(TOKEN)
+}
+
+/// The disk of `sections` under the fixed token.
+fn write(sections: &[(SectionKind, &[u8])]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut out = Vec::new();
+    let length = write_input_disk(&mut out, &token(), sections)?;
+    assert_eq!(u64::try_from(out.len())?, length);
+    Ok(out)
+}
+
+/// `bytes` read back as a disk.
+fn read(bytes: &[u8]) -> Result<InputSections, DiskError> {
+    read_input_disk(&mut Cursor::new(bytes))
+}
+
+/// The error reading `bytes` gives; an error if it read.
+fn refused(bytes: &[u8]) -> Result<DiskError, Box<dyn Error>> {
+    match read(bytes) {
+        Ok(_) => Err("the disk was accepted".into()),
+        Err(error) => Ok(error),
+    }
+}
+
+/// `bytes` with `with` written at `at`.
+fn patch(bytes: &mut [u8], at: usize, with: &[u8]) -> Result<(), Box<dyn Error>> {
+    let end = at.checked_add(with.len()).ok_or("overflow")?;
+    bytes
+        .get_mut(at..end)
+        .ok_or("patch out of range")?
+        .copy_from_slice(with);
+    Ok(())
+}
+
+/// The big-endian `u32` at `at`.
+fn u32_at(bytes: &[u8], at: usize) -> Result<u32, Box<dyn Error>> {
+    let field: [u8; 4] = bytes.get(at..at + 4).ok_or("short")?.try_into()?;
+    Ok(u32::from_be_bytes(field))
+}
+
+/// The big-endian `u64` at `at`.
+fn u64_at(bytes: &[u8], at: usize) -> Result<u64, Box<dyn Error>> {
+    let field: [u8; 8] = bytes.get(at..at + 8).ok_or("short")?.try_into()?;
+    Ok(u64::from_be_bytes(field))
+}
+
+/// Where table entry `index` starts.
+const fn entry_at(index: usize) -> usize {
+    DISK_HEADER_BYTES + index * SECTION_ENTRY_BYTES
+}
+
+/// A header and table with no section bytes: `entries` are `(kind, offset, length)`, each with a zero digest.
+fn header_and_table(count: u32, entries: &[(u32, u64, u64)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&DISK_MAGIC);
+    out.extend_from_slice(&DISK_VERSION.to_be_bytes());
+    out.extend_from_slice(&count.to_be_bytes());
+    out.extend_from_slice(&TOKEN);
+    for (kind, offset, length) in entries {
+        out.extend_from_slice(&kind.to_be_bytes());
+        out.extend_from_slice(&offset.to_be_bytes());
+        out.extend_from_slice(&length.to_be_bytes());
+        out.extend_from_slice(&[0; 32]);
+    }
+    out
+}
+
+fn job_bytes() -> &'static [u8] {
+    br#"{"k":1}"#
+}
+
+#[test]
+fn disk_constants() {
+    assert_eq!(&DISK_MAGIC, b"MINOSJB2");
+    assert_eq!(DISK_VERSION, 2);
+    assert_eq!(DISK_HEADER_BYTES, 48);
+    assert_eq!(SECTION_ENTRY_BYTES, 52);
+    assert_eq!(SECTOR_BYTES, 512);
+    assert_eq!(MAX_BASE_TAR_BYTES, 83_886_080);
+    assert_eq!(MAX_CANDIDATE_OUT_BYTES, MAX_OUTPUT_STREAM_BYTES);
+    assert_eq!(SectionKind::Job.cap(), 1_048_576);
+    assert_eq!(SectionKind::Base.cap(), MAX_BASE_TAR_BYTES);
+    assert_eq!(SectionKind::Diff.cap(), u64::try_from(MAX_DIFF_BYTES).unwrap_or(0));
+    assert_eq!(SectionKind::JudgeData.cap(), MAX_JUDGE_DATA_BYTES);
+    assert_eq!(SectionKind::CandidateOut.cap(), MAX_CANDIDATE_OUT_BYTES);
+    for (code, kind) in [
+        (1, SectionKind::Job),
+        (2, SectionKind::Base),
+        (3, SectionKind::Diff),
+        (4, SectionKind::JudgeData),
+        (5, SectionKind::CandidateOut),
+    ] {
+        assert_eq!(SectionKind::from_u32(code), Some(kind));
+        assert_eq!(kind.code(), code);
+    }
+    assert_eq!(SectionKind::from_u32(0), None);
+    assert_eq!(SectionKind::from_u32(6), None);
+}
+
+#[test]
+fn disk_layout() -> TestResult {
+    let base = vec![7_u8; 600];
+    let diff = b"diff!".to_vec();
+    let bytes = write(&[
+        (SectionKind::Diff, &diff),
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Base, &base),
+    ])?;
+    assert_eq!(bytes.get(..8), Some(&b"MINOSJB2"[..]));
+    assert_eq!(u32_at(&bytes, 8)?, 2);
+    assert_eq!(u32_at(&bytes, 12)?, 3);
+    assert_eq!(bytes.get(16..48), Some(&TOKEN[..]));
+    // Ascending kind order, whatever the order given; the first section starts on the sector after the table
+    // (48 + 3 * 52 = 204 bytes), and each later one on the sector after the one before.
+    let expected: [(u32, u64, &[u8]); 3] = [(1, 512, job_bytes()), (2, 1024, &base), (3, 2048, &diff)];
+    for (index, (kind, offset, content)) in expected.into_iter().enumerate() {
+        let at = entry_at(index);
+        assert_eq!(u32_at(&bytes, at)?, kind);
+        assert_eq!(u64_at(&bytes, at + 4)?, offset);
+        assert_eq!(offset % SECTOR_BYTES, 0);
+        let length = u64_at(&bytes, at + 12)?;
+        assert_eq!(length, u64::try_from(content.len())?);
+        let digest: [u8; 32] = Sha256::digest(content).into();
+        assert_eq!(bytes.get(at + 20..at + 52), Some(&digest[..]));
+        let start = usize::try_from(offset)?;
+        assert_eq!(bytes.get(start..start + content.len()), Some(content));
+    }
+    // 2048 + 5 rounded up to the sector.
+    assert_eq!(bytes.len(), 2560);
+    assert_eq!(u64::try_from(bytes.len())? % SECTOR_BYTES, 0);
+    // Every byte that is not header, table, or section is zero.
+    let padding: usize = [
+        bytes.get(204..512),
+        bytes.get(512 + 7..1024),
+        bytes.get(1624..2048),
+        bytes.get(2053..2560),
+    ]
+    .into_iter()
+    .map(|range| range.map_or(1, |range| range.iter().filter(|byte| **byte != 0).count()))
+    .sum();
+    assert_eq!(padding, 0);
+    Ok(())
+}
+
+#[test]
+fn disk_golden() -> TestResult {
+    // The pin was computed outside the code under test, by building the disk from the layout alone:
+    //
+    //   python3 -c 'import hashlib, struct
+    //   job = b"{\"k\":1}"; base = bytes(600); token = bytes([0x5a]) * 32
+    //   header = b"MINOSJB2" + struct.pack(">II", 2, 2) + token
+    //   table = struct.pack(">IQQ", 1, 512, len(job)) + hashlib.sha256(job).digest() \
+    //         + struct.pack(">IQQ", 2, 1024, len(base)) + hashlib.sha256(base).digest()
+    //   disk = (header + table).ljust(512, b"\0") + job.ljust(512, b"\0") + base.ljust(1024, b"\0")
+    //   print(len(disk), hashlib.sha256(disk).hexdigest())'
+    let base = vec![0_u8; 600];
+    let bytes = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, &base)])?;
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(sha256_hex(&bytes), "unpinned");
+    Ok(())
+}
+
+proptest! {
+    #[test]
+    fn disk_round_trip(
+        token_bytes in any::<[u8; 32]>(),
+        job in proptest::collection::vec(any::<u8>(), 0..1500),
+        others in proptest::collection::vec(proptest::option::of(proptest::collection::vec(any::<u8>(), 0..1500)), 4),
+    ) {
+        let kinds = [SectionKind::Base, SectionKind::Diff, SectionKind::JudgeData, SectionKind::CandidateOut];
+        let mut sections: Vec<(SectionKind, &[u8])> = vec![(SectionKind::Job, &job)];
+        for (kind, content) in kinds.into_iter().zip(&others) {
+            if let Some(content) = content {
+                sections.push((kind, content));
+            }
+        }
+        // Reverse, so the writer must sort.
+        sections.reverse();
+        let mut out = Vec::new();
+        let written = write_input_disk(&mut out, &ChunkToken::from_bytes(token_bytes), &sections);
+        prop_assert!(written.is_ok());
+        let mut read = read_input_disk(&mut Cursor::new(&out)).map_err(|error| TestCaseError::fail(error.to_string()))?;
+        prop_assert!(read.token().ct_eq(&token_bytes));
+        for (kind, content) in &sections {
+            prop_assert!(read.contains(*kind));
+            prop_assert_eq!(read.take(*kind).as_deref(), Some(*content));
+            prop_assert!(!read.contains(*kind));
+        }
+        for kind in kinds {
+            prop_assert_eq!(read.take(kind), None);
+        }
+    }
+}
+
+#[test]
+fn disk_reads_exactly_to_the_last_section() -> TestResult {
+    let bytes = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Diff, b"abc")])?;
+    // Without the trailing padding the disk still reads, and the reader stops at the last section's end.
+    let end = 1024 + 3;
+    let trimmed = bytes.get(..end).ok_or("short")?;
+    let mut cursor = Cursor::new(trimmed);
+    read_input_disk(&mut cursor)?;
+    assert_eq!(cursor.position(), u64::try_from(end)?);
+    let mut cursor = Cursor::new(&bytes);
+    read_input_disk(&mut cursor)?;
+    assert_eq!(cursor.position(), u64::try_from(end)?);
+    Ok(())
+}
+
+#[test]
+fn disk_sections_debug_shows_no_bytes() -> TestResult {
+    let sections = read(&write(&[(SectionKind::Job, b"secret-job")])?)?;
+    let debug = format!("{sections:?}");
+    assert!(!debug.contains("secret"), "{debug}");
+    assert!(!debug.contains("90"), "{debug}");
+    Ok(())
+}
+
+#[test]
+fn disk_writer_refusals() -> TestResult {
+    let mut out = Vec::new();
+    assert!(matches!(
+        write_input_disk(&mut out, &token(), &[]),
+        Err(DiskError::SectionCount { count: 0 })
+    ));
+    assert!(matches!(
+        write_input_disk(
+            &mut out,
+            &token(),
+            &[(SectionKind::Job, job_bytes()), (SectionKind::Job, job_bytes())]
+        ),
+        Err(DiskError::DuplicateKind)
+    ));
+    assert!(matches!(
+        write_input_disk(&mut out, &token(), &[(SectionKind::Base, b"t")]),
+        Err(DiskError::MissingSection { kind: 1 })
+    ));
+    let oversized = vec![0_u8; 1_048_577];
+    assert!(matches!(
+        write_input_disk(&mut out, &token(), &[(SectionKind::Job, &oversized)]),
+        Err(DiskError::TooLarge { kind: 1, length: 1_048_577, cap: 1_048_576 })
+    ));
+    assert!(out.is_empty(), "a refused disk writes nothing");
+    Ok(())
+}
+
+#[test]
+fn disk_refusals_header() -> TestResult {
+    let good = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, b"t")])?;
+    read(&good)?;
+
+    let mut magic = good.clone();
+    patch(&mut magic, 7, b"1")?;
+    assert!(matches!(refused(&magic)?, DiskError::Magic));
+
+    let mut version = good.clone();
+    patch(&mut version, 8, &1_u32.to_be_bytes())?;
+    assert!(matches!(refused(&version)?, DiskError::Version { found: 1 }));
+
+    for count in [0_u32, 6] {
+        let mut wrong = good.clone();
+        patch(&mut wrong, 12, &count.to_be_bytes())?;
+        assert!(
+            matches!(refused(&wrong)?, DiskError::SectionCount { count: found } if found == count),
+            "{count}"
+        );
+    }
+
+    // A truncated header or table.
+    for end in [0, 20, 47, 48 + 51, 48 + 52 + 51] {
+        let short = good.get(..end).ok_or("short")?;
+        assert!(matches!(refused(short)?, DiskError::Io(_)), "{end}");
+    }
+    Ok(())
+}
+
+#[test]
+fn disk_refusals_table() -> TestResult {
+    let good = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, b"t")])?;
+
+    let mut unknown = good.clone();
+    patch(&mut unknown, entry_at(1), &9_u32.to_be_bytes())?;
+    assert!(matches!(refused(&unknown)?, DiskError::UnknownKind { kind: 9 }));
+
+    let mut zero_kind = good.clone();
+    patch(&mut zero_kind, entry_at(0), &0_u32.to_be_bytes())?;
+    assert!(matches!(refused(&zero_kind)?, DiskError::UnknownKind { kind: 0 }));
+
+    let mut duplicate = good.clone();
+    patch(&mut duplicate, entry_at(1), &1_u32.to_be_bytes())?;
+    assert!(matches!(refused(&duplicate)?, DiskError::DuplicateKind));
+
+    // Kinds out of order.
+    let mut swapped = good.clone();
+    patch(&mut swapped, entry_at(0), &2_u32.to_be_bytes())?;
+    patch(&mut swapped, entry_at(1), &1_u32.to_be_bytes())?;
+    assert!(matches!(refused(&swapped)?, DiskError::Layout));
+
+    // Offsets: overlapping the header and table, misaligned, overlapping the section before, out of order, and
+    // leaving a gap.
+    for (index, offset) in [(0, 0_u64), (0, 48), (0, 513), (1, 512), (1, 0), (1, 1536), (1, 1025)] {
+        let mut wrong = good.clone();
+        patch(&mut wrong, entry_at(index) + 4, &offset.to_be_bytes())?;
+        assert!(matches!(refused(&wrong)?, DiskError::Layout), "{index} {offset}");
+    }
+
+    // A length over its kind's cap is refused from the table alone: there are no section bytes to read.
+    let job_cap = header_and_table(1, &[(1, 512, 1_048_577)]);
+    assert!(matches!(
+        refused(&job_cap)?,
+        DiskError::TooLarge { kind: 1, length: 1_048_577, cap: 1_048_576 }
+    ));
+    let base_cap = header_and_table(2, &[(1, 512, 7), (2, 1024, MAX_BASE_TAR_BYTES + 1)]);
+    assert!(matches!(refused(&base_cap)?, DiskError::TooLarge { kind: 2, .. }));
+
+    // No JOB section.
+    let mut no_job = write(&[(SectionKind::Job, job_bytes())])?;
+    patch(&mut no_job, entry_at(0), &3_u32.to_be_bytes())?;
+    assert!(matches!(refused(&no_job)?, DiskError::MissingSection { kind: 1 }));
+    Ok(())
+}
+
+#[test]
+fn disk_refusals_sections() -> TestResult {
+    let good = write(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, b"tree")])?;
+
+    // A flipped byte in the base section.
+    let mut flipped = good.clone();
+    patch(&mut flipped, 1024, b"T")?;
+    assert!(matches!(refused(&flipped)?, DiskError::Digest { kind: 2 }));
+
+    // A wrong digest in the table.
+    let mut digest = good.clone();
+    patch(&mut digest, entry_at(0) + 20, &[0; 32])?;
+    assert!(matches!(refused(&digest)?, DiskError::Digest { kind: 1 }));
+
+    // A stream cut inside the last section, and one cut in the padding before it.
+    for end in [1024 + 3, 800] {
+        let short = good.get(..end).ok_or("short")?;
+        assert!(matches!(refused(short)?, DiskError::Io(_)), "{end}");
+    }
+
+    // Padding that is not zero.
+    for at in [300, 600] {
+        let mut dirty = good.clone();
+        patch(&mut dirty, at, b"x")?;
+        assert!(matches!(refused(&dirty)?, DiskError::Layout), "{at}");
+    }
+    Ok(())
+}
+
+/// The sections of a disk holding `sections`.
+fn sections_of(sections: &[(SectionKind, &[u8])]) -> Result<InputSections, Box<dyn Error>> {
+    Ok(read(&write(sections)?)?)
+}
+
+#[test]
+fn check_role_candidate() -> TestResult {
+    let job = candidate_job()?;
+    let diff = diff()?;
+    let diff_bytes = diff.as_bytes();
+    // `base()` is the tree of the tarball bytes `t`.
+    let good = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Base, b"t"),
+        (SectionKind::Diff, diff_bytes),
+    ])?;
+    good.check_role(&job)?;
+
+    let no_base = sections_of(&[(SectionKind::Job, job_bytes()), (SectionKind::Diff, diff_bytes)])?;
+    assert!(matches!(
+        no_base.check_role(&job),
+        Err(DiskError::MissingSection { kind: 2 })
+    ));
+    let no_diff = sections_of(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, b"t")])?;
+    assert!(matches!(
+        no_diff.check_role(&job),
+        Err(DiskError::MissingSection { kind: 3 })
+    ));
+    let other_base = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Base, b"u"),
+        (SectionKind::Diff, diff_bytes),
+    ])?;
+    assert!(matches!(other_base.check_role(&job), Err(DiskError::BaseMismatch)));
+    let other_diff = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Base, b"t"),
+        (SectionKind::Diff, b"another diff"),
+    ])?;
+    assert!(matches!(other_diff.check_role(&job), Err(DiskError::DiffMismatch)));
+    for kind in [SectionKind::JudgeData, SectionKind::CandidateOut] {
+        let extra = sections_of(&[
+            (SectionKind::Job, job_bytes()),
+            (SectionKind::Base, b"t"),
+            (SectionKind::Diff, diff_bytes),
+            (kind, b"x"),
+        ])?;
+        assert!(
+            matches!(extra.check_role(&job), Err(DiskError::UnexpectedSection { kind: found }) if found == kind.code()),
+            "{kind:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn check_role_baseline() -> TestResult {
+    let job = baseline_job()?;
+    let good = sections_of(&[(SectionKind::Job, job_bytes()), (SectionKind::Base, b"t")])?;
+    good.check_role(&job)?;
+    let with_diff = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::Base, b"t"),
+        (SectionKind::Diff, diff()?.as_bytes()),
+    ])?;
+    assert!(matches!(
+        with_diff.check_role(&job),
+        Err(DiskError::UnexpectedSection { kind: 3 })
+    ));
+    Ok(())
+}
+
+#[test]
+fn check_role_judge() -> TestResult {
+    let job = judge_job()?;
+    let good = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::JudgeData, b"judge data"),
+        (SectionKind::CandidateOut, b"candidate output"),
+    ])?;
+    good.check_role(&job)?;
+    let no_data = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::CandidateOut, b"candidate output"),
+    ])?;
+    assert!(matches!(
+        no_data.check_role(&job),
+        Err(DiskError::MissingSection { kind: 4 })
+    ));
+    let no_output = sections_of(&[
+        (SectionKind::Job, job_bytes()),
+        (SectionKind::JudgeData, b"judge data"),
+    ])?;
+    assert!(matches!(
+        no_output.check_role(&job),
+        Err(DiskError::MissingSection { kind: 5 })
+    ));
+    for (kind, content) in [(SectionKind::Base, &b"t"[..]), (SectionKind::Diff, b"d")] {
+        let extra = sections_of(&[
+            (SectionKind::Job, job_bytes()),
+            (kind, content),
+            (SectionKind::JudgeData, b"judge data"),
+            (SectionKind::CandidateOut, b"candidate output"),
+        ])?;
+        assert!(
+            matches!(extra.check_role(&job), Err(DiskError::UnexpectedSection { kind: found }) if found == kind.code()),
+            "{kind:?}"
+        );
+    }
     Ok(())
 }
