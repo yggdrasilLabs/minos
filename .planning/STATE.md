@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-10-18T19:20:16.947Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-10-18T19:36:01.657Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 42
+  completed_plans: 43
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 5 of 22
+Plan: 6 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -100,6 +100,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P02 | 9min | 2 tasks | 6 files |
 | Phase 05 P04 | 12 min | 3 tasks | 10 files |
 | Phase 05 P05 | 6min | 2 tasks | 7 files |
+| Phase 05 P03 | 13min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -220,6 +221,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-04: GuestJob's judge-version getter is judge_version() because GuestJob::judge is the judge-job constructor
 - [Phase 05]: 05-04: every role's input-disk section caps sum to at most MAX_GUEST_INPUT_BYTES (half the guest reserve) by const assertion; judge data is capped at 96 MiB
 - [Phase 05]: 05-05: FileStore::verified_path re-checks the store root as well as the blob directories, since the path leaves the store for the VM launcher
+- [Phase 05]: 05-03 Mechanism selections: console pipe, root image store-path, chunks proceed (05-EVIDENCE.md)
+- [Phase 05]: 05-03: ROOT_IMG path-ancestors metadata rule kept in minos-vmm.sb; without it preflight exits 66 Operation not permitted (W0-ROOT-DENY)
+- [Phase 05]: 05-03: 16 MiB chunked output reassembled exactly in about 247 ms over 4097 connections, 0 retries (W0-CHUNKS, S03-ANSWER measurement)
 
 ### Pending Todos
 
@@ -250,6 +254,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T19:20:12.487Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-guest-krun-backend-and-environment-build/05-CONTEXT.md
+Last session: 2026-10-18T19:36:01.652Z
+Stopped at: Completed 05-03-PLAN.md
+Resume file: None
