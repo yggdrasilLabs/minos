@@ -67,9 +67,9 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 ### Guest (GUEST)
 
-- [ ] **GUEST-01**: `minos-guest` is a static `aarch64-unknown-linux-musl` binary that runs as PID 1, reaps children, and creates nothing per-run at startup
-- [ ] **GUEST-02**: The guest reads the job (base tarball, canonical diff, manifest subset) from a read-only input disk, applies the diff with the core applier, and fails the job as `Rejected` on any mismatch
-- [ ] **GUEST-03**: Manifest commands run as argv arrays under a non-root uid with rlimits on CPU, memory, processes, and file size, writing only to scratch space. *Superseded wording (2026-10-18): "writing only to the scratch disk". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
+- [x] **GUEST-01**: `minos-guest` is a static `aarch64-unknown-linux-musl` binary that runs as PID 1, reaps children, and creates nothing per-run at startup
+- [x] **GUEST-02**: The guest reads the job (base tarball, canonical diff, manifest subset) from a read-only input disk, applies the diff with the core applier, and fails the job as `Rejected` on any mismatch
+- [x] **GUEST-03**: Manifest commands run as argv arrays under a non-root uid with rlimits on CPU, memory, processes, and file size, writing only to scratch space. *Superseded wording (2026-10-18): "writing only to the scratch disk". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [ ] **GUEST-04**: Guest output is a tar stream over vsock capped by bytes; the judge scorecard is only accepted from the judge-role channel
 - [ ] **GUEST-05**: The guest environment contains no host variables, verified by a test that reads `env` and `/proc/cmdline` inside the VM
 
@@ -84,7 +84,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **KRUN-07**: The run records which confinement layers were active (dedicated user, Seatbelt, rlimits) in `BackendInfo`, and never falls back silently
 - [ ] **KRUN-08**: After every build, the helper is signed with the entitlement by the one `codesign` argv documented in CLAUDE.md Commands (no `xtask`, script, `build.rs`, or cargo alias), and the signature is verified with `codesign -d --entitlements -`; `minos host setup` may run the same argv from Rust. *Superseded wording (2026-10-09): "An `xtask` signs the helper with the entitlement after build". Phase 1 D-01 and D-07 rule out an `xtask` (02-CONTEXT.md D-11).*
 - [ ] **KRUN-09**: `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` = `minos-guest` written in by the trusted packer, records digests in `minos.lock`, and the build context contains no judge data and no secrets. *Superseded wording (2026-10-09): "a root image and an initramfs". Stock libkrunfw 5.6.2 cannot unpack an initramfs (02-CONTEXT.md D-18).*
-- [ ] **KRUN-10**: Two sequential experiments on the same host both record outcomes and share no build output
+- [x] **KRUN-10**: Two sequential experiments on the same host both record outcomes and share no build output
 
 ### Propose (PROP)
 
@@ -234,9 +234,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SBX-04 | Phase 4 | Complete |
 | SBX-05 | Phase 4 | Complete |
 | SBX-06 | Phase 4 | Complete |
-| GUEST-01 | Phase 5 | Pending |
-| GUEST-02 | Phase 5 | Pending |
-| GUEST-03 | Phase 5 | Pending |
+| GUEST-01 | Phase 5 | Complete |
+| GUEST-02 | Phase 5 | Complete |
+| GUEST-03 | Phase 5 | Complete |
 | GUEST-04 | Phase 5 | Pending |
 | GUEST-05 | Phase 5 | Pending |
 | KRUN-01 | Phase 5 | Complete |
@@ -248,7 +248,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | KRUN-07 | Phase 5 | Complete |
 | KRUN-08 | Phase 5 | Pending |
 | KRUN-09 | Phase 5 | Pending |
-| KRUN-10 | Phase 5 | Pending |
+| KRUN-10 | Phase 5 | Complete |
 | PROP-01 | Phase 6 | Pending |
 | PROP-02 | Phase 6 | Pending |
 | PROP-03 | Phase 6 | Pending |
