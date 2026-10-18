@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-10-18T19:48:04.014Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-10-18T20:03:11.553Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 44
+  completed_plans: 45
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 7 of 22
+Plan: 8 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -102,6 +102,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P05 | 6min | 2 tasks | 7 files |
 | Phase 05 P03 | 13min | 3 tasks | 16 files |
 | Phase 05 P06 | 8 min | 3 tasks | 13 files |
+| Phase 05 P07 | 14 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -227,6 +228,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-03: 16 MiB chunked output reassembled exactly in about 247 ms over 4097 connections, 0 retries (W0-CHUNKS, S03-ANSWER measurement)
 - [Phase 05]: 05-06: VerifiedPath checks path bytes, not Path::components, because components normalizes '/./' and '//' away
 - [Phase 05]: 05-06: Capabilities carries layers and kernel; a krun host without Seatbelt clears no plan (D-03); DedicatedUser is recorded missing, never refused (D-01)
+- [Phase 05]: 05-07: minos-vmm launch config v2 has no scratch, boot, or console field; the console is the constant /dev/fd/1 and preflight refuses a non-pipe fd 1
+- [Phase 05]: 05-07: the helper sets RLIMIT_CORE 0, RLIMIT_NOFILE min(1024, hard), and RLIMIT_FSIZE 0 before reading its config, so its stdout and stderr must be pipes (a regular-file stderr dies by SIGXFSZ)
 
 ### Pending Todos
 
@@ -257,6 +260,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T19:48:04.010Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-10-18T20:03:11.549Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None
