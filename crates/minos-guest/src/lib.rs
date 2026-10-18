@@ -16,6 +16,7 @@
 
 pub mod job;
 pub mod nofollow;
+pub mod pack;
 pub mod pattern;
 pub mod report;
 pub mod sink;
