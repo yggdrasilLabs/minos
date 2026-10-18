@@ -51,6 +51,8 @@ pub mod job;
 
 pub mod chunk;
 
+pub mod lock;
+
 pub mod report;
 
 // id: SHA-256 identifiers and validated names
@@ -101,6 +103,9 @@ pub use state::{RunState, fold};
 
 // chunk: the authenticated vsock output codec
 pub use chunk::{ChunkToken, Reassembler};
+
+// lock: the minos.lock wire type
+pub use lock::Lock;
 
 // job: the loop-to-runner contract
 pub use job::{JobRequest, JobResult};

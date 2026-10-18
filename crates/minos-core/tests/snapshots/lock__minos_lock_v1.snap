@@ -1,0 +1,17 @@
+---
+source: crates/minos-core/tests/lock.rs
+expression: text
+---
+v = 1
+
+[[image]]
+backend = "krun"
+arch = "arm64"
+root_image = "8bce2282dd938d7f1346b91ee94d2cd8a3908ac8ab678d9f4a54fc08280d4b0f"
+dockerfile_sha256 = "f04bea490d45e7ae69d542846511e7c90eb683deaa1e0df19e9fca4d227265c2"
+base_images = ["docker.io/library/alpine@sha256:1111111111111111111111111111111111111111111111111111111111111111", "docker.io/library/rust@sha256:2222222222222222222222222222222222222222222222222222222222222222"]
+guest_sha256 = "864d00bb2e30c2bd8c56c3ad52760d21b68f4bba90bc3e74d60bb16541576aa8"
+
+[image.builder]
+name = "docker-buildx"
+version = "v0.35.0-desktop.2"

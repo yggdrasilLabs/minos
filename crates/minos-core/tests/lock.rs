@@ -72,7 +72,7 @@ fn lock_golden_v1() -> TestResult {
     // awk prints each body line with one newline, and the serialized lock ends with exactly one newline.
     assert_eq!(
         sha256_hex(text.as_bytes()),
-        "0000000000000000000000000000000000000000000000000000000000000000"
+        "a495cdbae3f6eb7bc57a26eba8b08c0c8eda5c3245904267ff30c263d343dfdb"
     );
     Ok(())
 }
@@ -104,7 +104,11 @@ fn lock_sorts_base_images() -> TestResult {
     let locked = lock
         .image(BackendKind::Krun, Arch::Arm64)
         .ok_or("no image")?;
-    let names: Vec<String> = locked.base_images().iter().map(ToString::to_string).collect();
+    let names: Vec<String> = locked
+        .base_images()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     assert_eq!(names, vec![ALPINE.to_owned(), RUST.to_owned()]);
     // A repeated base image is kept once.
     let repeated = LockedImage::new(
@@ -125,18 +129,33 @@ fn lock_refuses_unknown_keys() -> TestResult {
     let top = format!("extra = 1\n{}", golden_lock()?.to_toml()?);
     assert!(matches!(Lock::parse_toml(&top), Err(LockError::Toml(_))));
     let in_image = edited("backend = \"krun\"", "backend = \"krun\"\nextra = 1")?;
-    assert!(matches!(Lock::parse_toml(&in_image), Err(LockError::Toml(_))));
-    let in_builder = edited("name = \"docker-buildx\"", "name = \"docker-buildx\"\nengine = \"x\"")?;
-    assert!(matches!(Lock::parse_toml(&in_builder), Err(LockError::Toml(_))));
+    assert!(matches!(
+        Lock::parse_toml(&in_image),
+        Err(LockError::Toml(_))
+    ));
+    let in_builder = edited(
+        "name = \"docker-buildx\"",
+        "name = \"docker-buildx\"\nengine = \"x\"",
+    )?;
+    assert!(matches!(
+        Lock::parse_toml(&in_builder),
+        Err(LockError::Toml(_))
+    ));
     Ok(())
 }
 
 #[test]
 fn lock_refuses_missing_keys() -> TestResult {
     let no_guest = edited("guest_sha256 = ", "unused_guest = ")?;
-    assert!(matches!(Lock::parse_toml(&no_guest), Err(LockError::Toml(_))));
+    assert!(matches!(
+        Lock::parse_toml(&no_guest),
+        Err(LockError::Toml(_))
+    ));
     let no_version = edited("v = 1\n", "")?;
-    assert!(matches!(Lock::parse_toml(&no_version), Err(LockError::Toml(_))));
+    assert!(matches!(
+        Lock::parse_toml(&no_version),
+        Err(LockError::Toml(_))
+    ));
     Ok(())
 }
 
@@ -165,12 +184,18 @@ fn lock_refuses_duplicate_image() -> TestResult {
 #[test]
 fn lock_refuses_unsorted_base_images() -> TestResult {
     let sorted = format!("base_images = [\"{ALPINE}\", \"{RUST}\"]");
-    let unsorted = edited(&sorted, &format!("base_images = [\"{RUST}\", \"{ALPINE}\"]"))?;
+    let unsorted = edited(
+        &sorted,
+        &format!("base_images = [\"{RUST}\", \"{ALPINE}\"]"),
+    )?;
     assert!(matches!(
         Lock::parse_toml(&unsorted),
         Err(LockError::BaseImagesNotCanonical)
     ));
-    let repeated = edited(&sorted, &format!("base_images = [\"{ALPINE}\", \"{ALPINE}\"]"))?;
+    let repeated = edited(
+        &sorted,
+        &format!("base_images = [\"{ALPINE}\", \"{ALPINE}\"]"),
+    )?;
     assert!(matches!(
         Lock::parse_toml(&repeated),
         Err(LockError::BaseImagesNotCanonical)
@@ -194,19 +219,43 @@ fn lock_refuses_bad_builder_text() -> TestResult {
     assert!(BuilderText::try_from("v".repeat(MAX_BUILDER_TEXT_BYTES)).is_ok());
     for bad in ["v 1", "v\t1", "v\u{7}1", "v\u{7f}1", "vé"] {
         assert!(
-            matches!(BuilderText::try_from(bad.to_owned()), Err(LockError::BuilderText)),
+            matches!(
+                BuilderText::try_from(bad.to_owned()),
+                Err(LockError::BuilderText)
+            ),
             "{bad:?}"
         );
     }
     let empty_name = edited("name = \"docker-buildx\"", "name = \"\"")?;
-    assert!(matches!(Lock::parse_toml(&empty_name), Err(LockError::BuilderText)));
+    assert!(matches!(
+        Lock::parse_toml(&empty_name),
+        Err(LockError::BuilderText)
+    ));
     let long = "x".repeat(MAX_BUILDER_TEXT_BYTES + 1);
-    let long_version = edited("version = \"v0.35.0-desktop.2\"", &format!("version = \"{long}\""))?;
-    assert!(matches!(Lock::parse_toml(&long_version), Err(LockError::BuilderText)));
-    let spaced = edited("version = \"v0.35.0-desktop.2\"", "version = \"v0.35 desktop\"")?;
-    assert!(matches!(Lock::parse_toml(&spaced), Err(LockError::BuilderText)));
-    let control = edited("version = \"v0.35.0-desktop.2\"", "version = \"v0.35\\u001b\"")?;
-    assert!(matches!(Lock::parse_toml(&control), Err(LockError::BuilderText)));
+    let long_version = edited(
+        "version = \"v0.35.0-desktop.2\"",
+        &format!("version = \"{long}\""),
+    )?;
+    assert!(matches!(
+        Lock::parse_toml(&long_version),
+        Err(LockError::BuilderText)
+    ));
+    let spaced = edited(
+        "version = \"v0.35.0-desktop.2\"",
+        "version = \"v0.35 desktop\"",
+    )?;
+    assert!(matches!(
+        Lock::parse_toml(&spaced),
+        Err(LockError::BuilderText)
+    ));
+    let control = edited(
+        "version = \"v0.35.0-desktop.2\"",
+        "version = \"v0.35\\u001b\"",
+    )?;
+    assert!(matches!(
+        Lock::parse_toml(&control),
+        Err(LockError::BuilderText)
+    ));
     Ok(())
 }
 
@@ -265,9 +314,9 @@ fn lock_check() -> TestResult {
 #[test]
 fn lock_with_image_replaces() -> TestResult {
     let lock = golden_lock()?.with_image(image(Arch::X86_64, b"x86", b"guest x86")?);
-    let replaced = lock
-        .clone()
-        .with_image(image(Arch::Arm64, b"FROM alpine:new\n", b"minos-guest")?);
+    let replaced =
+        lock.clone()
+            .with_image(image(Arch::Arm64, b"FROM alpine:new\n", b"minos-guest")?);
     let arm = replaced
         .image(BackendKind::Krun, Arch::Arm64)
         .ok_or("no arm64 image")?;
