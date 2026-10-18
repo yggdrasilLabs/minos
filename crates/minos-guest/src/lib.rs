@@ -5,7 +5,7 @@
 //! a sequence of short authenticated vsock connections ([`sink::ChunkSink`]); the AWS milestone adds a
 //! lifecycle-hook pair implementing the same two traits, without touching the decoders, the applier, or the
 //! command runner. Every stage command runs as one fixed unprivileged uid under the D-05 limits, through the
-//! `/init --minos-stage` trampoline whose argv [`stage`] encodes and parses (D-08).
+//! `/init --minos-stage` trampoline whose argv the `stage` module encodes and parses (D-08).
 //!
 //! This library holds the parts the host can compile and test: the source and sink traits and their
 //! implementations over generic readers and connectors, the stage limits and trampoline argv, and the Phase 2

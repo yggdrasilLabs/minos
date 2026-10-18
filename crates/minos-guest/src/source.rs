@@ -199,12 +199,26 @@ fn required(sections: &mut InputSections, kind: SectionKind) -> Result<Vec<u8>, 
 
 impl<R: Read> JobSource for DiskJobSource<R> {
     fn read_input(&mut self) -> Result<GuestInput, SourceFailure> {
-        // RED stub: the decoder is not wired yet.
-        let _ = (&mut self.reader, decode);
-        Err(SourceFailure {
+        let mut sections = read_input_disk(&mut self.reader).map_err(|error| SourceFailure {
             token: None,
-            error: SourceError::DiffNotUtf8,
-        })
+            error: SourceError::Disk(error),
+        })?;
+        let token = sections.token().clone();
+        let decoded = decode(&mut sections);
+        match decoded {
+            Ok((job, base, diff, judge_data, candidate_out)) => Ok(GuestInput {
+                token,
+                job,
+                base,
+                diff,
+                judge_data,
+                candidate_out,
+            }),
+            Err(error) => Err(SourceFailure {
+                token: Some(token),
+                error,
+            }),
+        }
     }
 }
 

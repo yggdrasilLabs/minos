@@ -163,10 +163,35 @@ impl<C: Connector> ChunkSink<C> {
 
 impl<C: Connector> OutputSink for ChunkSink<C> {
     fn send(&mut self, tar: &[u8]) -> Result<SendReport, SinkError> {
-        // RED stub: nothing is sent yet.
-        let _ = (tar, &self.token, ChunkStream::chunk_count, MAX_OUTPUT_STREAM_BYTES);
-        let _ = Self::connect;
-        Err(SinkError::TooLarge { bytes: 0 })
+        let bytes = u64::try_from(tar.len()).unwrap_or(u64::MAX);
+        if bytes > MAX_OUTPUT_STREAM_BYTES {
+            return Err(SinkError::TooLarge { bytes });
+        }
+        let mut report = SendReport {
+            connections: 0,
+            retries: 0,
+            bytes: 0,
+        };
+        let token = self.token.clone();
+        for frame in ChunkStream::new(&token, tar) {
+            let chunk = report.connections;
+            let mut stream = self.connect(chunk, &mut report.retries)?;
+            stream.write_all(&frame).map_err(|error| SinkError::Write {
+                chunk,
+                kind: error.kind(),
+            })?;
+            self.connector
+                .close(stream)
+                .map_err(|error| SinkError::Write {
+                    chunk,
+                    kind: error.kind(),
+                })?;
+            report.connections = report.connections.saturating_add(1);
+            report.bytes = report
+                .bytes
+                .saturating_add(u64::try_from(frame.len()).unwrap_or(u64::MAX));
+        }
+        Ok(report)
     }
 }
 
