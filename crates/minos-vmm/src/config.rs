@@ -500,11 +500,22 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use super::{
-        Boot, ConfigError, MAX_CONFIG_BYTES, PathReason, STDOUT_CONSOLE, VmmConfig, parse,
-    };
+    use sha2::{Digest, Sha256};
+
+    use super::{ConfigError, MAX_CONFIG_BYTES, PathReason, VmmConfig, parse};
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    /// The golden v2 launch config: one line of compact JSON in the serializer's field order, then a newline.
+    /// 05-21 binds `minos-backend-krun`'s serializer to the same bytes (02-CONTEXT.md D-04).
+    const GOLDEN: &str = include_str!("../golden/config-v2.json");
+
+    /// SHA-256 of `golden/config-v2.json`, from `shasum -a 256 crates/minos-vmm/golden/config-v2.json`.
+    const GOLDEN_SHA256: &str = "0b1a1208888bbb6da4d77d0947a24993b31210aef4f788fb366549ee445f4a7b";
+
+    const ROOT_PATH: &str = r#""/Users/example/project/.minos/blobs/sha256/ab/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd""#;
+    const INPUT_PATH: &str = r#""/private/tmp/minos-501/mnsAAAAAAAA/input.img""#;
+    const SOCKET_PATH: &str = r#""/private/tmp/minos-501/mnsAAAAAAAA/o.sock""#;
 
     /// `crates/minos-sandbox/src/spec.rs` restates these four bounds (`MAX_DURATION_MS` as `MAX_LAUNCH_MS`) so
     /// preflight never clears a plan this launcher refuses with exit 64 or 65. minos-vmm may not link an internal
@@ -518,16 +529,6 @@ mod tests {
         assert_eq!(super::MAX_DURATION_MS, 3_600_000);
     }
 
-    /// E-1 from 02-03-PLAN.md, byte-identical to 02-05's E-1 (one line, no trailing newline).
-    const E1: &str = r#"{"v":1,"kernel":{"krunfw":"/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"boot":"root_disk","disks":{"root":"/private/tmp/mns00000000/root.img","input":"/private/tmp/mns00000000/input.img","scratch":{"path":"/private/tmp/mns00000000/scratch.img","cap_bytes":67108864}},"vsock":{"port":1024,"socket":"/private/tmp/mns00000000/o.sock"},"console":{"path":"/private/tmp/mns00000000/console.log","cap_bytes":1048576},"max_duration_ms":60000,"machine":{"vcpus":1,"memory_mib":256}}"#;
-
-    /// E-1b: the `boot` value of initramfs mode.
-    const E1B: &str = r#"{"initramfs":{"path":"/private/tmp/mns00000000/initramfs.cpio","sha256":"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"}}"#;
-
-    const ROOT_DISK_BOOT: &str = r#""boot":"root_disk""#;
-    const ROOT_PATH: &str = r#""/private/tmp/mns00000000/root.img""#;
-    const SOCKET_PATH: &str = r#""/private/tmp/mns00000000/o.sock""#;
-
     /// `text` with the first `from` replaced by `to`; an error if `from` is missing, so no test is vacuous.
     fn edit(text: &str, from: &str, to: &str) -> Result<String, Box<dyn Error>> {
         if text.contains(from) {
@@ -535,10 +536,6 @@ mod tests {
         } else {
             Err(format!("the base text does not contain {from}").into())
         }
-    }
-
-    fn initramfs_text() -> Result<String, Box<dyn Error>> {
-        edit(E1, ROOT_DISK_BOOT, &format!(r#""boot":{E1B}"#))
     }
 
     fn rejected(text: &str) -> Result<ConfigError, Box<dyn Error>> {
@@ -549,7 +546,7 @@ mod tests {
     }
 
     fn assert_out_of_range(from: &str, to: &str, expected: &str) -> TestResult {
-        let error = rejected(&edit(E1, from, to)?)?;
+        let error = rejected(&edit(GOLDEN, from, to)?)?;
         assert!(
             matches!(error, ConfigError::OutOfRange { field, .. } if field == expected),
             "expected {expected} out of range, got: {error}"
@@ -558,7 +555,7 @@ mod tests {
     }
 
     fn assert_path_rule(from: &str, to: &str, expected: &str, reason: PathReason) -> TestResult {
-        let error = rejected(&edit(E1, from, to)?)?;
+        let error = rejected(&edit(GOLDEN, from, to)?)?;
         assert!(
             matches!(error, ConfigError::Path { field, reason: found } if field == expected && found == reason),
             "expected {expected} to break {reason:?}, got: {error}"
@@ -566,144 +563,141 @@ mod tests {
         Ok(())
     }
 
-    fn assert_unknown_field(text: &str) -> TestResult {
+    /// `text` is refused by serde as carrying the unknown field `name`.
+    fn assert_unknown_field(text: &str, name: &str) -> TestResult {
         let error = rejected(text)?;
-        assert!(matches!(error, ConfigError::Json(_)), "got: {error}");
         let shown = match &error {
             ConfigError::Json(source) => source.to_string(),
-            other => other.to_string(),
+            other => return Err(format!("expected a JSON error, got: {other}").into()),
         };
-        assert!(shown.contains("unknown field `x`"), "got: {shown}");
+        assert!(
+            shown.contains(&format!("unknown field `{name}`")),
+            "got: {shown}"
+        );
         Ok(())
     }
 
     #[test]
-    fn config_e1_parses_in_root_disk_mode() -> TestResult {
-        let config = parse(E1.as_bytes())?;
-        assert!(matches!(config.boot(), Boot::RootDisk));
+    fn config_v2_golden() -> TestResult {
+        let digest: [u8; 32] = Sha256::digest(GOLDEN.as_bytes()).into();
+        assert_eq!(base16ct::lower::encode_string(&digest), GOLDEN_SHA256);
+        assert_eq!(GOLDEN.lines().count(), 1);
+        assert!(GOLDEN.ends_with("}\n"));
+
+        let config = parse(GOLDEN.as_bytes())?;
         assert_eq!(
             config.krunfw(),
             Path::new("/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib")
         );
-        assert_eq!(config.krunfw_sha256().first(), Some(&0x01));
-        assert_eq!(config.krunfw_sha256().last(), Some(&0xef));
+        assert_eq!(
+            base16ct::lower::encode_string(config.krunfw_sha256()),
+            "59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217"
+        );
         assert_eq!(
             config.root(),
-            Path::new("/private/tmp/mns00000000/root.img")
+            Path::new(
+                "/Users/example/project/.minos/blobs/sha256/ab/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd"
+            )
         );
         assert_eq!(
             config.input(),
-            Path::new("/private/tmp/mns00000000/input.img")
+            Path::new("/private/tmp/minos-501/mnsAAAAAAAA/input.img")
         );
-        assert_eq!(
-            config.scratch(),
-            Path::new("/private/tmp/mns00000000/scratch.img")
-        );
-        assert_eq!(config.scratch_cap_bytes(), 67_108_864);
         assert_eq!(config.vsock_port(), 1024);
         assert_eq!(
             config.socket(),
-            Path::new("/private/tmp/mns00000000/o.sock")
+            Path::new("/private/tmp/minos-501/mnsAAAAAAAA/o.sock")
         );
-        assert_eq!(
-            config.console(),
-            Path::new("/private/tmp/mns00000000/console.log")
-        );
-        assert_eq!(config.console_cap_bytes(), 1_048_576);
-        assert_eq!(config.max_duration(), Duration::from_mins(1));
-        assert_eq!(config.vcpus(), 1);
-        assert_eq!(config.memory_mib(), 256);
+        assert_eq!(config.max_duration(), Duration::from_mins(10));
+        assert_eq!(config.vcpus(), 2);
+        assert_eq!(config.memory_mib(), 2048);
         Ok(())
     }
 
     #[test]
-    fn config_e1b_parses_in_initramfs_mode() -> TestResult {
-        let config = parse(initramfs_text()?.as_bytes())?;
-        let Boot::Initramfs { path, sha256 } = config.boot() else {
-            return Err("expected initramfs boot".into());
-        };
-        assert_eq!(path, Path::new("/private/tmp/mns00000000/initramfs.cpio"));
-        assert_eq!(sha256.first(), Some(&0xfe));
-        assert_eq!(sha256.last(), Some(&0x10));
-        Ok(())
-    }
-
-    #[test]
-    fn config_serde_try_from_runs_the_same_rules() -> TestResult {
-        let config: VmmConfig = serde_json::from_str(E1)?;
+    fn config_v2_serde_try_from_runs_the_same_rules() -> TestResult {
+        let config: VmmConfig = serde_json::from_str(GOLDEN)?;
         assert_eq!(config.vsock_port(), 1024);
-        let refused = serde_json::from_str::<VmmConfig>(&edit(E1, r#""v":1"#, r#""v":2"#)?);
+        let refused = serde_json::from_str::<VmmConfig>(&edit(GOLDEN, r#""v":2"#, r#""v":1"#)?);
         assert!(refused.is_err());
         Ok(())
     }
 
     #[test]
-    fn config_rejects_version_2() -> TestResult {
-        let error = rejected(&edit(E1, r#""v":1"#, r#""v":2"#)?)?;
-        assert!(matches!(error, ConfigError::Version(2)), "got: {error}");
+    fn config_v2_refuses_v1() -> TestResult {
+        let error = rejected(&edit(GOLDEN, r#""v":2"#, r#""v":1"#)?)?;
+        assert!(matches!(error, ConfigError::Version(1)), "got: {error}");
+        let error = rejected(&edit(GOLDEN, r#""v":2"#, r#""v":3"#)?)?;
+        assert!(matches!(error, ConfigError::Version(3)), "got: {error}");
         Ok(())
     }
 
+    /// D-05 moved scratch into guest memory and 05-RESEARCH Open Question 7 removed the initramfs mode, so the
+    /// v1 scratch object and boot field are unknown fields in v2.
     #[test]
-    fn config_rejects_unknown_top_level_key() -> TestResult {
-        assert_unknown_field(&edit(E1, r#""v":1,"#, r#""v":1,"x":1,"#)?)
+    fn config_v2_refuses_removed_fields() -> TestResult {
+        let scratch = edit(
+            GOLDEN,
+            INPUT_PATH,
+            &format!(
+                r#"{INPUT_PATH},"scratch":{{"path":"/private/tmp/minos-501/mnsAAAAAAAA/scratch.img","cap_bytes":67108864}}"#
+            ),
+        )?;
+        assert_unknown_field(&scratch, "scratch")?;
+        assert_unknown_field(
+            &edit(GOLDEN, r#""v":2,"#, r#""v":2,"boot":"root_disk","#)?,
+            "boot",
+        )?;
+        let initramfs = r#""boot":{"initramfs":{"path":"/private/tmp/minos-501/mnsAAAAAAAA/initramfs.cpio","sha256":"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"}},"#;
+        assert_unknown_field(
+            &edit(GOLDEN, r#""v":2,"#, &format!(r#""v":2,{initramfs}"#))?,
+            "boot",
+        )
+    }
+
+    /// The console is the helper's stdout pipe, a constant, so a console object is an unknown field.
+    #[test]
+    fn config_v2_has_no_console_object() -> TestResult {
+        let console = r#""console":{"path":"/dev/fd/1","cap_bytes":1048576},"#;
+        let text = edit(
+            GOLDEN,
+            r#""max_duration_ms":"#,
+            &format!(r#"{console}"max_duration_ms":"#),
+        )?;
+        assert_unknown_field(&text, "console")
     }
 
     #[test]
-    fn config_rejects_unknown_key_in_every_object() -> TestResult {
-        for object in ["kernel", "disks", "scratch", "vsock", "console", "machine"] {
+    fn config_v2_rejects_unknown_key_in_every_object() -> TestResult {
+        assert_unknown_field(&edit(GOLDEN, r#""v":2,"#, r#""v":2,"x":1,"#)?, "x")?;
+        for object in ["kernel", "disks", "vsock", "machine"] {
             let from = format!(r#""{object}":{{"#);
             let to = format!(r#""{object}":{{"x":1,"#);
-            assert_unknown_field(&edit(E1, &from, &to)?)?;
+            assert_unknown_field(&edit(GOLDEN, &from, &to)?, "x")?;
         }
         Ok(())
     }
 
     #[test]
-    fn config_rejects_unknown_key_in_initramfs() -> TestResult {
-        let text = initramfs_text()?;
-        assert_unknown_field(&edit(&text, r#""initramfs":{"#, r#""initramfs":{"x":1,"#)?)
-    }
-
-    #[test]
-    fn config_rejects_unknown_boot_mode() -> TestResult {
-        let error = rejected(&edit(E1, ROOT_DISK_BOOT, r#""boot":"virtio_fs""#)?)?;
-        assert!(matches!(error, ConfigError::Json(_)), "got: {error}");
-        Ok(())
-    }
-
-    #[test]
-    fn config_rejects_relative_path() -> TestResult {
+    fn config_v2_keeps_path_rules() -> TestResult {
         assert_path_rule(
             ROOT_PATH,
             r#""private/tmp/root.img""#,
             "disks.root",
             PathReason::NotAbsolute,
-        )
-    }
-
-    #[test]
-    fn config_rejects_dot_dot_component() -> TestResult {
+        )?;
         assert_path_rule(
             ROOT_PATH,
             r#""/private/tmp/../tmp/root.img""#,
             "disks.root",
             PathReason::NotNormal,
-        )
-    }
-
-    #[test]
-    fn config_rejects_dot_component() -> TestResult {
+        )?;
         assert_path_rule(
             ROOT_PATH,
             r#""/private/tmp/./root.img""#,
             "disks.root",
             PathReason::NotNormal,
-        )
-    }
-
-    #[test]
-    fn config_rejects_empty_component_and_trailing_slash() -> TestResult {
+        )?;
         assert_path_rule(
             ROOT_PATH,
             r#""/private//tmp/root.img""#,
@@ -716,62 +710,48 @@ mod tests {
             "disks.root",
             PathReason::NotNormal,
         )?;
-        assert_path_rule(ROOT_PATH, r#""/""#, "disks.root", PathReason::NotNormal)
-    }
-
-    #[test]
-    fn config_rejects_nul_in_path() -> TestResult {
+        assert_path_rule(ROOT_PATH, r#""/""#, "disks.root", PathReason::NotNormal)?;
         assert_path_rule(
-            ROOT_PATH,
-            r#""/private/tmp/ro\u0000ot.img""#,
-            "disks.root",
+            INPUT_PATH,
+            r#""/private/tmp/in\u0000put.img""#,
+            "disks.input",
             PathReason::Nul,
+        )?;
+        assert_path_rule(
+            SOCKET_PATH,
+            r#""relative.sock""#,
+            "vsock.socket",
+            PathReason::NotAbsolute,
         )
     }
 
     #[test]
-    fn config_rejects_1025_byte_path() -> TestResult {
+    fn config_v2_path_length_limits() -> TestResult {
         let long = format!(r#""/{}""#, "a".repeat(1024));
         assert_path_rule(
             ROOT_PATH,
             &long,
             "disks.root",
             PathReason::TooLong { max: 1024 },
-        )
-    }
-
-    #[test]
-    fn config_accepts_1024_byte_path() -> TestResult {
+        )?;
         let longest = format!(r#""/{}""#, "a".repeat(1023));
-        parse(edit(E1, ROOT_PATH, &longest)?.as_bytes())?;
-        Ok(())
-    }
+        parse(edit(GOLDEN, ROOT_PATH, &longest)?.as_bytes())?;
 
-    #[test]
-    fn config_rejects_104_byte_socket_path() -> TestResult {
         let long = format!(r#""/{}""#, "s".repeat(103));
         assert_path_rule(
             SOCKET_PATH,
             &long,
             "vsock.socket",
             PathReason::TooLong { max: 103 },
-        )
-    }
-
-    #[test]
-    fn config_accepts_103_byte_socket_path() -> TestResult {
+        )?;
         let longest = format!(r#""/{}""#, "s".repeat(102));
-        parse(edit(E1, SOCKET_PATH, &longest)?.as_bytes())?;
+        parse(edit(GOLDEN, SOCKET_PATH, &longest)?.as_bytes())?;
         Ok(())
     }
 
     #[test]
-    fn config_rejects_two_fields_with_the_same_path() -> TestResult {
-        let error = rejected(&edit(
-            E1,
-            r#""/private/tmp/mns00000000/input.img""#,
-            ROOT_PATH,
-        )?)?;
+    fn config_v2_rejects_two_fields_with_the_same_path() -> TestResult {
+        let error = rejected(&edit(GOLDEN, INPUT_PATH, ROOT_PATH)?)?;
         assert!(
             matches!(
                 error,
@@ -782,23 +762,13 @@ mod tests {
             ),
             "got: {error}"
         );
-        Ok(())
-    }
-
-    #[test]
-    fn config_rejects_initramfs_path_equal_to_root() -> TestResult {
-        let text = edit(
-            &initramfs_text()?,
-            r#""/private/tmp/mns00000000/initramfs.cpio""#,
-            ROOT_PATH,
-        )?;
-        let error = rejected(&text)?;
+        let error = rejected(&edit(GOLDEN, SOCKET_PATH, INPUT_PATH)?)?;
         assert!(
             matches!(
                 error,
                 ConfigError::DuplicatePath {
-                    first: "boot.initramfs.path",
-                    second: "disks.root"
+                    first: "disks.input",
+                    second: "vsock.socket"
                 }
             ),
             "got: {error}"
@@ -807,163 +777,72 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_63_char_sha256() -> TestResult {
-        let error = rejected(&edit(E1, r#"abcdef"}"#, r#"abcde"}"#)?)?;
-        assert!(
-            matches!(
-                error,
-                ConfigError::Sha256 {
-                    field: "kernel.sha256"
-                }
-            ),
-            "got: {error}"
-        );
+    fn config_v2_rejects_bad_sha256() -> TestResult {
+        for (from, to) in [(r#"8e5217""#, r#"8e521""#), (r#"bbdd5218"#, r#"BBDD5218"#)] {
+            let error = rejected(&edit(GOLDEN, from, to)?)?;
+            assert!(
+                matches!(
+                    error,
+                    ConfigError::Sha256 {
+                        field: "kernel.sha256"
+                    }
+                ),
+                "got: {error}"
+            );
+        }
         Ok(())
     }
 
     #[test]
-    fn config_rejects_uppercase_sha256() -> TestResult {
-        let error = rejected(&edit(
-            E1,
-            r#""sha256":"0123456789abcdef"#,
-            r#""sha256":"0123456789ABCDEF"#,
-        )?)?;
-        assert!(
-            matches!(
-                error,
-                ConfigError::Sha256 {
-                    field: "kernel.sha256"
-                }
-            ),
-            "got: {error}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn config_rejects_bad_initramfs_sha256() -> TestResult {
-        let text = edit(&initramfs_text()?, "fedcba", "FEDCBA")?;
-        let error = rejected(&text)?;
-        assert!(
-            matches!(
-                error,
-                ConfigError::Sha256 {
-                    field: "boot.initramfs.sha256"
-                }
-            ),
-            "got: {error}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn config_rejects_vsock_port_0() -> TestResult {
-        assert_out_of_range(r#""port":1024"#, r#""port":0"#, "vsock.port")
-    }
-
-    #[test]
-    fn config_rejects_vsock_port_u32_max() -> TestResult {
-        assert_out_of_range(r#""port":1024"#, r#""port":4294967295"#, "vsock.port")
-    }
-
-    #[test]
-    fn config_rejects_scratch_cap_0() -> TestResult {
+    fn config_v2_rejects_out_of_range_numbers() -> TestResult {
+        assert_out_of_range(r#""port":1024"#, r#""port":0"#, "vsock.port")?;
+        assert_out_of_range(r#""port":1024"#, r#""port":4294967295"#, "vsock.port")?;
         assert_out_of_range(
-            r#""cap_bytes":67108864"#,
-            r#""cap_bytes":0"#,
-            "disks.scratch.cap_bytes",
-        )
-    }
-
-    #[test]
-    fn config_rejects_scratch_cap_over_16_gib() -> TestResult {
-        assert_out_of_range(
-            r#""cap_bytes":67108864"#,
-            r#""cap_bytes":17179869185"#,
-            "disks.scratch.cap_bytes",
-        )
-    }
-
-    #[test]
-    fn config_rejects_console_cap_0() -> TestResult {
-        assert_out_of_range(
-            r#""cap_bytes":1048576"#,
-            r#""cap_bytes":0"#,
-            "console.cap_bytes",
-        )
-    }
-
-    #[test]
-    fn config_rejects_console_cap_over_64_mib() -> TestResult {
-        assert_out_of_range(
-            r#""cap_bytes":1048576"#,
-            r#""cap_bytes":67108865"#,
-            "console.cap_bytes",
-        )
-    }
-
-    #[test]
-    fn config_rejects_max_duration_0() -> TestResult {
-        assert_out_of_range(
-            r#""max_duration_ms":60000"#,
+            r#""max_duration_ms":600000"#,
             r#""max_duration_ms":0"#,
             "max_duration_ms",
-        )
-    }
-
-    #[test]
-    fn config_rejects_max_duration_over_one_hour() -> TestResult {
+        )?;
         assert_out_of_range(
-            r#""max_duration_ms":60000"#,
+            r#""max_duration_ms":600000"#,
             r#""max_duration_ms":3600001"#,
             "max_duration_ms",
-        )
-    }
-
-    #[test]
-    fn config_rejects_vcpus_0() -> TestResult {
-        assert_out_of_range(r#""vcpus":1"#, r#""vcpus":0"#, "machine.vcpus")
-    }
-
-    #[test]
-    fn config_rejects_vcpus_9() -> TestResult {
-        assert_out_of_range(r#""vcpus":1"#, r#""vcpus":9"#, "machine.vcpus")
-    }
-
-    #[test]
-    fn config_rejects_memory_127_mib() -> TestResult {
+        )?;
+        assert_out_of_range(r#""vcpus":2"#, r#""vcpus":0"#, "machine.vcpus")?;
+        assert_out_of_range(r#""vcpus":2"#, r#""vcpus":9"#, "machine.vcpus")?;
         assert_out_of_range(
-            r#""memory_mib":256"#,
+            r#""memory_mib":2048"#,
             r#""memory_mib":127"#,
             "machine.memory_mib",
-        )
-    }
-
-    #[test]
-    fn config_rejects_memory_16385_mib() -> TestResult {
+        )?;
         assert_out_of_range(
-            r#""memory_mib":256"#,
+            r#""memory_mib":2048"#,
             r#""memory_mib":16385"#,
             "machine.memory_mib",
         )
     }
 
-    /// KRUN-01: the console may be the helper's own stdout, named by exactly one literal path.
     #[test]
-    fn config_accepts_stdout_console() -> TestResult {
-        let text = edit(
-            E1,
-            r#""/private/tmp/mns00000000/console.log""#,
-            r#""/dev/fd/1""#,
-        )?;
-        let config = parse(text.as_bytes())?;
-        assert_eq!(config.console(), Path::new(STDOUT_CONSOLE));
-        assert_eq!(STDOUT_CONSOLE, "/dev/fd/1");
+    fn config_v2_accepts_the_range_bounds() -> TestResult {
+        for (from, to) in [
+            (r#""port":1024"#, r#""port":1"#),
+            (r#""port":1024"#, r#""port":4294967294"#),
+            (r#""max_duration_ms":600000"#, r#""max_duration_ms":1"#),
+            (
+                r#""max_duration_ms":600000"#,
+                r#""max_duration_ms":3600000"#,
+            ),
+            (r#""vcpus":2"#, r#""vcpus":1"#),
+            (r#""vcpus":2"#, r#""vcpus":8"#),
+            (r#""memory_mib":2048"#, r#""memory_mib":128"#),
+            (r#""memory_mib":2048"#, r#""memory_mib":16384"#),
+        ] {
+            parse(edit(GOLDEN, from, to)?.as_bytes())?;
+        }
         Ok(())
     }
 
     #[test]
-    fn config_rejects_oversized_input_before_parsing() -> TestResult {
+    fn config_v2_rejects_oversized_input_before_parsing() -> TestResult {
         // Not JSON at all: a size check that ran after parsing would report Json instead.
         let len = usize::try_from(MAX_CONFIG_BYTES + 1)?;
         let error = rejected(&"{".repeat(len))?;
@@ -972,9 +851,12 @@ mod tests {
     }
 
     #[test]
-    fn config_accepts_input_at_the_size_limit() -> TestResult {
+    fn config_v2_accepts_input_at_the_size_limit() -> TestResult {
         let len = usize::try_from(MAX_CONFIG_BYTES)?;
-        let padded = format!("{E1}{}", " ".repeat(len - E1.len()));
+        let padding = len
+            .checked_sub(GOLDEN.len())
+            .ok_or("the golden config is longer than the size limit")?;
+        let padded = format!("{GOLDEN}{}", " ".repeat(padding));
         parse(padded.as_bytes())?;
         Ok(())
     }
