@@ -19,8 +19,13 @@ use crate::key::LaunchKey;
 use crate::role::{Judge, Role, RoleKind};
 
 // The machine and duration bounds below restate `crates/minos-vmm/src/config.rs` (`MAX_VCPUS`, `MIN_MEMORY_MIB`,
-// `MAX_MEMORY_MIB`, `MAX_DURATION_MS`). minos-sandbox cannot depend on the launcher binary, so a plan that
-// passes here must also pass the launcher's own config validation; change both together.
+// `MAX_MEMORY_MIB`, `MAX_DURATION_MS`), and `BOOT_ALLOWANCE_MS` restates `HOST_DEADLINE_GRACE` in
+// `crates/minos-backend-krun/src/supervise.rs`. A plan that passes here must also pass the launcher's own config
+// validation, but minos-vmm links no internal crate, so the bounds cannot share a constant. Instead each side
+// pins the same literals in a test: `launcher_bounds_match_minos_vmm` in `crates/minos-sandbox/tests/spec.rs`,
+// `launcher_bounds_are_pinned_for_minos_sandbox` in `crates/minos-vmm/src/config.rs`, and
+// `host_deadline_grace_is_pinned_for_minos_sandbox` in `crates/minos-backend-krun/src/supervise.rs`. Changing one
+// side fails the gate until the other side and both tests change with it (review WR-02).
 
 /// Most vCPUs a sandbox may have: the launcher refuses more.
 pub const MAX_VCPUS: u8 = 8;

@@ -243,3 +243,16 @@ fn only_judge_secrets_set_judge_data() -> TestResult {
     assert_eq!(candidate.judge_data(), None);
     Ok(())
 }
+
+/// The sandbox restates launcher bounds it cannot import. The first four are pinned to the same literals by
+/// `launcher_bounds_are_pinned_for_minos_sandbox` in `crates/minos-vmm/src/config.rs`, and `BOOT_ALLOWANCE_MS`
+/// by `host_deadline_grace_is_pinned_for_minos_sandbox` in `crates/minos-backend-krun/src/supervise.rs`, so
+/// changing either side fails the gate until both change (review WR-02).
+#[test]
+fn launcher_bounds_match_minos_vmm() {
+    assert_eq!(minos_sandbox::spec::MAX_VCPUS, 8);
+    assert_eq!(minos_sandbox::spec::MIN_MEMORY_MIB, 128);
+    assert_eq!(minos_sandbox::spec::MAX_MEMORY_MIB, 16_384);
+    assert_eq!(minos_sandbox::spec::MAX_LAUNCH_MS, 3_600_000);
+    assert_eq!(minos_sandbox::spec::BOOT_ALLOWANCE_MS, 30_000);
+}

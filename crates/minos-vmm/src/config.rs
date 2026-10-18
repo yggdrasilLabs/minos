@@ -27,6 +27,8 @@ pub const MAX_VSOCK_PORT: u32 = 4_294_967_294;
 pub const MAX_SCRATCH_CAP_BYTES: u64 = 17_179_869_184;
 /// Largest console output cap, in bytes (64 MiB).
 pub const MAX_CONSOLE_CAP_BYTES: u64 = 67_108_864;
+// `crates/minos-sandbox/src/spec.rs` restates the next four bounds so preflight never clears a plan this launcher
+// refuses; minos-vmm links no internal crate, so both sides pin the same literals in tests (review WR-02).
 /// Longest hard maximum run time, in milliseconds (one hour).
 pub const MAX_DURATION_MS: u64 = 3_600_000;
 /// Most vCPUs a VM may have.
@@ -494,6 +496,18 @@ mod tests {
     use super::{Boot, ConfigError, MAX_CONFIG_BYTES, PathReason, VmmConfig, parse};
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    /// `crates/minos-sandbox/src/spec.rs` restates these four bounds (`MAX_DURATION_MS` as `MAX_LAUNCH_MS`) so
+    /// preflight never clears a plan this launcher refuses with exit 64 or 65. minos-vmm may not link an internal
+    /// crate, so both sides pin the same literals, and the sandbox side is `launcher_bounds_match_minos_vmm` in
+    /// `crates/minos-sandbox/tests/spec.rs`. Change both files and both tests together (review WR-02).
+    #[test]
+    fn launcher_bounds_are_pinned_for_minos_sandbox() {
+        assert_eq!(super::MAX_VCPUS, 8);
+        assert_eq!(super::MIN_MEMORY_MIB, 128);
+        assert_eq!(super::MAX_MEMORY_MIB, 16_384);
+        assert_eq!(super::MAX_DURATION_MS, 3_600_000);
+    }
 
     /// E-1 from 02-03-PLAN.md, byte-identical to 02-05's E-1 (one line, no trailing newline).
     const E1: &str = r#"{"v":1,"kernel":{"krunfw":"/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"boot":"root_disk","disks":{"root":"/private/tmp/mns00000000/root.img","input":"/private/tmp/mns00000000/input.img","scratch":{"path":"/private/tmp/mns00000000/scratch.img","cap_bytes":67108864}},"vsock":{"port":1024,"socket":"/private/tmp/mns00000000/o.sock"},"console":{"path":"/private/tmp/mns00000000/console.log","cap_bytes":1048576},"max_duration_ms":60000,"machine":{"vcpus":1,"memory_mib":256}}"#;

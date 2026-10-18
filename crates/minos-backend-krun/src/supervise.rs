@@ -67,6 +67,8 @@ pub const DEFAULT_HOST_DEADLINE: Duration = Duration::from_mins(2);
 /// What [`Launch::for_config`] adds to the config's `max_duration_ms`: time for the helper to start, for its own
 /// watchdog to trip, and for the VMM to flush the console and print its `minos-vmm: watchdog deadline` marker
 /// before the host gives up. The helper's deadline must fire first, or that evidence of a timeout is lost.
+/// `minos_sandbox::spec::BOOT_ALLOWANCE_MS` documents the same 30 s figure, and both sides pin it in tests
+/// (`host_deadline_grace_is_pinned_for_minos_sandbox` here, `launcher_bounds_match_minos_vmm` there).
 pub const HOST_DEADLINE_GRACE: Duration = Duration::from_secs(30);
 /// Per-connection byte cap when [`Launch::conn_caps`] is not called.
 pub const DEFAULT_CONN_CAP: u64 = 1_048_576;
@@ -1140,6 +1142,14 @@ mod tests {
     const E3_PAYLOAD: &[u8] = br#"{"v":1,"steps":[],"job_error":null}"#;
 
     const GENEROUS: Duration = Duration::from_secs(10);
+
+    /// `minos_sandbox::spec::BOOT_ALLOWANCE_MS` documents the same 30 s figure and pins it in
+    /// `launcher_bounds_match_minos_vmm` (`crates/minos-sandbox/tests/spec.rs`). minos-backend-krun does not link
+    /// minos-sandbox yet, so both sides pin the literal; change both together (review WR-02).
+    #[test]
+    fn host_deadline_grace_is_pinned_for_minos_sandbox() {
+        assert_eq!(super::HOST_DEADLINE_GRACE, Duration::from_secs(30));
+    }
 
     fn hex(text: &str) -> Result<Vec<u8>, Box<dyn Error>> {
         text.as_bytes()
