@@ -6,7 +6,8 @@
 //!   never names an image type and nothing is ever probed.
 //! - One vsock route: a guest connection to the configured port is connected to the host Unix socket the parent
 //!   already bound. That socket is the only path out of the guest.
-//! - The console writes to a file, so neither host stdin nor a host terminal reaches the guest.
+//! - The console writes to a file, or to the helper's own stdout pipe when the config names exactly
+//!   [`crate::config::STDOUT_CONSOLE`], so neither host stdin nor a host terminal reaches the guest.
 //! - The balloon and metrics devices are off. The rng device keeps its default (02-RESEARCH.md open question 3).
 //!
 //! The VM has no network device and no shared host directory. Without a network device the builder leaves the

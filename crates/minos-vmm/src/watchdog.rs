@@ -6,14 +6,15 @@
 
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::parent_id;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::VmmConfig;
+use crate::config::{STDOUT_CONSOLE, VmmConfig};
 
 /// How often the watchdog checks its limits.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -23,7 +24,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 enum Trip {
     /// `max_duration_ms` elapsed since `main` entry.
     Deadline,
-    /// The console file passed `console.cap_bytes`.
+    /// The console file passed `console.cap_bytes`. Never for a console on the helper's stdout.
     ConsoleCap,
     /// The parent process is not the one recorded at `main` entry, or is PID 1: whoever started the launcher is
     /// gone.
@@ -53,17 +54,30 @@ impl Trip {
 /// The limits the watchdog enforces, taken from the launch config.
 pub struct Limits {
     deadline: Duration,
-    console: PathBuf,
+    /// The console file to measure; `None` when the console is the helper's stdout pipe, whose cap the parent
+    /// enforces on its side of the pipe (KRUN-01, 05-RESEARCH Pattern 7).
+    console: Option<PathBuf>,
     console_cap_bytes: u64,
 }
 
 impl Limits {
     /// The deadline, console path, and console cap of `config`.
     pub fn from_config(config: &VmmConfig) -> Self {
+        Self::new(
+            config.max_duration(),
+            config.console(),
+            config.console_cap_bytes(),
+        )
+    }
+
+    /// Limits for a deadline, a console path, and a console cap. A console path equal to [`STDOUT_CONSOLE`] byte
+    /// for byte is never measured, so the console cap never trips for it; the deadline and the parent check do.
+    fn new(deadline: Duration, console: &Path, console_cap_bytes: u64) -> Self {
+        let is_stdout = console.as_os_str().as_bytes() == STDOUT_CONSOLE.as_bytes();
         Self {
-            deadline: config.max_duration(),
-            console: config.console().to_path_buf(),
-            console_cap_bytes: config.console_cap_bytes(),
+            deadline,
+            console: (!is_stdout).then(|| console.to_path_buf()),
+            console_cap_bytes,
         }
     }
 
@@ -71,7 +85,11 @@ impl Limits {
     fn tripped(&self, start: Instant, parent: u32) -> Option<Trip> {
         if start.elapsed() >= self.deadline {
             Some(Trip::Deadline)
-        } else if console_len(&self.console) > self.console_cap_bytes {
+        } else if self
+            .console
+            .as_deref()
+            .is_some_and(|console| console_len(console) > self.console_cap_bytes)
+        {
             Some(Trip::ConsoleCap)
         } else if parent_gone(parent, parent_id()) {
             Some(Trip::ParentGone)
@@ -92,7 +110,7 @@ fn parent_gone(expected: u32, current: u32) -> bool {
 }
 
 /// Length of the console file; a file that does not exist yet counts as empty.
-fn console_len(path: &std::path::Path) -> u64 {
+fn console_len(path: &Path) -> u64 {
     fs::metadata(path).map_or(0, |metadata| metadata.len())
 }
 

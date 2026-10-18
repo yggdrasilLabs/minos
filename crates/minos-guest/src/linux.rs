@@ -21,12 +21,15 @@ use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
+use minos_core::chunk::ChunkStream as ChunkEncoder;
+use minos_guest::job::{
+    ChunkStream, ConsoleFlood, ScratchRoundtrip, Step, VsockConnect, VsockStream,
+};
 use minos_guest::job::{Connect, Finish, Job, JobError, Run, read_job};
-use minos_guest::job::{ConsoleFlood, ScratchRoundtrip, Step, VsockConnect, VsockStream};
 use minos_guest::pattern::{fill_pattern, pattern_byte};
 use minos_guest::report::{
-    BootResult, ConnectAttempt, ConnectResult, ConsoleFloodResult, Report, RunResult,
-    ScratchResult, StepResult, VsockConnectResult, VsockStreamResult, encode_frame,
+    BootResult, ChunkStreamResult, ConnectAttempt, ConnectResult, ConsoleFloodResult, Report,
+    RunResult, ScratchResult, StepResult, VsockConnectResult, VsockStreamResult, encode_frame,
 };
 use minos_guest::{BOOT_MARKER, FRAME_SENT_MARKER, JOB_ERROR_MARKER, POWEROFF_MARKER};
 use rustix::fs::{OFlags, fcntl_setfl};
@@ -96,6 +99,9 @@ pub fn run() -> ExitCode {
             Step::Run(step) => StepResult::Run(run_command(step)),
             Step::ConsoleFlood(step) => StepResult::ConsoleFlood(console_flood(*step)),
             Step::Hang(_) => hang(),
+            Step::ChunkStream(step) => {
+                StepResult::ChunkStream(chunk_stream(job.vsock_port(), step))
+            }
         };
         report.push(result);
     }
@@ -331,6 +337,77 @@ fn vsock_stream(port: u32, step: VsockStream) -> VsockStreamResult {
         raw_os_error: failure.as_ref().and_then(io::Error::raw_os_error),
         error: failure.map(|error| error.to_string()),
     }
+}
+
+/// First delay before retrying a refused or reset chunk connect.
+const CHUNK_RETRY_FIRST: Duration = Duration::from_millis(1);
+/// Longest delay between chunk connect retries; the delay doubles from [`CHUNK_RETRY_FIRST`] up to this.
+const CHUNK_RETRY_MAX: Duration = Duration::from_millis(64);
+/// Most connect attempts for one chunk before the step gives up.
+const CHUNK_CONNECT_ATTEMPTS: u32 = 200;
+
+/// Connects to the host for one chunk, retrying a refused or reset connect with delays of 1, 2, 4, ... up to 64 ms,
+/// at most [`CHUNK_CONNECT_ATTEMPTS`] times. Adds every retry to `retries`.
+fn connect_chunk(port: u32, retries: &mut u32) -> io::Result<Vsock> {
+    let mut delay = CHUNK_RETRY_FIRST;
+    let mut attempt = 1_u32;
+    loop {
+        match Vsock::connect_with_cid_port(VMADDR_CID_HOST, port) {
+            Ok(stream) => return Ok(stream),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionRefused | io::ErrorKind::ConnectionReset
+                ) && attempt < CHUNK_CONNECT_ATTEMPTS =>
+            {
+                *retries = retries.saturating_add(1);
+                attempt = attempt.saturating_add(1);
+                std::thread::sleep(delay);
+                delay = delay.saturating_mul(2).min(CHUNK_RETRY_MAX);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Sends `bytes` pattern bytes as authenticated chunks, one fresh vsock connection per chunk (S03-ANSWER): connect,
+/// write the whole chunk, shut down the write side, close. Spike-only (05-03 Wave 0); the first failure stops it.
+fn chunk_stream(port: u32, step: &ChunkStream) -> ChunkStreamResult {
+    let started = Instant::now();
+    let mut result = ChunkStreamResult {
+        bytes_sent: 0,
+        connections: 0,
+        connect_retries: 0,
+        elapsed_ms: 0,
+        error: None,
+    };
+    let Ok(len) = usize::try_from(step.bytes()) else {
+        result.error = Some("payload length does not fit this guest's address space".to_owned());
+        return result;
+    };
+    let mut payload = vec![0_u8; len];
+    fill_pattern(0, &mut payload);
+    let token = step.token();
+    for chunk in ChunkEncoder::new(&token, &payload) {
+        let sent = connect_chunk(port, &mut result.connect_retries).and_then(|mut stream| {
+            stream.write_all(&chunk)?;
+            stream.shutdown(Shutdown::Write)?;
+            drop(stream);
+            Ok(())
+        });
+        if let Err(error) = sent {
+            result.error = Some(format!("chunk {}: {error}", result.connections));
+            break;
+        }
+        result.connections = result.connections.saturating_add(1);
+        result.bytes_sent = result.bytes_sent.saturating_add(to_u64(chunk.len()));
+    }
+    result.elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    console_line(&format!(
+        "minos-guest: chunk_stream {} connections, {} retries, {} ms",
+        result.connections, result.connect_retries, result.elapsed_ms
+    ));
+    result
 }
 
 /// Writes the pattern to the scratch disk, syncs, reads it back, and compares. `Ok(Some(..))` describes a

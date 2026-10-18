@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::config::{Boot, VmmConfig};
+use crate::config::{Boot, STDOUT_CONSOLE, VmmConfig};
 
 /// Environment variable name prefixes the launcher refuses to run under. `msb_krun` appends
 /// `MSB_KRUN_KERNEL_CMDLINE` to the guest kernel command line, and `DYLD_` variables change what the loader maps
@@ -108,6 +108,11 @@ pub enum PreflightError {
 /// The first failed check, as a [`PreflightError`]. A digest mismatch is [`PreflightError::Hash`].
 pub fn check(config: &VmmConfig) -> Result<(), PreflightError> {
     check_environment(std::env::vars_os().map(|(name, _)| name))?;
+    check_files(config)
+}
+
+/// Every file check after the environment: files, socket, console, then hashes.
+fn check_files(config: &VmmConfig) -> Result<(), PreflightError> {
     regular_file("kernel.krunfw", config.krunfw())?;
     regular_file("disks.root", config.root())?;
     regular_file("disks.input", config.input())?;
@@ -122,7 +127,7 @@ pub fn check(config: &VmmConfig) -> Result<(), PreflightError> {
         regular_file("boot.initramfs.path", path)?;
     }
     unix_socket(config.socket())?;
-    console_absent(config.console())?;
+    console_ok(config.console())?;
     hash_matches("kernel.krunfw", config.krunfw(), config.krunfw_sha256())?;
     if let Boot::Initramfs { path, sha256 } = config.boot() {
         hash_matches("boot.initramfs.path", path, sha256)?;
@@ -194,6 +199,17 @@ fn unix_socket(path: &Path) -> Result<(), PreflightError> {
         Err(PreflightError::NotSocket {
             path: path.to_path_buf(),
         })
+    }
+}
+
+/// The console is either the helper's own stdout, named by exactly [`STDOUT_CONSOLE`], or a file that does not
+/// exist yet in a canonical directory. The stdout literal is compared byte for byte, so `/dev/stdout`, another
+/// descriptor, or any other existing path is still refused as an existing console.
+fn console_ok(path: &Path) -> Result<(), PreflightError> {
+    if path.as_os_str().as_bytes() == STDOUT_CONSOLE.as_bytes() {
+        Ok(())
+    } else {
+        console_absent(path)
     }
 }
 

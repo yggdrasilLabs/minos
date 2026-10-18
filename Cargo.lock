@@ -791,6 +791,7 @@ dependencies = [
 name = "minos-guest"
 version = "0.1.0"
 dependencies = [
+ "minos-core",
  "rustix",
  "serde",
  "serde_json",

@@ -39,6 +39,13 @@ pub const MIN_MEMORY_MIB: u16 = 128;
 pub const MAX_MEMORY_MIB: u16 = 16_384;
 /// Length of a SHA-256 digest written as lowercase hex.
 const SHA256_HEX_LEN: usize = 64;
+/// The console path that names the helper's own stdout: the helper's own stdout, a pipe the supervisor reads;
+/// Seatbelt matches this literal (05-RESEARCH Pattern 7).
+///
+/// Only this exact byte string is treated as stdout. Preflight skips its console-absent and parent checks for it,
+/// and the watchdog does not measure it, because the supervisor reads the pipe through its own cap (KRUN-01).
+/// Every other spelling, `/dev/stdout` and `/dev/fd/2` included, is an ordinary console path that must not exist.
+pub const STDOUT_CONSOLE: &str = "/dev/fd/1";
 
 /// Why a launch config was refused. Field names are the dotted JSON key path.
 #[derive(Debug, thiserror::Error)]
@@ -277,7 +284,7 @@ impl VmmConfig {
         &self.socket
     }
 
-    /// File that receives the guest console output.
+    /// File that receives the guest console output, or [`STDOUT_CONSOLE`] for the helper's own stdout.
     pub fn console(&self) -> &Path {
         &self.console
     }

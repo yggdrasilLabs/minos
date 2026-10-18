@@ -24,3 +24,7 @@
 ; S05-ITER-3: "deny(1) file-read-metadata /private/tmp/<job>/o.sock"; preflight checks that the route path is a
 ; socket (lstat). Metadata of that one path only; the connect itself is the network-outbound rule above.
 (allow file-read-metadata (literal (param "SOCK")))
+; Phase 5 Wave 0 (05-CONTEXT D-14): the root image lives in the project's .minos/blobs, so preflight's canonicalize
+; stats each ancestor; without this rule preflight fails with "disks.root ... Operation not permitted"
+; (05-EVIDENCE.md W0-ROOT-DENY). Metadata only.
+(allow file-read-metadata (path-ancestors (param "ROOT_IMG")))

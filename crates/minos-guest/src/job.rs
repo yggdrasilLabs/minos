@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::Duration;
 
+use minos_core::chunk::{ChunkToken, TOKEN_BYTES};
 use serde::Deserialize;
 
 use crate::{MAX_JOB_BYTES, PROTOCOL_VERSION};
@@ -234,6 +235,8 @@ pub enum RawStep {
     ConsoleFlood(RawConsoleFlood),
     /// See [`Hang`].
     Hang(RawHang),
+    /// See [`ChunkStream`].
+    ChunkStream(RawChunkStream),
 }
 
 /// A validated step.
@@ -256,6 +259,8 @@ pub enum Step {
     ConsoleFlood(ConsoleFlood),
     /// Sleep forever; no later step runs and no status frame is sent.
     Hang(Hang),
+    /// Send a byte pattern to the host as authenticated chunks, one short vsock connection per chunk.
+    ChunkStream(ChunkStream),
 }
 
 impl TryFrom<RawStep> for Step {
@@ -271,6 +276,7 @@ impl TryFrom<RawStep> for Step {
             RawStep::Run(r) => Self::Run(Run::try_from(r)?),
             RawStep::ConsoleFlood(r) => Self::ConsoleFlood(ConsoleFlood::try_from(r)?),
             RawStep::Hang(RawHang {}) => Self::Hang(Hang),
+            RawStep::ChunkStream(r) => Self::ChunkStream(ChunkStream::try_from(r)?),
         })
     }
 }
@@ -584,6 +590,95 @@ pub struct RawHang {}
 /// The validated `hang` step. It has no fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Hang;
+
+/// `chunk_stream` as written.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawChunkStream {
+    bytes: u64,
+    token: String,
+}
+
+/// The validated `chunk_stream` step: 1 to 1073741824 pattern bytes, sent with the chunk codec in
+/// `minos_core::chunk` and authenticated by a 32-byte token written as exactly 64 lowercase hex characters.
+///
+/// This is a spike-only step (05-03-PLAN.md Wave 0): the token in the job is a fixed test value so the host test
+/// can reassemble the stream. A production token is never in a job; it is drawn per launch and reaches the guest
+/// only on the root-only input disk (05-04, 05-13). The step is removed with the spike protocol in 05-12.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ChunkStream {
+    bytes: u64,
+    token: [u8; TOKEN_BYTES],
+}
+
+impl ChunkStream {
+    /// How many pattern bytes to send.
+    #[must_use]
+    pub const fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// The token that authenticates every chunk.
+    #[must_use]
+    pub const fn token(&self) -> ChunkToken {
+        ChunkToken::from_bytes(self.token)
+    }
+}
+
+/// Never prints the token.
+impl std::fmt::Debug for ChunkStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChunkStream")
+            .field("bytes", &self.bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TryFrom<RawChunkStream> for ChunkStream {
+    type Error = InvalidField;
+
+    fn try_from(raw: RawChunkStream) -> Result<Self, Self::Error> {
+        if !(1..=MAX_VSOCK_STREAM_BYTES).contains(&raw.bytes) {
+            return Err(InvalidField::new(
+                "steps.chunk_stream.bytes",
+                "1 to 1073741824",
+            ));
+        }
+        let token = decode_token(&raw.token).ok_or(InvalidField::new(
+            "steps.chunk_stream.token",
+            "64 lowercase hex characters",
+        ))?;
+        Ok(Self {
+            bytes: raw.bytes,
+            token,
+        })
+    }
+}
+
+/// Decodes exactly 64 lowercase hex characters into 32 bytes; anything else is `None`.
+fn decode_token(text: &str) -> Option<[u8; TOKEN_BYTES]> {
+    let digits = text.as_bytes();
+    if digits.len() != TOKEN_BYTES.checked_mul(2)? {
+        return None;
+    }
+    let mut token = [0_u8; TOKEN_BYTES];
+    for (byte, pair) in token.iter_mut().zip(digits.chunks_exact(2)) {
+        let [high, low] = pair else {
+            return None;
+        };
+        *byte = (lower_hex_digit(*high)? << 4) | lower_hex_digit(*low)?;
+    }
+    Some(token)
+}
+
+/// The value of one lowercase hex digit.
+const fn lower_hex_digit(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        _ => None,
+    }
+}
 
 fn check_port(field: &'static str, port: u32) -> Result<u32, InvalidField> {
     if (1..=MAX_VSOCK_PORT).contains(&port) {

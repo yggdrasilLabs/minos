@@ -82,6 +82,8 @@ pub enum StepResult {
     Run(RunResult),
     /// Result of `console_flood`.
     ConsoleFlood(ConsoleFloodResult),
+    /// Result of `chunk_stream`.
+    ChunkStream(ChunkStreamResult),
 }
 
 /// What the guest saw at boot.
@@ -211,6 +213,21 @@ pub struct ConsoleFloodResult {
     /// Bytes written before the console failed.
     pub written: u64,
     /// The first error; `None` if every byte was written.
+    pub error: Option<String>,
+}
+
+/// Result of `chunk_stream`, the guest's own measurement of one chunked output stream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChunkStreamResult {
+    /// Bytes written across every chunk connection, headers included.
+    pub bytes_sent: u64,
+    /// Connections that carried a whole chunk.
+    pub connections: u32,
+    /// Connect attempts refused or reset and then retried, over the whole stream.
+    pub connect_retries: u32,
+    /// Guest monotonic time from building the payload to the last chunk's close, in milliseconds.
+    pub elapsed_ms: u64,
+    /// The first failure, which stopped the step; `None` if every chunk was sent.
     pub error: Option<String>,
 }
 
