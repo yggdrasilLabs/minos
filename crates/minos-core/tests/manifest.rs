@@ -9,8 +9,9 @@ use std::str::FromStr;
 use minos_core::id::{MetricName, ModelId, TreeId};
 use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::limits::{
-    DEFAULT_JUDGE_MS, EMPTY_GENERATIONS_DEFAULT, INFRA_FAILURES_DEFAULT, STALL_STEP_DEFAULT,
-    TOKEN_CAP_DEFAULT,
+    DEFAULT_JUDGE_MS, DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB, EMPTY_GENERATIONS_DEFAULT,
+    GUEST_RESERVE_MIB, INFRA_FAILURES_DEFAULT, MIN_CANDIDATE_ALLOWANCE_MIB, STALL_STEP_DEFAULT,
+    TOKEN_CAP_DEFAULT, candidate_allowance_mib,
 };
 use minos_core::manifest::{
     Arch, ChoiceList, CommandArgv, DurationMs, Eligibility, Goal, IneligibleReason, IntRange,
@@ -1566,4 +1567,144 @@ fn judge_version_ignores_the_label_and_min_improvement() -> TestResult {
         base
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Environment memory (05-CONTEXT D-05, D-06)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The `[environment] requires` line of the example, after which the memory keys are inserted.
+const REQUIRES: &str = "requires = { arch = \"arm64\" }\n";
+
+/// The example with `lines` added to `[environment]`.
+fn with_environment(lines: &str) -> Result<String, Box<dyn Error>> {
+    example(REQUIRES, &format!("{REQUIRES}{lines}"))
+}
+
+/// The example with `memory_mib` and `scratch_mib` set; `None` leaves a key absent.
+fn with_memory(memory: Option<u32>, scratch: Option<u32>) -> Result<String, Box<dyn Error>> {
+    let mut lines = String::new();
+    if let Some(memory) = memory {
+        lines.push_str(&format!("memory_mib = {memory}\n"));
+    }
+    if let Some(scratch) = scratch {
+        lines.push_str(&format!("scratch_mib = {scratch}\n"));
+    }
+    with_environment(&lines)
+}
+
+/// The three memory figures of a parsed manifest: memory, scratch, and the candidate allowance.
+fn memory_of(text: &str) -> Result<(u16, u16, u16), Box<dyn Error>> {
+    let manifest = Manifest::parse_toml(text)?;
+    let environment = manifest.environment();
+    Ok((
+        environment.memory_mib(),
+        environment.scratch_mib(),
+        environment.candidate_allowance_mib(),
+    ))
+}
+
+#[test]
+fn limits_budget_holds_for_defaults() {
+    assert_eq!(
+        candidate_allowance_mib(DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB),
+        Some(768)
+    );
+    assert_eq!(candidate_allowance_mib(1279, 768), None);
+    assert_eq!(candidate_allowance_mib(1280, 768), Some(256));
+    // A scratch cap larger than the memory itself never underflows.
+    assert_eq!(candidate_allowance_mib(128, 15_872), None);
+}
+
+#[test]
+fn manifest_environment_memory_defaults() -> TestResult {
+    assert_eq!(memory_of(CLAUDE_EXAMPLE)?, (2048, 1024, 768));
+    assert_eq!(
+        memory_of(CLAUDE_EXAMPLE)?,
+        (DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB, 768)
+    );
+    Ok(())
+}
+
+#[test]
+fn manifest_environment_memory_explicit() -> TestResult {
+    assert_eq!(
+        memory_of(&with_memory(Some(4096), Some(2048))?)?,
+        (4096, 2048, 1792)
+    );
+    Ok(())
+}
+
+#[test]
+fn manifest_environment_memory_bounds() -> TestResult {
+    assert_field(&with_memory(Some(127), None)?, "environment.memory_mib")?;
+    assert_field(&with_memory(Some(16_385), None)?, "environment.memory_mib")?;
+    assert_field(&with_memory(None, Some(63))?, "environment.scratch_mib")?;
+    assert_field(
+        &with_memory(Some(16_384), Some(15_873))?,
+        "environment.scratch_mib",
+    )?;
+    // 128 MiB passes the leaf check; with the default scratch cap it fails only the budget rule.
+    let error = rejected(&with_memory(Some(128), None)?)?;
+    assert!(
+        matches!(
+            error,
+            ManifestError::MemoryBudget {
+                memory_mib: 128,
+                scratch_mib: 1024
+            }
+        ),
+        "got: {error}"
+    );
+    assert_eq!(
+        memory_of(&with_memory(Some(16_384), None)?)?,
+        (16_384, 1024, 15_104)
+    );
+    assert_eq!(memory_of(&with_memory(None, Some(64))?)?, (2048, 64, 1728));
+    assert_eq!(
+        memory_of(&with_memory(Some(16_384), Some(15_872))?)?,
+        (16_384, 15_872, 256)
+    );
+    Ok(())
+}
+
+#[test]
+fn manifest_environment_memory_out_of_u16_is_a_type_error() -> TestResult {
+    let error = rejected(&with_memory(Some(70_000), None)?)?;
+    assert!(matches!(error, ManifestError::Toml(_)), "got: {error}");
+    Ok(())
+}
+
+#[test]
+fn manifest_environment_memory_budget() -> TestResult {
+    let error = rejected(&with_memory(Some(1279), Some(768))?)?;
+    assert!(
+        matches!(
+            error,
+            ManifestError::MemoryBudget {
+                memory_mib: 1279,
+                scratch_mib: 768
+            }
+        ),
+        "got: {error}"
+    );
+    let shown = error.to_string();
+    assert!(
+        shown.contains(&GUEST_RESERVE_MIB.to_string()),
+        "got: {shown}"
+    );
+    assert!(
+        shown.contains(&MIN_CANDIDATE_ALLOWANCE_MIB.to_string()),
+        "got: {shown}"
+    );
+    assert_eq!(
+        memory_of(&with_memory(Some(1280), Some(768))?)?,
+        (1280, 768, 256)
+    );
+    Ok(())
+}
+
+#[test]
+fn manifest_environment_memory_unknown_key_is_refused() -> TestResult {
+    assert_unknown_field(&with_environment("vcpus = 2\n")?)
 }
