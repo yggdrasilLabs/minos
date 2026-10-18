@@ -89,16 +89,25 @@ pub const fn log_path(stage: Stage) -> &'static str {
 /// [`LOG_TRUNCATED_LINE`], exactly [`LOG_CAP_BYTES`] long.
 #[must_use]
 pub fn cap_log(log: &[u8]) -> Cow<'_, [u8]> {
-    let _ = log;
-    Cow::Borrowed(&[])
+    if log.len() <= LOG_CAP_BYTES {
+        return Cow::Borrowed(log);
+    }
+    let keep = LOG_CAP_BYTES - LOG_TRUNCATED_LINE.len();
+    let mut capped = Vec::with_capacity(LOG_CAP_BYTES);
+    capped.extend(log.iter().take(keep));
+    capped.extend_from_slice(LOG_TRUNCATED_LINE);
+    Cow::Owned(capped)
 }
 
 /// The content budget left for `/out` once PID 1's own files are counted: the content cap, less the largest status
 /// and every log as it will be packed.
 #[must_use]
 pub fn out_budget(logs: &BTreeMap<Stage, Vec<u8>>) -> u64 {
-    let _ = logs;
-    0
+    let pid1 = logs
+        .values()
+        .map(|log| log.len().min(LOG_CAP_BYTES))
+        .fold(MAX_STATUS_BYTES, usize::saturating_add);
+    MAX_OUTPUT_CONTENT_BYTES.saturating_sub(u64::try_from(pid1).unwrap_or(u64::MAX))
 }
 
 /// Walks `out_dir` without following links and returns the output status and the files under `out/`, in path
@@ -106,16 +115,144 @@ pub fn out_budget(logs: &BTreeMap<Stage, Vec<u8>>) -> u64 {
 /// is empty.
 #[must_use]
 pub fn walk_out(out_dir: &Path, budget: u64) -> (OutputStatus, Vec<(RelPath, Vec<u8>)>) {
-    let _ = (out_dir, budget);
-    (OutputStatus::NotPacked, Vec::new())
+    let mut walk = Walk {
+        files: Vec::new(),
+        content: 0,
+        dirs: 0,
+        budget,
+    };
+    let walked = match fs::symlink_metadata(out_dir) {
+        Ok(meta) if meta.is_dir() => walk.dir(out_dir, OUT_PREFIX, 1),
+        _ => Err(Refused::Invalid),
+    };
+    let files = u32::try_from(walk.files.len());
+    match (walked, files) {
+        (Ok(()), Ok(files)) => {
+            walk.files.sort_by(|left, right| left.0.cmp(&right.0));
+            (
+                OutputStatus::Packed {
+                    files,
+                    content_bytes: walk.content,
+                },
+                walk.files,
+            )
+        }
+        (Err(Refused::Invalid), _) => (OutputStatus::Invalid, Vec::new()),
+        (Err(Refused::TooLarge), _) | (Ok(()), Err(_)) => (OutputStatus::TooLarge, Vec::new()),
+    }
+}
+
+/// Why the walk stopped.
+enum Refused {
+    /// Something other than a one-link regular file or a directory, or a name that is not a valid output path.
+    Invalid,
+    /// Over a cap.
+    TooLarge,
+}
+
+/// The state of one `/out` walk.
+struct Walk {
+    files: Vec<(RelPath, Vec<u8>)>,
+    content: u64,
+    dirs: usize,
+    budget: u64,
+}
+
+impl Walk {
+    /// Walks the directory `dir`, whose output path is `rel` and whose depth in components is `depth`.
+    fn dir(&mut self, dir: &Path, rel: &str, depth: usize) -> Result<(), Refused> {
+        self.dirs = self.dirs.saturating_add(1);
+        if self.dirs > MAX_OUT_DIRS {
+            return Err(Refused::TooLarge);
+        }
+        let mut names = Vec::new();
+        for entry in fs::read_dir(dir).map_err(|_| Refused::Invalid)? {
+            let entry = entry.map_err(|_| Refused::Invalid)?;
+            if names.len() >= MAX_OUT_FILES.saturating_add(MAX_OUT_DIRS) {
+                return Err(Refused::TooLarge);
+            }
+            names.push(entry.file_name());
+        }
+        names.sort();
+        for name in names {
+            let text = name.to_str().ok_or(Refused::Invalid)?;
+            let child_rel = format!("{rel}/{text}");
+            let child = dir.join(&name);
+            let meta = fs::symlink_metadata(&child).map_err(|_| Refused::Invalid)?;
+            if meta.is_dir() {
+                if depth >= MAX_PATH_DEPTH {
+                    return Err(Refused::Invalid);
+                }
+                self.dir(&child, &child_rel, depth.saturating_add(1))?;
+            } else if meta.is_file() {
+                self.file(&child, &child_rel, &meta)?;
+            } else {
+                return Err(Refused::Invalid);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads the regular file `path`, whose output path is `rel`, checked as `meta`.
+    fn file(&mut self, path: &Path, rel: &str, meta: &fs::Metadata) -> Result<(), Refused> {
+        let name = RelPath::try_from(rel).map_err(|_| Refused::Invalid)?;
+        if meta.nlink() != 1 || !fits_ustar(&name) {
+            return Err(Refused::Invalid);
+        }
+        if self.files.len() >= MAX_OUT_FILES || meta.len() > MAX_OUTPUT_ENTRY_BYTES {
+            return Err(Refused::TooLarge);
+        }
+        let file = open_nofollow(path).map_err(|_| Refused::Invalid)?;
+        let opened = file.metadata().map_err(|_| Refused::Invalid)?;
+        if !same_file(meta, &file).map_err(|_| Refused::Invalid)?
+            || !opened.is_file()
+            || opened.nlink() != 1
+        {
+            return Err(Refused::Invalid);
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_OUTPUT_ENTRY_BYTES.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|_| Refused::Invalid)?;
+        let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if size > MAX_OUTPUT_ENTRY_BYTES {
+            return Err(Refused::TooLarge);
+        }
+        self.content = self
+            .content
+            .checked_add(size)
+            .filter(|sum| *sum <= self.budget)
+            .ok_or(Refused::TooLarge)?;
+        self.files.push((name, bytes));
+        Ok(())
+    }
+}
+
+/// Whether `path` fits a ustar header's prefix and name fields.
+fn fits_ustar(path: &RelPath) -> bool {
+    Header::new_ustar().set_path(path.as_str()).is_ok()
 }
 
 /// The judge's scorecard, `out_dir/scorecard.json`: a one-link regular file of at most [`MAX_SCORECARD_BYTES`],
 /// opened without following a link. Anything else is `None`, which the host reports as a missing scorecard.
 #[must_use]
 pub fn read_scorecard(out_dir: &Path) -> Option<Vec<u8>> {
-    let _ = out_dir;
-    None
+    let path = out_dir.join(SCORECARD_FILE);
+    let cap = u64::try_from(MAX_SCORECARD_BYTES).ok()?;
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.nlink() != 1 || meta.len() > cap {
+        return None;
+    }
+    let file = open_nofollow(&path).ok()?;
+    let opened = file.metadata().ok()?;
+    if !same_file(&meta, &file).ok()? || !opened.is_file() || opened.nlink() != 1 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= MAX_SCORECARD_BYTES).then_some(bytes)
 }
 
 /// Why an output tar could not be built. Each is a PID 1 bug, never a candidate fault: the walk already refused
@@ -163,8 +300,100 @@ pub fn build_output(
     out: &[(RelPath, Vec<u8>)],
     scorecard: Option<&[u8]>,
 ) -> Result<Vec<u8>, PackError> {
-    let _ = (status, logs, out, scorecard);
-    Err(PackError::TooLarge)
+    let role = status.role();
+    let status_json = status.to_json().map_err(PackError::Status)?;
+    let out_dir = RelPath::try_from(OUT_PREFIX).map_err(|_| PackError::OutPath)?;
+
+    let mut entries: BTreeMap<RelPath, Cow<'_, [u8]>> = BTreeMap::new();
+    add(
+        &mut entries,
+        fixed_path(STATUS_PATH)?,
+        Cow::Owned(status_json),
+    )?;
+    for (stage, log) in logs {
+        if !role.stages().contains(stage) {
+            return Err(PackError::Stage);
+        }
+        add(&mut entries, fixed_path(log_path(*stage))?, cap_log(log))?;
+    }
+    match role {
+        GuestRole::Judge => {
+            if !out.is_empty() {
+                return Err(PackError::Role);
+            }
+            if let Some(card) = scorecard {
+                if card.len() > MAX_SCORECARD_BYTES {
+                    return Err(PackError::Scorecard);
+                }
+                add(&mut entries, fixed_path(SCORECARD)?, Cow::Borrowed(card))?;
+            }
+        }
+        GuestRole::Candidate => {
+            if scorecard.is_some() {
+                return Err(PackError::Role);
+            }
+            for (path, bytes) in out {
+                if !path.is_within(&out_dir) {
+                    return Err(PackError::OutPath);
+                }
+                add(&mut entries, path.clone(), Cow::Borrowed(bytes.as_slice()))?;
+            }
+        }
+    }
+
+    if entries.len() > MAX_OUTPUT_ENTRIES {
+        return Err(PackError::TooLarge);
+    }
+    let mut total: u64 = 0;
+    let mut builder = Builder::new(Vec::new());
+    for (path, bytes) in &entries {
+        let size = u64::try_from(bytes.len()).map_err(|_| PackError::TooLarge)?;
+        if size > MAX_OUTPUT_ENTRY_BYTES {
+            return Err(PackError::TooLarge);
+        }
+        total = total
+            .checked_add(size)
+            .filter(|sum| *sum <= MAX_OUTPUT_CONTENT_BYTES)
+            .ok_or(PackError::TooLarge)?;
+        builder
+            .append(&header(path, size)?, bytes.as_ref())
+            .map_err(PackError::Io)?;
+    }
+    builder.into_inner().map_err(PackError::Io)
+}
+
+/// Adds one entry, refusing a second entry with the same path.
+fn add<'a>(
+    entries: &mut BTreeMap<RelPath, Cow<'a, [u8]>>,
+    path: RelPath,
+    bytes: Cow<'a, [u8]>,
+) -> Result<(), PackError> {
+    if entries.insert(path, bytes).is_some() {
+        return Err(PackError::Duplicate);
+    }
+    Ok(())
+}
+
+/// One of PID 1's own output paths as a `RelPath`.
+fn fixed_path(path: &str) -> Result<RelPath, PackError> {
+    RelPath::try_from(path).map_err(|_| PackError::Header)
+}
+
+/// The header of one entry, built with exactly these calls in this order, as minos-source builds its own.
+fn header(path: &RelPath, size: u64) -> Result<Header, PackError> {
+    let mut header = Header::new_ustar();
+    header
+        .set_path(path.as_str())
+        .map_err(|_| PackError::Header)?;
+    header.set_size(size);
+    header.set_mode(0o644);
+    // Set explicitly: they write seven `0` digits and a NUL, where new_ustar leaves zero bytes.
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_entry_type(EntryType::Regular);
+    header.set_cksum();
+    Ok(header)
 }
 
 #[cfg(test)]
@@ -177,6 +406,9 @@ mod tests {
     use super::*;
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    /// A parsed tar: each entry's name and bytes.
+    type TarEntries = Vec<(String, Vec<u8>)>;
 
     fn write(root: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
         let path = root.join(name);
@@ -217,7 +449,7 @@ mod tests {
     }
 
     /// Every entry of `tar` as (name, bytes), checking each header is plain ustar with zeroed metadata.
-    fn read_tar(tar: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Box<dyn Error>> {
+    fn read_tar(tar: &[u8]) -> Result<TarEntries, Box<dyn Error>> {
         assert_eq!(tar.len() % 512, 0);
         let mut entries = Vec::new();
         let mut archive = tar::Archive::new(Cursor::new(tar));
