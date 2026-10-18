@@ -1,38 +1,37 @@
 //! Sandbox specs and sealed launch plans (SBX-01, SBX-03, SBX-06).
 //!
 //! A [`SandboxSpec`] is built from a validated [`JobRequest`] and carries IDs and digests only, never bytes: the
-//! launch key, the root image digest, the input disk blob, the stage budgets, the machine size, the architecture,
-//! and the hard maximum duration. Policy is enforced while the spec is built, and [`SandboxSpec::seal`] is the
-//! only constructor of a [`LaunchPlan`], the only thing a backend ever receives.
+//! launch key, the root image digest, the input disk's part IDs, the stage budgets, the machine size, the
+//! architecture, and the hard maximum duration. Policy is enforced while the spec is built, and
+//! [`SandboxSpec::seal`] is the only constructor of a [`LaunchPlan`], the only thing a backend ever receives.
 //!
 //! Only `SandboxSpec<Judge>` has a method that attaches judge data ([`SandboxSpec::secrets`]). No role has a
 //! method or a field that attaches a network device: no sandbox gets one (CLAUDE.md "Sandbox roles").
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use minos_core::id::{BlobId, ImageDigest};
+use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
 use minos_core::manifest::Arch;
 
 use crate::key::LaunchKey;
 use crate::role::{Judge, Role, RoleKind};
 
-// The machine and duration bounds below restate `crates/minos-vmm/src/config.rs` (`MAX_VCPUS`, `MIN_MEMORY_MIB`,
-// `MAX_MEMORY_MIB`, `MAX_DURATION_MS`), and `BOOT_ALLOWANCE_MS` restates `HOST_DEADLINE_GRACE` in
-// `crates/minos-backend-krun/src/supervise.rs`. A plan that passes here must also pass the launcher's own config
-// validation, but minos-vmm links no internal crate, so the bounds cannot share a constant. Instead each side
-// pins the same literals in a test: `launcher_bounds_match_minos_vmm` in `crates/minos-sandbox/tests/spec.rs`,
+// The machine bounds are defined once, in `minos-core::limits` (05-CONTEXT D-06), because `Manifest::try_from`
+// range-checks `[environment] memory_mib` against them and core depends on no internal crate; this crate
+// re-exports them so existing paths keep working. They are restated only in `crates/minos-vmm/src/config.rs`
+// (`MAX_VCPUS`, `MIN_MEMORY_MIB`, `MAX_MEMORY_MIB`, `MAX_DURATION_MS`), because minos-vmm links no internal crate,
+// and `BOOT_ALLOWANCE_MS` below restates `HOST_DEADLINE_GRACE` in `crates/minos-backend-krun/src/supervise.rs`. A
+// plan that passes here must also pass the launcher's own config validation, so each side pins the same literals
+// in a test: `launcher_bounds_match_minos_vmm` in `crates/minos-sandbox/tests/spec.rs`,
 // `launcher_bounds_are_pinned_for_minos_sandbox` in `crates/minos-vmm/src/config.rs`, and
 // `host_deadline_grace_is_pinned_for_minos_sandbox` in `crates/minos-backend-krun/src/supervise.rs`. Changing one
 // side fails the gate until the other side and both tests change with it (review WR-02).
 
-/// Most vCPUs a sandbox may have: the launcher refuses more.
-pub const MAX_VCPUS: u8 = 8;
-/// Least guest memory a sandbox may have, in MiB: the guest kernel and `/init` need at least this much.
-pub const MIN_MEMORY_MIB: u16 = 128;
-/// Most guest memory a sandbox may have, in MiB: the launcher refuses more.
-pub const MAX_MEMORY_MIB: u16 = 16_384;
+pub use minos_core::limits::{MAX_MEMORY_MIB, MAX_VCPUS, MIN_MEMORY_MIB};
+
 /// The launcher's ceiling on a VM's hard maximum duration, in milliseconds (one hour). A plan over it is refused,
 /// never clamped, because a clamped plan would time out a job its budgets allow.
 pub const MAX_LAUNCH_MS: u64 = 3_600_000;
@@ -73,6 +72,21 @@ pub enum SpecError {
         /// The computed hard maximum, in milliseconds.
         ms: u64,
     },
+    /// The input disk's parts are shaped for another role than the spec's: a runner bug, because a Candidate
+    /// input names a base tree and a Judge input names a candidate's output (05-CONTEXT D-15).
+    #[error(
+        "the input disk is shaped for the {role:?} role, not this spec's; build the role's own input"
+    )]
+    InputRole {
+        /// The role the input is shaped for.
+        role: RoleKind,
+    },
+    /// A Candidate input's base tree or diff blob differs from the job's: a runner bug, because the disk would
+    /// carry a different experiment than the launch key names.
+    #[error(
+        "the input disk's base tree or diff differs from the job's; build the input from the job"
+    )]
+    InputMismatch,
 }
 
 /// The size of a sandbox VM: 1 to [`MAX_VCPUS`] vCPUs and [`MIN_MEMORY_MIB`] to [`MAX_MEMORY_MIB`] MiB.
@@ -112,26 +126,107 @@ impl Machine {
     }
 }
 
-/// The per-job read-only input disk, by blob ID.
+/// The per-job read-only input disk, as the IDs of its parts (05-CONTEXT D-15).
 ///
-/// Provenance rule, owned by the runner: the blob is the disk the host wrote from the base tarball, the canonical
-/// diff, and the job JSON, without unpacking or applying anything. It is publicly constructible in Phase 4;
-/// Phase 5, which owns the input-disk format, may restrict this constructor. `preflight` refuses a Judge plan
-/// whose input disk and judge data are the same blob.
+/// The input disk is not itself stored as a blob. The backend fetches each part through
+/// `BlobSource` under caps and writes the per-job disk itself, without unpacking or applying
+/// anything. Every input names the guest job blob, the runner's `GuestJob` JSON. A Candidate input adds the base
+/// [`TreeId`] (the source tarball) and, unless the job is the baseline, the canonical diff blob; a Judge input adds
+/// the candidate's output blob. Judge data is never a part of an input: it stays [`JudgeData`], attachable only by
+/// [`SandboxSpec::secrets`] on a `SandboxSpec<Judge>`. [`SandboxSpec::new`] refuses an input of the other role's
+/// shape, and a Candidate input whose base or diff disagrees with the job; `preflight` refuses a Judge plan whose
+/// judge data is any of its parts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InputDisk(BlobId);
+pub struct InputDisk {
+    job: BlobId,
+    parts: Parts,
+}
+
+/// The role-specific parts of an [`InputDisk`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Parts {
+    /// A Candidate's base tree and, unless it is the baseline, its canonical diff.
+    Candidate { base: TreeId, diff: Option<BlobId> },
+    /// A Judge's view of the candidate: the candidate's output.
+    Judge { candidate_out: BlobId },
+}
 
 impl InputDisk {
-    /// The input disk stored as `blob`.
+    /// A Candidate input: the guest job blob `job`, the base tree `base`, and the canonical diff blob `diff`, which
+    /// is `None` exactly for the baseline.
     #[must_use]
-    pub const fn new(blob: BlobId) -> Self {
-        Self(blob)
+    pub const fn candidate(job: BlobId, base: TreeId, diff: Option<BlobId>) -> Self {
+        Self {
+            job,
+            parts: Parts::Candidate { base, diff },
+        }
     }
 
-    /// The blob ID of the disk.
+    /// A Judge input: the guest job blob `job` and the candidate's output blob `candidate_out`.
     #[must_use]
-    pub const fn blob(&self) -> &BlobId {
-        &self.0
+    pub const fn judge(job: BlobId, candidate_out: BlobId) -> Self {
+        Self {
+            job,
+            parts: Parts::Judge { candidate_out },
+        }
+    }
+
+    /// The guest job blob: the runner's `GuestJob` JSON.
+    #[must_use]
+    pub const fn job(&self) -> BlobId {
+        self.job
+    }
+
+    /// The base tree, on a Candidate input only.
+    #[must_use]
+    pub const fn base(&self) -> Option<TreeId> {
+        match self.parts {
+            Parts::Candidate { base, .. } => Some(base),
+            Parts::Judge { .. } => None,
+        }
+    }
+
+    /// The canonical diff blob, on a Candidate input that is not the baseline only.
+    #[must_use]
+    pub const fn diff(&self) -> Option<BlobId> {
+        match self.parts {
+            Parts::Candidate { diff, .. } => diff,
+            Parts::Judge { .. } => None,
+        }
+    }
+
+    /// The candidate's output blob, on a Judge input only.
+    #[must_use]
+    pub const fn candidate_out(&self) -> Option<BlobId> {
+        match self.parts {
+            Parts::Candidate { .. } => None,
+            Parts::Judge { candidate_out } => Some(candidate_out),
+        }
+    }
+
+    /// The role this input is shaped for.
+    #[must_use]
+    pub const fn role(&self) -> RoleKind {
+        match self.parts {
+            Parts::Candidate { .. } => RoleKind::Candidate,
+            Parts::Judge { .. } => RoleKind::Judge,
+        }
+    }
+
+    /// Every blob the input names, the base tree as [`TreeId::to_blob_id`]: what the backend fetches.
+    #[must_use]
+    pub fn blobs(&self) -> BTreeSet<BlobId> {
+        let mut blobs = BTreeSet::from([self.job]);
+        match self.parts {
+            Parts::Candidate { base, diff } => {
+                blobs.insert(base.to_blob_id());
+                blobs.extend(diff);
+            }
+            Parts::Judge { candidate_out } => {
+                blobs.insert(candidate_out);
+            }
+        }
+        blobs
     }
 }
 
@@ -139,7 +234,7 @@ impl InputDisk {
 ///
 /// Provenance rule, owned by the runner: the blob is judge data the user pushed, and it is never given to a
 /// Candidate; the type system enforces that half, because only `SandboxSpec<Judge>` has
-/// [`SandboxSpec::secrets`]. `preflight` refuses a Judge plan whose judge data and input disk are the same blob.
+/// [`SandboxSpec::secrets`]. `preflight` refuses a Judge plan whose judge data is any part of its input disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JudgeData(BlobId);
 
@@ -184,8 +279,10 @@ impl<R: Role> SandboxSpec<R> {
     ///
     /// # Errors
     ///
-    /// [`SpecError::DurationOverCeiling`] when that duration exceeds [`MAX_LAUNCH_MS`]. It is refused, never
-    /// clamped.
+    /// [`SpecError::InputRole`] when `input` is shaped for the other role, [`SpecError::InputMismatch`] when a
+    /// Candidate input's base or diff differs from the job's, and [`SpecError::DurationOverCeiling`] when the
+    /// duration exceeds [`MAX_LAUNCH_MS`]. The input is checked first, and an over-ceiling duration is refused,
+    /// never clamped.
     pub fn new(
         job: &JobRequest,
         root: ImageDigest,
@@ -193,6 +290,14 @@ impl<R: Role> SandboxSpec<R> {
         machine: Machine,
         arch: Arch,
     ) -> Result<Self, SpecError> {
+        if input.role() != R::KIND {
+            return Err(SpecError::InputRole { role: input.role() });
+        }
+        if R::KIND == RoleKind::Candidate
+            && (input.base() != Some(job.base()) || input.diff() != job.diff())
+        {
+            return Err(SpecError::InputMismatch);
+        }
         let budget = job.budget();
         let ms = match R::KIND {
             RoleKind::Candidate => budget

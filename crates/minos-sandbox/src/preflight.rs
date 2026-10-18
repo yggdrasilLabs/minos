@@ -65,9 +65,9 @@ pub enum Refusal {
     /// A Judge plan carries no judge data. The runner must attach the pushed judge data with `secrets`.
     #[error("the judge plan carries no judge data; push judge data and attach it")]
     JudgeDataMissing,
-    /// A Judge plan's judge data is the same blob as its input disk: a runner bug that would hand judge data in as
-    /// candidate input. Fix the runner.
-    #[error("the judge plan's judge data is its input disk")]
+    /// A Judge plan's judge data is one of its input disk's parts: a runner bug that would hand judge data in as
+    /// ordinary input. Fix the runner.
+    #[error("the judge plan's judge data is part of its input disk; fix the runner")]
     JudgeDataIsInput,
     /// The VMM helper lacks the hypervisor entitlement. Re-sign it as `minos host setup` describes.
     #[error("the VMM helper lacks the hypervisor entitlement; re-sign it")]
@@ -179,7 +179,7 @@ impl<R: Role> Cleared<R> {
 ///
 /// The only constructor of [`Cleared`]. Refuses when the architecture differs, when the plan's vCPUs, memory, or
 /// duration exceed the host's, when the host isolates below [`Isolation::Hardware`], when a Judge plan has no
-/// judge data or its judge data is its input disk, and for every host refusal.
+/// judge data or its judge data is any part of its input disk, and for every host refusal.
 ///
 /// # Errors
 ///
@@ -221,7 +221,7 @@ pub fn preflight<R: Role>(
             None => {
                 refusals.insert(Refusal::JudgeDataMissing);
             }
-            Some(data) if data.blob() == plan.input().blob() => {
+            Some(data) if plan.input().blobs().contains(data.blob()) => {
                 refusals.insert(Refusal::JudgeDataIsInput);
             }
             Some(_) => {}

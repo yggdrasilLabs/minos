@@ -46,21 +46,12 @@ use minos_core::path::RelPath;
 use crate::role::Role;
 use crate::untrusted::{GuestOutput, Untrusted};
 
-/// Most content bytes, summed over every file of one output: 16 MiB. Logs are capped by the guest, a scorecard is
-/// 4 KiB, and a diff 1 MiB, so this leaves room for artifacts. It is 4096 vsock chunks of 4 KiB, whose throughput
-/// is unmeasured (02-SPIKE-EVIDENCE.md S03-ANSWER).
-pub const MAX_OUTPUT_CONTENT_BYTES: u64 = 16 * 1024 * 1024;
-
-/// Most bytes in one file: 8 MiB, so one artifact cannot take the whole budget.
-pub const MAX_OUTPUT_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
-
-/// Most files in one output: bounds the per-entry work and the size of the map.
-pub const MAX_OUTPUT_ENTRIES: usize = 1024;
-
-/// Most bytes in one output stream: the content cap, plus one header block and up to 511 padding bytes per entry,
-/// plus the two end blocks. A stream any longer cannot be a valid output.
-pub const MAX_OUTPUT_STREAM_BYTES: u64 =
-    MAX_OUTPUT_CONTENT_BYTES + (MAX_OUTPUT_ENTRIES as u64 + 2) * 1024;
+// The output caps are defined in `minos-core::limits`, so the guest's output packer and this reader share one
+// definition: 16 MiB of content in total, 8 MiB per file, 1024 files, and a stream at most the content cap plus
+// one header block and up to 511 padding bytes per entry plus the two end blocks.
+pub use minos_core::limits::{
+    MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES, MAX_OUTPUT_ENTRY_BYTES, MAX_OUTPUT_STREAM_BYTES,
+};
 
 /// Most diff texts one output may carry: one proposal batch (`limits::BATCH_MAX`).
 pub const MAX_DIFF_TEXTS: usize = minos_core::limits::BATCH_MAX as usize;
