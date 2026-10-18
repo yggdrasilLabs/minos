@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 5
+current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
 stopped_at: Phase 5 context gathered
-last_updated: "2026-10-18T18:07:17.938Z"
+last_updated: "2026-10-18T18:44:14.520Z"
 last_activity: 2026-10-18
-last_activity_desc: "Completed quick task 261018-eiw: Fix Phase 4 review warnings WR-01, WR-02, WR-03"
+last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
-  total_plans: 38
-  completed_plans: 38
+  total_plans: 60
+  completed_plans: 39
   percent: 50
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 04 — store-source-snapshot-and-sandbox-types
+**Current focus:** Phase 05 — Guest, krun Backend, and Environment Build
 
 ## Current Position
 
-Phase: 5 — Guest, krun Backend, and Environment Build
-Plan: Not started
+Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
+Plan: 2 of 22
 Status: Ready to execute
-Last activity: 2026-10-18 — Completed quick task 261018-eiw: Fix Phase 4 review warnings WR-01, WR-02, WR-03
+Last activity: 2026-10-18 — Phase 05 execution started
 
 Progress: [██████████] 100% (29 of 29 plans)
 
@@ -96,6 +96,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 04 P07 | 7min | 3 tasks | 6 files |
 | Phase 04 P08 | 6min | 3 tasks | 30 files |
 | Phase 04 P09 | 6min | 3 tasks | 3 files |
+| Phase 05 P01 | 7min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-08: the compile-fail suite holds the twelve planned cases; Untrusted::new from outside and Finished::new with a wrong-role Cleared are follow-up candidates
 - [Phase 04]: 04-09: GATE-06 not checked off (cross-cutting); the phase verifier reruns cargo clean as its last command after verification passes
 - [Phase 04]: 04-09: CLAUDE.md gains the minos-store section and three open questions (id_* denylist breadth, backend blob access, streaming blob put); other known limitations live in 04-VALIDATION.md
+- [Phase 05]: VM machine bounds and the D-05 memory budget live in minos-core::limits; minos-sandbox uses them from 05-06 (core depends on no internal crate)
+- [Phase 05]: Defaults memory_mib 2048 / scratch_mib 1024 are a recorded assumption (05-RESEARCH A6); Phase 8 sample project measures RLIMIT_AS at the 768 MiB default allowance
 
 ### Pending Todos
 
@@ -237,6 +240,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T16:04:38.557Z
+Last session: 2026-10-18T18:43:55.719Z
 Stopped at: Phase 5 context gathered
 Resume file: .planning/phases/05-guest-krun-backend-and-environment-build/05-CONTEXT.md
