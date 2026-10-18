@@ -254,7 +254,7 @@ Plans:
   4. `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` written in by the trusted packer (*superseded wording, 2026-10-09: "a root image and an initramfs"; 02-CONTEXT.md D-18*) and writes its digests to `minos.lock`, from a build context with no judge data and no secrets. `minos host doctor` runs the launch preflight (entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, active confinement layers) and prints every refusal with an explanation and a fix. The active confinement layers are recorded in `BackendInfo`, with no silent fallback (KRUN-06, KRUN-07, KRUN-09, CLI-02, CLI-03)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 20 plans
+**Plans**: 22 plans
 Plans:
 **Wave 1**
 
@@ -263,20 +263,22 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 05-03-PLAN.md — Wave 0 VM proofs (chunks at 16 MiB with the S03-ANSWER measurement, console on `/dev/fd/1` under Seatbelt, store-path root image) recorded in 05-EVIDENCE.md with mechanism selections and fallbacks
-- [ ] 05-04-PLAN.md — Core guest wire: `GuestJob`, `GuestStatus`, input disk v2 codec with the token (D-15)
+- [ ] 05-03-PLAN.md — Wave 0 VM proofs (chunks at 16 MiB with the S03-ANSWER measurement, console on `/dev/fd/1` under Seatbelt, store-path root image) recorded in 05-EVIDENCE.md with mechanism selections and fallbacks (conditional stop: `chunks: stop` ends at a user checkpoint)
+- [ ] 05-04-PLAN.md — Core guest wire: `GuestJob`, `GuestStatus`, input disk v2 codec with the token (D-15); each role's inputs bound to half the guest reserve
 - [ ] 05-05-PLAN.md — Store `put_reader` streaming put and `FileStore::verified_path` (D-09, D-14)
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 05-06-PLAN.md — Sandbox: `BlobSource` (D-13), `InputDisk` as part IDs (D-15), Capabilities layers and kernel, Seatbelt-mandatory preflight (D-03), refusals, `Finished` elapsed and console, `take_status`
+- [ ] 05-06-PLAN.md — Sandbox: `BlobSource` (D-13), `InputDisk` as part IDs (D-15), Capabilities layers and kernel, Seatbelt-mandatory preflight (D-03), refusals
 - [ ] 05-07-PLAN.md — minos-vmm v2: no scratch disk or initramfs (D-05), selected console, explicit rng, capped logger, own rlimits, new clippy bans, golden config; KRUN-04 amendment recorded
 - [ ] 05-08-PLAN.md — Guest `JobSource`/`OutputSink` (D-07), `ChunkSink`, fixed uid 64000 and stage limits, trampoline argv (D-08)
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 05-09-PLAN.md — Backend serializer v2 bound to the golden config, embedded Seatbelt profile, root image mount points and static-ELF check; spike and wave0 tests retired with mapping
+- [ ] 05-09-PLAN.md — Embedded Seatbelt profile and argv, root image mount points, static-ELF check; CLAUDE.md for the profile and the VM tests
 - [ ] 05-10-PLAN.md — Guest unpack and strict apply, link-free output packer, `run_job` orchestration
+- [ ] 05-21-PLAN.md — Spike and wave0 tests retired with mapping; backend serializer v2 bound to the golden config; supervisor scratch and initramfs paths trimmed
+- [ ] 05-22-PLAN.md — Sandbox: `Finished` elapsed and console, `Ended::ChunkProtocol`, `take_status`
 
 **Wave 5** *(blocked on Wave 4)*
 
@@ -285,7 +287,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5)*
 
-- [ ] 05-13-PLAN.md — Backend input disk writer with `/dev/urandom` token and plan binding; poll-based chunk receiver
+- [ ] 05-13-PLAN.md — Backend input disk writer with `/dev/urandom` token and plan binding; poll-based chunk receiver; initramfs writer removed
 - [ ] 05-14-PLAN.md — CLI skeleton, D-04 locator, `FileBlobSource`, `minos host doctor` (CLI-03) and `minos host setup` (D-02)
 
 **Wave 7** *(blocked on Wave 6)*
@@ -300,7 +302,7 @@ Plans:
 
 **Wave 9** *(blocked on 05-17)*
 
-- [ ] 05-19-PLAN.md — Permanent exit tests `exit_egress`, `exit_env`, `exit_kill9`, plus `exit_forge`
+- [ ] 05-19-PLAN.md — Permanent exit tests `exit_egress`, `exit_env`, `exit_kill9`, plus `exit_forge` (checkpoint: the user confirms the one `KRUN_BOOT_START_NS` cmdline allowance first)
 
 **Wave 10** *(blocked on all prior plans)*
 

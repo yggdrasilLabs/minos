@@ -31,6 +31,7 @@ created: 2026-10-18
 - **After every plan wave:** Run the six gate commands, then the VM suite after build, sign, and guest build
 - **Before `/gsd-verify-work`:** Full suite must be green; the three permanent exit tests (`exit_egress`, `exit_env`, `exit_kill9`) pass and are recorded in `05-EVIDENCE.md`; the C-02 grep prints nothing; then `cargo clean` (GATE-06)
 - **Max feedback latency:** 180 seconds
+- **VM-suite tasks (05-17, 05-19, 05-20):** each task's `<verify>` runs one named ignored test after build and sign (`cargo test -p minos-backend-krun --test <vm|exit> -- --ignored --exact <test> --nocapture --test-threads=1`), which stays inside the latency target; the full VM and exit suites take minutes and are phase-end gates, listed in each plan's acceptance criteria and run in full by 05-20's final gate
 
 ---
 
@@ -49,7 +50,7 @@ created: 2026-10-18
 - [ ] `crates/minos-backend-krun/tests/wave0_chunks.rs` — chunked output throughput and backlog at the 16 MiB cap (S03-ANSWER measurement)
 - [ ] `crates/minos-backend-krun/tests/wave0_console_pipe.rs` — `/dev/fd/1` console under the deny-default Seatbelt profile, exact cap
 - [ ] `crates/minos-backend-krun/tests/wave0_store_root.rs` — root image read from a store path with ancestor metadata under Seatbelt
-- [ ] A probe fixture binary (second `[[bin]]` in `minos-guest`, never packed into user images) that the exit tests run as the candidate: egress connects, env and cmdline dump, forged chunk, write outside scratch
+- [ ] A probe fixture binary (second `[[bin]]` in `minos-guest`, never packed into user images) that the exit tests run as the candidate: egress connects, env and cmdline dump, forged chunk, write outside scratch. **Relocated:** it lands in 05-12 (wave 5), not in 05-03, because the Phase 2 spike guest that 05-03's proofs run has no candidate stage to run it in (05-03 objective); no test needs it before 05-17
 - [ ] `05-EVIDENCE.md` skeleton
 - [ ] Framework install: none; existing infrastructure covers everything else
 
