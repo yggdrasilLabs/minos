@@ -204,54 +204,77 @@ mod tests {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
-    use super::{Boot, Console, Disks, Kernel, LaunchConfig, Machine, Vsock};
+    use sha2::{Digest, Sha256};
+
+    use super::{Disks, Kernel, LAUNCH_CONFIG_VERSION, LaunchConfig, Machine, Vsock};
 
     type TestResult = Result<(), Box<dyn Error>>;
 
-    /// 02-05-PLAN.md Exact texts E-1, byte-identical to 02-03's E-1 and to `E1` in minos-vmm's config tests.
-    const E1: &str = r#"{"v":1,"kernel":{"krunfw":"/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"boot":"root_disk","disks":{"root":"/private/tmp/mns00000000/root.img","input":"/private/tmp/mns00000000/input.img","scratch":{"path":"/private/tmp/mns00000000/scratch.img","cap_bytes":67108864}},"vsock":{"port":1024,"socket":"/private/tmp/mns00000000/o.sock"},"console":{"path":"/private/tmp/mns00000000/console.log","cap_bytes":1048576},"max_duration_ms":60000,"machine":{"vcpus":1,"memory_mib":256}}"#;
+    /// minos-vmm's golden v2 launch config. Both sides are bound to these bytes (02-CONTEXT.md D-04): minos-vmm's
+    /// `config_v2_golden` parses them, and [`launch_config_matches_golden`] serializes them.
+    const GOLDEN: &str = include_str!("../../minos-vmm/golden/config-v2.json");
 
-    /// 02-05-PLAN.md Exact texts E-1b: the `boot` value in initramfs mode.
-    const E1B: &str = r#"{"initramfs":{"path":"/private/tmp/mns00000000/initramfs.cpio","sha256":"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"}}"#;
+    /// The same pin as `GOLDEN_SHA256` in minos-vmm's config tests, from
+    /// `shasum -a 256 crates/minos-vmm/golden/config-v2.json`. Change both together.
+    const GOLDEN_SHA256: &str = "0b1a1208888bbb6da4d77d0947a24993b31210aef4f788fb366549ee445f4a7b";
 
-    fn e1_config(boot: Boot) -> LaunchConfig {
+    /// The config whose serialization is the golden file.
+    fn golden_config() -> LaunchConfig {
         LaunchConfig::new(
             Kernel::new(
                 "/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib",
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217",
             ),
-            boot,
             Disks::new(
-                "/private/tmp/mns00000000/root.img",
-                "/private/tmp/mns00000000/input.img",
-                "/private/tmp/mns00000000/scratch.img",
-                67_108_864,
+                "/Users/example/project/.minos/blobs/sha256/ab/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",
+                "/private/tmp/minos-501/mnsAAAAAAAA/input.img",
             ),
-            Vsock::new(1024, "/private/tmp/mns00000000/o.sock"),
-            Console::new("/private/tmp/mns00000000/console.log", 1_048_576),
-            60_000,
-            Machine::new(1, 256),
+            Vsock::new(1024, "/private/tmp/minos-501/mnsAAAAAAAA/o.sock"),
+            600_000,
+            Machine::new(2, 2048),
         )
     }
 
     #[test]
-    fn launch_config_root_disk_serializes_to_e1() -> TestResult {
-        assert_eq!(e1_config(Boot::RootDisk).to_json()?, E1);
+    fn launch_config_matches_golden() -> TestResult {
+        let digest: [u8; 32] = Sha256::digest(GOLDEN.as_bytes()).into();
+        assert_eq!(base16ct::lower::encode_string(&digest), GOLDEN_SHA256);
+        let json = golden_config().to_json()?;
+        assert_eq!(json, GOLDEN);
+        let digest: [u8; 32] = Sha256::digest(json.as_bytes()).into();
+        assert_eq!(base16ct::lower::encode_string(&digest), GOLDEN_SHA256);
         Ok(())
     }
 
     #[test]
-    fn launch_config_initramfs_serializes_to_e1_with_e1b() -> TestResult {
-        let expected = E1.replacen(r#""boot":"root_disk""#, &format!(r#""boot":{E1B}"#), 1);
-        assert_ne!(
-            expected, E1,
-            "the E-1 boot value must be present to substitute"
-        );
-        let boot = Boot::initramfs(
-            "/private/tmp/mns00000000/initramfs.cpio",
-            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
-        );
-        assert_eq!(e1_config(boot).to_json()?, expected);
+    fn launch_config_field_order() -> TestResult {
+        assert_eq!(LAUNCH_CONFIG_VERSION, 2);
+        let json = golden_config().to_json()?;
+        assert!(json.starts_with(r#"{"v":2,"kernel":{"krunfw":"#));
+        let keys = [
+            r#""v":"#,
+            r#""kernel":"#,
+            r#""disks":{"root":"#,
+            r#","input":"#,
+            r#""vsock":{"port":"#,
+            r#""max_duration_ms":"#,
+            r#""machine":{"vcpus":"#,
+        ];
+        let mut last = 0;
+        for key in keys {
+            let at = json
+                .find(key)
+                .ok_or_else(|| format!("{key} is missing"))?;
+            assert!(at >= last, "{key} is out of order");
+            last = at;
+        }
+        // The console is the helper's stdout pipe (05-EVIDENCE.md Mechanism selections), and v2 has no boot mode,
+        // scratch disk, or initramfs (05-CONTEXT D-05).
+        for gone in [r#""console""#, r#""boot""#, r#""scratch""#, r#""initramfs""#] {
+            assert!(!json.contains(gone), "{gone} must not be written");
+        }
+        assert_eq!(json.lines().count(), 1);
+        assert!(json.ends_with("}\n"));
         Ok(())
     }
 
@@ -260,10 +283,8 @@ mod tests {
         let path = OsStr::from_bytes(b"/private/tmp/\xff/root.img");
         let config = LaunchConfig::new(
             Kernel::new("/k", "00"),
-            Boot::RootDisk,
-            Disks::new(path, "/i", "/s", 1),
+            Disks::new(path, "/i"),
             Vsock::new(1024, "/o.sock"),
-            Console::new("/c", 1),
             1,
             Machine::new(1, 1),
         );
