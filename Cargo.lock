@@ -797,6 +797,8 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "tar",
+ "tempfile",
  "thiserror",
  "vsock",
 ]

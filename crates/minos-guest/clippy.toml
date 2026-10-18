@@ -1,0 +1,13 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every method path below is proven to fire once (05-10-SUMMARY.md "Clippy bans fire").
+# A mistyped path only warns, so re-prove any entry you change.
+disallowed-methods = [
+  { path = "tar::Archive::unpack",  reason = "the guest writes each entry itself: RelPath names, regular files only, create_new, capped" },
+  { path = "tar::Entry::unpack",    reason = "the guest writes each entry itself: RelPath names, regular files only, create_new, capped" },
+  { path = "tar::Entry::unpack_in", reason = "the guest writes each entry itself: RelPath names, regular files only, create_new, capped" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeSet" },
+]

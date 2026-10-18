@@ -61,7 +61,7 @@ batch = 4
 "#;
 
 /// A single-hunk modify of the manifest's one writable file.
-const DIFF: &str = "\
+pub(crate) const DIFF: &str = "\
 diff --git a/src/parse.rs b/src/parse.rs
 --- a/src/parse.rs
 +++ b/src/parse.rs
@@ -126,4 +126,56 @@ pub(crate) fn baseline_job() -> Result<GuestJob, Box<dyn Error>> {
 /// The judge job for the candidate.
 pub(crate) fn judge_job() -> Result<GuestJob, Box<dyn Error>> {
     Ok(GuestJob::judge(&manifest()?, &candidate_request()?))
+}
+
+/// The base file [`DIFF`] applies to.
+pub(crate) const PARSE_RS: &[u8] = b"fn parse() {\n    old();\n}\n";
+
+/// [`PARSE_RS`] after [`DIFF`].
+pub(crate) const PARSE_RS_AFTER: &[u8] = b"fn parse() {\n    new();\n}\n";
+
+/// A request for the candidate that applies `diff_text` to the base tarball `base_tar`.
+fn request_for(base_tar: &[u8], diff_text: &str) -> Result<JobRequest, Box<dyn Error>> {
+    let diff = Diff::parse(diff_text, manifest()?.writable(), &Limits::standard())?;
+    let blob = BlobId::of(diff.as_bytes());
+    let experiment = Experiment::candidate(TreeId::of(base_tar), diff);
+    Ok(JobRequest::candidate(
+        &experiment,
+        blob,
+        judge()?,
+        0,
+        budget()?,
+    )?)
+}
+
+/// A candidate job that applies `diff_text` to the base tarball `base_tar`.
+pub(crate) fn candidate_job_for(base_tar: &[u8], diff_text: &str) -> Result<GuestJob, Box<dyn Error>> {
+    Ok(GuestJob::candidate(
+        &manifest()?,
+        &request_for(base_tar, diff_text)?,
+    ))
+}
+
+/// The baseline job of the base tarball `base_tar`.
+pub(crate) fn baseline_job_for(base_tar: &[u8]) -> Result<GuestJob, Box<dyn Error>> {
+    let request = JobRequest::baseline(TreeId::of(base_tar), judge()?, 0, budget()?)?;
+    Ok(GuestJob::candidate(&manifest()?, &request))
+}
+
+/// A ustar tarball of `files`, each `(name, mode, bytes)`, with headers built as minos-source builds them.
+pub(crate) fn tar_of(files: &[(&str, u32, &[u8])]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut builder = tar::Builder::new(Vec::new());
+    for (name, mode, bytes) in files {
+        let mut header = tar::Header::new_ustar();
+        header.set_path(name)?;
+        header.set_size(u64::try_from(bytes.len())?);
+        header.set_mode(*mode);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_cksum();
+        builder.append(&header, *bytes)?;
+    }
+    Ok(builder.into_inner()?)
 }

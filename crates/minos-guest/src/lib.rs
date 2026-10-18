@@ -15,11 +15,13 @@
 //! until plan 05-12 replaces that path.
 
 pub mod job;
+pub mod nofollow;
 pub mod pattern;
 pub mod report;
 pub mod sink;
 pub mod source;
 pub mod stage;
+pub mod workspace;
 
 #[cfg(test)]
 pub(crate) mod test_fixture;
