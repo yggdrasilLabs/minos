@@ -26,6 +26,7 @@ minos-loop.workspace = true
 # clap: the builder API is the decided surface (01-UAT.md test 6); a clap derive cannot pass the gate (F-01).
 clap.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tar.workspace = true

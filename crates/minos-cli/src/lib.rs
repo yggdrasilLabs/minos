@@ -3,10 +3,16 @@
 //!
 //! - [`locate`] finds the `minos-vmm` helper, the static `minos-guest`, and libkrunfw at fixed locations, with no
 //!   configuration file and no environment variable (05-CONTEXT D-04).
+//! - [`builder`] is the container builder seam, [`builder::RootfsBuilder`], and its Docker buildx implementation,
+//!   run as an argv array with a cleared environment (05-RESEARCH Pattern 10).
+//! - [`env_build`] is the `minos env build` pipeline: snapshot, build, pack with `/init`, store, and `minos.lock`
+//!   (KRUN-09, CLI-02; 05-CONTEXT D-09 to D-12).
 //! - [`blob_source`] implements [`minos_sandbox::BlobSource`] over the project's [`minos_store::FileStore`]: the
 //!   CLI is the only crate where the store and the backend meet (05-CONTEXT D-13, D-14).
 //!
 //! The commands themselves, and `anyhow`, live in the binary (rules/err-anyhow-app).
 
 pub mod blob_source;
+pub mod builder;
+pub mod env_build;
 pub mod locate;

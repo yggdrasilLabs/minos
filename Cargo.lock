@@ -769,6 +769,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "thiserror",
  "toml",
  "tracing",
  "tracing-subscriber",
