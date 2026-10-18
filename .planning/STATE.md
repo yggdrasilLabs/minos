@@ -6,14 +6,14 @@ current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
 stopped_at: Phase 5 context gathered
-last_updated: "2026-10-18T18:56:11.275Z"
+last_updated: "2026-10-18T19:14:18.757Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 40
+  completed_plans: 41
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 3 of 22
+Plan: 4 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -98,6 +98,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 04 P09 | 6min | 3 tasks | 3 files |
 | Phase 05 P01 | 7min | 2 tasks | 6 files |
 | Phase 05 P02 | 9min | 2 tasks | 6 files |
+| Phase 05 P04 | 12 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -214,6 +215,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-02: A valid chunk stream has one form (DATA full except the last, never empty); deviations are ChunkFault::Length
 - [Phase 05]: 05-02: ChunkFault::NoEnd is is_incomplete(); every other chunk fault is Reason::ChunkProtocol, never retried
 - [Phase 05]: 05-02: minos.lock serializes sorted by (backend, arch); base_images must be strictly ascending on parse
+- [Phase 05]: 05-04: the input disk has one canonical layout (ascending kinds, next 512-byte boundary, zero padding); the reader validates the whole table before reading any section byte
+- [Phase 05]: 05-04: GuestJob's judge-version getter is judge_version() because GuestJob::judge is the judge-job constructor
+- [Phase 05]: 05-04: every role's input-disk section caps sum to at most MAX_GUEST_INPUT_BYTES (half the guest reserve) by const assertion; judge data is capped at 96 MiB
 
 ### Pending Todos
 
@@ -244,6 +248,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T18:55:57.138Z
+Last session: 2026-10-18T19:14:04.505Z
 Stopped at: Phase 5 context gathered
 Resume file: .planning/phases/05-guest-krun-backend-and-environment-build/05-CONTEXT.md
