@@ -1,6 +1,7 @@
 (version 1)
 (deny default)
-; Seatbelt profile for one minos-vmm helper (SPIKE-05). Every path arrives as a canonical -D parameter.
+; Seatbelt profile for one minos-vmm helper (SPIKE-05). Every job path arrives as a canonical -D parameter; only
+; fixed system paths and the console literal /dev/fd/1 are written in the profile.
 ; Allowances below the starting set are added only from logged denials, each with a comment.
 (allow process-exec (literal (param "VMM")))
 (allow file-read* (literal "/") (subpath "/usr/lib") (subpath "/System/Library")
@@ -8,8 +9,13 @@
 (allow file-read* (literal (param "VMM")) (literal (param "CONFIG"))
                   (literal (param "KRUNFW")) (literal (param "KRUNFW_LINK"))
                   (literal (param "ROOT_IMG")) (literal (param "INPUT_IMG")))
-(allow file-read* file-write* (literal (param "SCRATCH_IMG")) (literal (param "CONSOLE_LOG")))
-; AF_UNIX connect to the vsock route socket is a network-outbound operation (02-RESEARCH.md Pitfall 4).
+; Phase 5 (05-EVIDENCE.md W0-CONSOLE, Mechanism selections "console: pipe"): the guest console is the helper's
+; stdout pipe, which msb_krun opens by the fixed path /dev/fd/1. Seatbelt matches that literal; a /dev/stdout rule
+; does not (05-RESEARCH Pattern 7, A3). Write only. The scratch disk is gone: scratch is a tmpfs in guest memory
+; (05-CONTEXT D-05), so the helper writes no host file.
+(allow file-write* (literal "/dev/fd/1"))
+; AF_UNIX connect to the vsock route socket is an outbound network operation in SBPL (02-RESEARCH.md Pitfall 4).
+; This is the only network allowance in the profile.
 (allow network-outbound (literal (param "SOCK")))
 (allow sysctl-read (sysctl-name "hw.pagesize") (sysctl-name "hw.ncpu") (sysctl-name "hw.memsize")
                    (sysctl-name-prefix "hw.optional.arm.") (sysctl-name-prefix "kern.proc.pid."))
@@ -22,7 +28,7 @@
 (allow file-read-metadata (path-ancestors (param "KRUNFW")) (path-ancestors (param "KRUNFW_LINK"))
                           (path-ancestors (param "CONFIG")))
 ; S05-ITER-3: "deny(1) file-read-metadata /private/tmp/<job>/o.sock"; preflight checks that the route path is a
-; socket (lstat). Metadata of that one path only; the connect itself is the network-outbound rule above.
+; socket (lstat). Metadata of that one path only; the connect itself is the outbound network rule above.
 (allow file-read-metadata (literal (param "SOCK")))
 ; Phase 5 Wave 0 (05-CONTEXT D-14): the root image lives in the project's .minos/blobs, so preflight's canonicalize
 ; stats each ancestor; without this rule preflight fails with "disks.root ... Operation not permitted"

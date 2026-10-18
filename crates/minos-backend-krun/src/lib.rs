@@ -7,4 +7,5 @@ pub mod initramfs;
 pub mod input_disk;
 pub mod launch_config;
 pub mod rootfs;
+pub mod seatbelt;
 pub mod supervise;
