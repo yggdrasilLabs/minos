@@ -15,8 +15,9 @@
 //! should stream file data to a temporary file instead.
 //!
 //! The image gets the mount points the guest needs on a read-only root (`/dev`, `/proc`, `/sys`,
-//! `/tmp`, `/mnt`), and `/init` is written last from the trusted guest bytes, replacing anything the
-//! tar put there.
+//! `/tmp`, `/mnt`, `/out`, `/scratch`), and `/init` is written last from the trusted guest bytes,
+//! replacing anything the tar put there. [`check_guest_elf`] refuses a guest that is not a static
+//! `aarch64` ELF; its callers run it before packing.
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -343,7 +344,7 @@ pub enum ElfError {
     /// The ELF data encoding is not little-endian.
     #[error("guest binary is not little-endian")]
     NotLittleEndian,
-    /// The ELF machine is not AArch64 (183).
+    /// The ELF machine is not `aarch64` (`EM_AARCH64`, 183).
     #[error("guest binary is not built for AArch64")]
     NotAarch64,
     /// A `PT_INTERP` program header names a dynamic loader, which the user's root image would supply.
@@ -354,24 +355,104 @@ pub enum ElfError {
     Truncated,
 }
 
-/// Checks that `bytes` is a binary the guest kernel can run as `/init` without anything from the root image.
+/// Checks that `bytes` is a binary the guest kernel can run as `/init` without anything from the root image: a
+/// 64-bit little-endian `aarch64` ELF with no `PT_INTERP` program header.
+///
+/// Next to a host `target/debug/minos` sits the macOS build of `minos-guest`, a Mach-O file. Packed as `/init` it
+/// never boots: the helper exits 0 with no status frame, which the host classifies as `Crashed` and blames on the
+/// candidate (05-RESEARCH Pitfall 8). A dynamically linked guest would load its libc from the user's image. The
+/// packer does not call this; `minos env build`, the host probes, and the VM harness run it before packing a guest
+/// or recording its digest.
 ///
 /// # Errors
 ///
-/// An [`ElfError`] naming the first property that fails.
+/// An [`ElfError`] naming the first property that fails, checked in the order magic, class, data encoding,
+/// machine, then each program header.
 pub fn check_guest_elf(bytes: &[u8]) -> Result<(), ElfError> {
-    let _ = bytes;
+    const MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
+    const ELFCLASS64: u8 = 2;
+    const ELFDATA2LSB: u8 = 1;
+    const EM_AARCH64: u16 = 183;
+    const PT_INTERP: u32 = 3;
+    const EHDR_LEN: usize = 64;
+    const PHDR_LEN: u16 = 56;
+    const PN_XNUM: u16 = 0xffff;
+
+    if bytes.get(..4).ok_or(ElfError::Truncated)? != MAGIC {
+        return Err(ElfError::NotElf);
+    }
+    let header = bytes.get(..EHDR_LEN).ok_or(ElfError::Truncated)?;
+    if header.get(4) != Some(&ELFCLASS64) {
+        return Err(ElfError::Not64Bit);
+    }
+    if header.get(5) != Some(&ELFDATA2LSB) {
+        return Err(ElfError::NotLittleEndian);
+    }
+    if le_u16(header, 18)? != EM_AARCH64 {
+        return Err(ElfError::NotAarch64);
+    }
+    let phoff = le_u64(header, 32)?;
+    let phentsize = le_u16(header, 54)?;
+    let phnum = le_u16(header, 56)?;
+    if phnum == 0 {
+        return Ok(());
+    }
+    // PN_XNUM moves the real count into section header 0; this check does not follow it, so it refuses.
+    if phnum == PN_XNUM || phentsize < PHDR_LEN {
+        return Err(ElfError::Truncated);
+    }
+    let start = usize::try_from(phoff).map_err(|_| ElfError::Truncated)?;
+    let entry = usize::from(phentsize);
+    for index in 0..usize::from(phnum) {
+        let at = index
+            .checked_mul(entry)
+            .and_then(|offset| offset.checked_add(start))
+            .ok_or(ElfError::Truncated)?;
+        let end = at.checked_add(entry).ok_or(ElfError::Truncated)?;
+        let program_header = bytes.get(at..end).ok_or(ElfError::Truncated)?;
+        if le_u32(program_header, 0)? == PT_INTERP {
+            return Err(ElfError::Dynamic);
+        }
+    }
     Ok(())
+}
+
+/// The `N` bytes of `bytes` at `at`, or [`ElfError::Truncated`].
+fn field<const N: usize>(bytes: &[u8], at: usize) -> Result<[u8; N], ElfError> {
+    let end = at.checked_add(N).ok_or(ElfError::Truncated)?;
+    let slice = bytes.get(at..end).ok_or(ElfError::Truncated)?;
+    <[u8; N]>::try_from(slice).map_err(|_| ElfError::Truncated)
+}
+
+/// A little-endian `u16` at `at`.
+fn le_u16(bytes: &[u8], at: usize) -> Result<u16, ElfError> {
+    field(bytes, at).map(u16::from_le_bytes)
+}
+
+/// A little-endian `u32` at `at`.
+fn le_u32(bytes: &[u8], at: usize) -> Result<u32, ElfError> {
+    field(bytes, at).map(u32::from_le_bytes)
+}
+
+/// A little-endian `u64` at `at`.
+fn le_u64(bytes: &[u8], at: usize) -> Result<u64, ElfError> {
+    field(bytes, at).map(u64::from_le_bytes)
 }
 
 /// The name `/init` has in the tree (paths are kept without a leading slash).
 const INIT_NAME: &str = "init";
 
 /// Mount points the guest needs on a read-only root, with the mode each gets when the tar lacks it.
-const MOUNT_POINTS: [(&str, u16); 5] = [
+///
+/// `/scratch` is where PID 1 mounts the size-capped scratch tmpfs (05-CONTEXT D-05), and `/out` is where it
+/// bind-mounts the stage's output directory from scratch (D-08). The packer creates every one, so a Dockerfile
+/// cannot leave a mount point out.
+const MOUNT_POINTS: [(&str, u16); 7] = [
     ("dev", 0o755),
     ("mnt", 0o755),
+    ("out", 0o755),
     ("proc", 0o755),
+    ("scratch", 0o755),
     ("sys", 0o755),
     ("tmp", 0o1777),
 ];
@@ -1198,7 +1279,7 @@ mod tests {
         let fs = read_back(&image)?;
         assert_eq!(file_bytes(&fs, "/init")?, INIT);
         assert_eq!(node(&fs, "/init")?.header, NodeHeader::new(0o755, 0, 0, 0));
-        for mount_point in ["/dev", "/proc", "/sys", "/mnt"] {
+        for mount_point in ["/dev", "/proc", "/sys", "/mnt", "/out", "/scratch"] {
             let found = node(&fs, mount_point)?;
             assert!(matches!(found.inner, InnerNode::Dir(_)), "{mount_point}");
             assert_eq!(found.header.permissions, 0o755, "{mount_point}");
@@ -1215,8 +1296,8 @@ mod tests {
         assert!(!report.init_overridden());
         assert_eq!(report.files(), 3);
         assert_eq!(report.symlinks(), 1);
-        // etc, usr, usr/bin (implicit), and the five mount points
-        assert_eq!(report.dirs(), 8);
+        // etc, usr, usr/bin (implicit), and the seven mount points
+        assert_eq!(report.dirs(), 10);
         Ok(())
     }
 
@@ -1568,7 +1649,7 @@ mod tests {
         let image = minimal_root_image(b"minos-golden-init")?;
         assert_eq!(
             image.report().image_sha256(),
-            "8e4f12d45a06ef4bf20fe0f37e74ca06e2b7b108a8c4325ed2c7f6a6600e4e98"
+            "97928bf08a816a881769335b02c05162a599eb20601667279e6d5d5cab77360d"
         );
         Ok(())
     }
@@ -1595,7 +1676,7 @@ mod tests {
     /// ELF64 program header length.
     const PHDR_LEN: u16 = 56;
 
-    /// A 64-bit little-endian AArch64 ELF header followed by one 56-byte program header per entry of
+    /// A 64-bit little-endian `aarch64` ELF header followed by one 56-byte program header per entry of
     /// `phdr_types`, with `class`, `data`, and `machine` set as given.
     fn elf(
         class: u8,
