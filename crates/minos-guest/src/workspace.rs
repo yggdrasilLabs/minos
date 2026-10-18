@@ -7,14 +7,22 @@
 //! search. A hunk that does not apply is [`ApplyOutcome::Failed`], a candidate fault the runner records as
 //! `Rejected`; it is never repaired.
 
-use std::fs;
-use std::io;
-use std::path::Path;
+use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
+use std::io::{self, Cursor, ErrorKind, Read, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 
-use minos_core::diff::DiffError;
+use minos_core::diff::apply::{Tree, apply};
+use minos_core::diff::{Diff, DiffError};
 use minos_core::guest::{GuestJob, MAX_JUDGE_DATA_BYTES};
-use minos_core::limits::{MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES, MAX_OUTPUT_ENTRY_BYTES};
+use minos_core::id::ExperimentId;
+use minos_core::limits::{
+    Limits, MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES, MAX_OUTPUT_ENTRY_BYTES,
+};
+use minos_core::outcome::Reason;
 use minos_core::path::RelPath;
+
+use crate::nofollow::{NOFOLLOW_FLAGS, open_nofollow, open_nofollow_rewrite, same_file};
 
 /// Bytes in a MiB.
 const MIB: u64 = 1_048_576;
@@ -144,8 +152,95 @@ pub enum UnpackError {
 ///
 /// An [`UnpackError`] for the first refused entry or failed write.
 pub fn unpack_tar(tar: &[u8], dest: &Path, caps: &UnpackCaps) -> Result<UnpackReport, UnpackError> {
-    let _ = (tar, dest, caps);
-    Err(UnpackError::Malformed)
+    let mut files: u64 = 0;
+    let mut total: u64 = 0;
+    let mut archive = tar::Archive::new(Cursor::new(tar));
+    // Raw mode: every header is an entry and no extension is applied, so the only size used is the ustar
+    // header's own, and an extension header is refused by its typeflag (as minos-sandbox's output reader does).
+    let entries = archive
+        .entries()
+        .map_err(|_| UnpackError::Malformed)?
+        .raw(true);
+    for entry in entries {
+        let mut entry = entry.map_err(|_| UnpackError::Malformed)?;
+        if files >= caps.entries {
+            return Err(UnpackError::TooManyEntries);
+        }
+        let header = entry.header();
+        if header.as_ustar().is_none() {
+            return Err(UnpackError::NotUstar);
+        }
+        if !matches!(header.as_old().linkflag, [b'0']) {
+            return Err(UnpackError::EntryType);
+        }
+        let path = std::str::from_utf8(&header.path_bytes())
+            .ok()
+            .and_then(|name| RelPath::try_from(name).ok())
+            .ok_or(UnpackError::Path)?;
+        let mode = header.mode().map_err(|_| UnpackError::Malformed)?;
+        if mode != 0o644 && mode != 0o755 {
+            return Err(UnpackError::Mode { mode });
+        }
+        let size = entry.size();
+        if size > caps.file_bytes {
+            return Err(UnpackError::FileTooLarge { bytes: size });
+        }
+        total = total
+            .checked_add(size)
+            .filter(|sum| *sum <= caps.total_bytes)
+            .ok_or(UnpackError::TotalTooLarge)?;
+
+        let target = create_parents(dest, &path)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .custom_flags(NOFOLLOW_FLAGS)
+            .open(&target)
+            .map_err(|error| match error.kind() {
+                ErrorKind::AlreadyExists => UnpackError::Collision,
+                _ => UnpackError::Io(error),
+            })?;
+        let copied = io::copy(&mut (&mut entry).take(size), &mut file).map_err(UnpackError::Io)?;
+        if copied != size {
+            return Err(UnpackError::Truncated);
+        }
+        // The create mode passes through the umask; set it exactly.
+        file.set_permissions(Permissions::from_mode(mode))
+            .map_err(UnpackError::Io)?;
+        files = files.saturating_add(1);
+    }
+    Ok(UnpackReport {
+        files,
+        bytes: total,
+    })
+}
+
+/// Creates the parent directories of `path` under `dest`, mode 0755, and returns the file's full path. An
+/// existing ancestor must be a directory, checked without following a link.
+fn create_parents(dest: &Path, path: &RelPath) -> Result<PathBuf, UnpackError> {
+    let mut current = dest.to_path_buf();
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        current.push(component);
+        if components.peek().is_none() {
+            break;
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(UnpackError::Collision),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                DirBuilder::new()
+                    .mode(0o755)
+                    .create(&current)
+                    .map_err(UnpackError::Io)?;
+                fs::set_permissions(&current, Permissions::from_mode(0o755))
+                    .map_err(UnpackError::Io)?;
+            }
+            Err(error) => return Err(UnpackError::Io(error)),
+        }
+    }
+    Ok(current)
 }
 
 /// How applying the diff went.
@@ -201,8 +296,69 @@ pub fn apply_diff(
     diff_text: &str,
     job: &GuestJob,
 ) -> Result<ApplyOutcome, ApplySetupError> {
-    let _ = (src, diff_text, job);
-    Err(ApplySetupError::Reason)
+    let base = job.base().ok_or(ApplySetupError::Role)?;
+    let diff = Diff::parse(diff_text, job.writable(), &Limits::standard())
+        .map_err(ApplySetupError::Parse)?;
+    if ExperimentId::of(&base, &diff) != job.exp() {
+        return Err(ApplySetupError::Identity);
+    }
+
+    // Only the touched files: the applier needs nothing else, and a missing one is left out so the applier
+    // reports it as hunk 0.
+    let mut tree = Tree::new();
+    for path in diff.paths() {
+        if let Some(bytes) = read_touched(&full_path(src, path))? {
+            tree.insert(path.clone(), bytes);
+        }
+    }
+    let applied = match apply(&tree, &diff) {
+        Ok(applied) => applied,
+        Err(error) => {
+            return match error.reason() {
+                Reason::ApplyFailed { path, hunk } => Ok(ApplyOutcome::Failed { path, hunk }),
+                _ => Err(ApplySetupError::Reason),
+            };
+        }
+    };
+    for path in diff.paths() {
+        let bytes = applied.get(path).ok_or(ApplySetupError::Reason)?;
+        let mut file = open_nofollow_rewrite(&full_path(src, path)).map_err(ApplySetupError::Io)?;
+        file.write_all(bytes).map_err(ApplySetupError::Io)?;
+    }
+    Ok(ApplyOutcome::Applied)
+}
+
+/// `path` under `src`, one component at a time.
+fn full_path(src: &Path, path: &RelPath) -> PathBuf {
+    let mut full = src.to_path_buf();
+    full.extend(path.components());
+    full
+}
+
+/// The bytes of one touched file, or `None` when it does not exist. Anything but a one-link regular file, checked
+/// without following a link and again on the opened file, is [`ApplySetupError::NotRegular`].
+fn read_touched(path: &Path) -> Result<Option<Vec<u8>>, ApplySetupError> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(ApplySetupError::Io(error)),
+    };
+    if !meta.is_file() || meta.nlink() != 1 {
+        return Err(ApplySetupError::NotRegular);
+    }
+    let file: File = open_nofollow(path).map_err(ApplySetupError::Io)?;
+    if !same_file(&meta, &file).map_err(ApplySetupError::Io)? {
+        return Err(ApplySetupError::NotRegular);
+    }
+    let cap = UnpackCaps::BASE.file_bytes;
+    let mut bytes = Vec::new();
+    file.take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(ApplySetupError::Io)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(ApplySetupError::TooLarge);
+    }
+    Ok(Some(bytes))
 }
 
 #[cfg(test)]
@@ -312,10 +468,22 @@ mod tests {
                 .err()
                 .ok_or_else(|| "accepted".into())
         };
-        assert!(matches!(kind(b"l", EntryType::Symlink, 0o644)?, UnpackError::EntryType));
-        assert!(matches!(kind(b"l", EntryType::Link, 0o644)?, UnpackError::EntryType));
-        assert!(matches!(kind(b"a/../b", EntryType::Regular, 0o644)?, UnpackError::Path));
-        assert!(matches!(kind(b"/abs", EntryType::Regular, 0o644)?, UnpackError::Path));
+        assert!(matches!(
+            kind(b"l", EntryType::Symlink, 0o644)?,
+            UnpackError::EntryType
+        ));
+        assert!(matches!(
+            kind(b"l", EntryType::Link, 0o644)?,
+            UnpackError::EntryType
+        ));
+        assert!(matches!(
+            kind(b"a/../b", EntryType::Regular, 0o644)?,
+            UnpackError::Path
+        ));
+        assert!(matches!(
+            kind(b"/abs", EntryType::Regular, 0o644)?,
+            UnpackError::Path
+        ));
         assert!(matches!(
             kind(b"s", EntryType::Regular, 0o4755)?,
             UnpackError::Mode { mode: 0o4755 }
@@ -378,8 +546,14 @@ mod tests {
     fn unpack_caps_are_core_caps() {
         assert_eq!(UnpackCaps::JUDGE.file_bytes(), MAX_JUDGE_DATA_BYTES);
         assert_eq!(UnpackCaps::JUDGE.total_bytes(), MAX_JUDGE_DATA_BYTES);
-        assert_eq!(UnpackCaps::CANDIDATE_OUT.file_bytes(), MAX_OUTPUT_ENTRY_BYTES);
-        assert_eq!(UnpackCaps::CANDIDATE_OUT.total_bytes(), MAX_OUTPUT_CONTENT_BYTES);
+        assert_eq!(
+            UnpackCaps::CANDIDATE_OUT.file_bytes(),
+            MAX_OUTPUT_ENTRY_BYTES
+        );
+        assert_eq!(
+            UnpackCaps::CANDIDATE_OUT.total_bytes(),
+            MAX_OUTPUT_CONTENT_BYTES
+        );
         assert_eq!(UnpackCaps::BASE.entries(), 10_000);
         assert_eq!(UnpackCaps::BASE.file_bytes(), 16 * MIB);
         assert_eq!(UnpackCaps::BASE.total_bytes(), 64 * MIB);
@@ -462,7 +636,10 @@ mod tests {
         let job = candidate_job_for(&tar, DIFF)?;
         let dir = tempfile::tempdir()?;
         unpack_tar(&tar, dir.path(), &UnpackCaps::BASE)?;
-        std::os::unix::fs::symlink(dir.path().join("src/real.rs"), dir.path().join("src/parse.rs"))?;
+        std::os::unix::fs::symlink(
+            dir.path().join("src/real.rs"),
+            dir.path().join("src/parse.rs"),
+        )?;
         assert!(matches!(
             apply_diff(dir.path(), DIFF, &job),
             Err(ApplySetupError::NotRegular)

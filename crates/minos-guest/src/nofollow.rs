@@ -102,7 +102,9 @@ mod tests {
     fn nofollow_rewrite_never_creates() -> TestResult {
         let dir = tempfile::tempdir()?;
         let missing = dir.path().join("missing");
-        let error = open_nofollow_rewrite(&missing).err().ok_or("opened a missing file")?;
+        let error = open_nofollow_rewrite(&missing)
+            .err()
+            .ok_or("opened a missing file")?;
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert!(!missing.exists());
         Ok(())

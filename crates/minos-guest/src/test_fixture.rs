@@ -149,7 +149,10 @@ fn request_for(base_tar: &[u8], diff_text: &str) -> Result<JobRequest, Box<dyn E
 }
 
 /// A candidate job that applies `diff_text` to the base tarball `base_tar`.
-pub(crate) fn candidate_job_for(base_tar: &[u8], diff_text: &str) -> Result<GuestJob, Box<dyn Error>> {
+pub(crate) fn candidate_job_for(
+    base_tar: &[u8],
+    diff_text: &str,
+) -> Result<GuestJob, Box<dyn Error>> {
     Ok(GuestJob::candidate(
         &manifest()?,
         &request_for(base_tar, diff_text)?,
