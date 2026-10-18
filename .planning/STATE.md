@@ -6,14 +6,14 @@ current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
 stopped_at: Completed 05-14-PLAN.md
-last_updated: "2026-10-18T21:59:37.017Z"
+last_updated: "2026-10-18T22:22:43.439Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 54
+  completed_plans: 55
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 17 of 22
+Plan: 18 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -112,6 +112,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P12 | 12min | 3 tasks | 9 files |
 | Phase 05 P13 | 7min | 3 tasks | 5 files |
 | Phase 05 P14 | 14min | 2 tasks | 9 files |
+| Phase 05 P15 | 18min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -258,6 +259,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-13: fetch_parts re-checks each BlobSource blob's length and SHA-256 and binds the job to the plan (role, LaunchKey, base, diff, budgets, memory) before fetching other parts
 - [Phase 05]: 05-14: minos-cli gains a minos_cli library (locate, FileBlobSource); host.rs stays a binary module so anyhow never leaves the binary
 - [Phase 05]: 05-14: host doctor probes a missing binary at the last path the locator checked, so one run shows every refusal; a job root that cannot be opened fails doctor
+- [Phase 05]: 05-15: macOS kill(-pgid) on a zombie-only process group returns EPERM (proven 5/5); EPERM is accepted only with waitid/ps proof, and the supervisor sweeps the group under waitid(WNOWAIT) before reaping
+- [Phase 05]: 05-15: VMM_STDIO_CAP is 131072 (twice minos-vmm's log budget) so the 124 marker after a full log is never cut off; stderr control characters become U+FFFD so nothing strips into a marker
+- [Phase 05]: 05-15: KrunBackend::launch refuses a host whose own probes failed or that lacks Seatbelt, whatever capabilities the plan was cleared against
 
 ### Pending Todos
 
@@ -288,6 +292,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T21:59:37.013Z
+Last session: 2026-10-18T22:22:30.461Z
 Stopped at: Completed 05-14-PLAN.md
 Resume file: None

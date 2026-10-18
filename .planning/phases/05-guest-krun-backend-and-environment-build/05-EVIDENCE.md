@@ -1050,3 +1050,34 @@ regular file, the first stderr write passes `RLIMIT_FSIZE` 0 and the helper dies
 writing nothing. That fails closed (the supervisor counts a signal it did not send as an infrastructure failure), but
 it loses the diagnostic, so the supervisor (05-15) must give the helper stderr on a pipe, as 05-RESEARCH Pattern 7
 already requires; anyone running the helper by hand must pipe its stderr too.
+
+## 05-15 EPERM on a zombie-only process group
+
+Requirement: KRUN-05 (05-RESEARCH Pitfall 11; 04 deferred-items, the flaky process-group test), T-05-15-06
+
+Step 1, before any change: the Phase 2 test `supervise_run_kills_the_whole_process_group_at_the_host_deadline` was run
+20 times by itself (`target/debug/deps/minos_backend_krun-31cf7fc38794285f supervise_run_kills_the_whole_process_group_at_the_host_deadline --exact ...`).
+Result: 20 passed, 0 failed; no `EPERM`.
+
+Step 2, after the rewrite: 100 runs of the new `supervise` tests failed 3 times, every time in `drop_kills_group` with
+`probing the process group: Operation not permitted (os error 1)`. In that test the leader was SIGKILLed by
+`Helper::drop` but not yet reaped (the console reader still held the shared process), so the group's only member was
+the test's own zombie child.
+
+Step 3, the proof: a throwaway test spawned `/bin/sleep 30` in its own group, probed it with `kill(-pgid, 0)`, sent
+SIGKILL, slept 200 ms without reaping, probed again, listed the group with `/bin/ps -ax -o pid=,pgid=,stat=`, then
+reaped and probed a third time. Five rounds, macOS 27.0.1 (26A434):
+
+```text
+TEMPDIAG round=0 pid=83357 alive=Ok(()) zombie=Err(Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }) members=["83357 83357 Z   "] reaped=Err(Os { code: 3, kind: Uncategorized, message: "No such process" })
+TEMPDIAG round=1 pid=83359 alive=Ok(()) zombie=Err(Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }) members=["83359 83359 Z   "] reaped=Err(Os { code: 3, kind: Uncategorized, message: "No such process" })
+(rounds 2 to 4 identical in shape)
+```
+
+Answer: on macOS, `kill(-pgid, sig)` on a group whose only remaining members are zombies returns `EPERM`, not `ESRCH`,
+every time; it returns `ESRCH` once the zombie is reaped. The throwaway test was removed. Changes: `Helper::drop` now
+reaps the helper right after the kill; `Reaper::kill` accepts `EPERM` only when `waitid(WNOWAIT)` shows the unreaped
+helper has exited (so it is one of the zombies); the tests' group probe treats `EPERM` as "keep waiting" only when
+`ps` lists no live member of the group, and still ends only on `ESRCH`. After the change, 200 runs of the `supervise`
+tests and 50 runs of the whole crate's unit tests passed with no failure. The sweep (05-11) is unchanged: it still
+reports `EPERM` as Unverified.

@@ -81,7 +81,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **KRUN-04**: Inputs are a shared read-only root disk and a per-job read-only input disk, both raw images; the candidate's scratch is size-capped space in guest memory; no host directory is ever shared; scratch is deleted unread. *Superseded wording (2026-10-18): "a size-capped scratch disk, all raw images". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [ ] **KRUN-05**: The supervisor enforces the hard maximum duration by killing the helper's process group; a parent-death watchdog and pidfile sweep ensure `kill -9` on `minos run` leaves no VM running
 - [ ] **KRUN-06**: Preflight checks the entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, and active confinement layers, and refuses with a reason for each failure
-- [ ] **KRUN-07**: The run records which confinement layers were active (dedicated user, Seatbelt, rlimits) in `BackendInfo`, and never falls back silently
+- [x] **KRUN-07**: The run records which confinement layers were active (dedicated user, Seatbelt, rlimits) in `BackendInfo`, and never falls back silently
 - [ ] **KRUN-08**: After every build, the helper is signed with the entitlement by the one `codesign` argv documented in CLAUDE.md Commands (no `xtask`, script, `build.rs`, or cargo alias), and the signature is verified with `codesign -d --entitlements -`; `minos host setup` may run the same argv from Rust. *Superseded wording (2026-10-09): "An `xtask` signs the helper with the entitlement after build". Phase 1 D-01 and D-07 rule out an `xtask` (02-CONTEXT.md D-11).*
 - [ ] **KRUN-09**: `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` = `minos-guest` written in by the trusted packer, records digests in `minos.lock`, and the build context contains no judge data and no secrets. *Superseded wording (2026-10-09): "a root image and an initramfs". Stock libkrunfw 5.6.2 cannot unpack an initramfs (02-CONTEXT.md D-18).*
 - [ ] **KRUN-10**: Two sequential experiments on the same host both record outcomes and share no build output
@@ -245,7 +245,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | KRUN-04 | Phase 5 | Complete |
 | KRUN-05 | Phase 5 | Pending |
 | KRUN-06 | Phase 5 | Pending |
-| KRUN-07 | Phase 5 | Pending |
+| KRUN-07 | Phase 5 | Complete |
 | KRUN-08 | Phase 5 | Pending |
 | KRUN-09 | Phase 5 | Pending |
 | KRUN-10 | Phase 5 | Pending |
