@@ -875,6 +875,7 @@ version = "0.1.0"
 dependencies = [
  "base16ct",
  "msb_krun",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

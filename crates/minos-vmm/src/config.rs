@@ -1,9 +1,20 @@
-//! Launch config v1: the JSON file named by `minos-vmm`'s only argument (02-CONTEXT.md D-04).
+//! Launch config v2: the JSON file named by `minos-vmm`'s only argument (02-CONTEXT.md D-04).
 //!
 //! The host writes the file, but the launcher validates it as if it were hostile. The size is capped before
 //! any parsing, every JSON object rejects unknown fields, and every value is checked by
 //! [`VmmConfig::try_from`], the only constructor of [`VmmConfig`]. `minos-backend-krun` serializes the same
-//! shape (02-05 E-1), so the two crates share one wire format without sharing a crate.
+//! shape, and both sides are bound to one golden file, `golden/config-v2.json`, pinned by SHA-256, so the two
+//! crates share one wire format without sharing a crate.
+//!
+//! v2 differs from v1 in three ways:
+//! - No scratch disk. Scratch is a size-capped tmpfs in guest memory (05-CONTEXT.md D-05), so the helper attaches
+//!   no writable disk at all: both disks are read-only.
+//! - No boot mode. The helper boots only from the read-only root disk; the initramfs mode is removed from the one
+//!   entitled binary (05-RESEARCH Open Question 7), and its negative evidence stays in 02-SPIKE-EVIDENCE.md
+//!   S01-INITRAMFS.
+//! - No console object. The console is always the helper's stdout pipe, [`STDOUT_CONSOLE`], a constant rather
+//!   than a config value, and its cap is the supervisor's: it reads the pipe through cap + 1 bytes
+//!   (05-EVIDENCE.md W0-CONSOLE, Mechanism selections "console: pipe").
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -16,17 +27,13 @@ use serde::Deserialize;
 /// Largest config file accepted, in bytes. Longer input is refused before JSON parsing.
 pub const MAX_CONFIG_BYTES: u64 = 65_536;
 /// The only config version this launcher reads.
-pub const CONFIG_VERSION: u32 = 1;
+pub const CONFIG_VERSION: u32 = 2;
 /// Longest path accepted in any path field, in bytes.
 pub const MAX_PATH_BYTES: usize = 1024;
 /// Longest vsock socket path, in bytes: the macOS `sun_path` holds 104 bytes including the NUL.
 pub const MAX_SOCKET_PATH_BYTES: usize = 103;
 /// Largest vsock port. `u32::MAX` is `VMADDR_PORT_ANY`, and `msb_krun` refuses both 0 and `u32::MAX`.
 pub const MAX_VSOCK_PORT: u32 = 4_294_967_294;
-/// Largest scratch disk cap, in bytes (16 GiB).
-pub const MAX_SCRATCH_CAP_BYTES: u64 = 17_179_869_184;
-/// Largest console output cap, in bytes (64 MiB).
-pub const MAX_CONSOLE_CAP_BYTES: u64 = 67_108_864;
 // `crates/minos-sandbox/src/spec.rs` restates the next four bounds so preflight never clears a plan this launcher
 // refuses; minos-vmm links no internal crate, so both sides pin the same literals in tests (review WR-02).
 /// Longest hard maximum run time, in milliseconds (one hour).
@@ -39,12 +46,12 @@ pub const MIN_MEMORY_MIB: u16 = 128;
 pub const MAX_MEMORY_MIB: u16 = 16_384;
 /// Length of a SHA-256 digest written as lowercase hex.
 const SHA256_HEX_LEN: usize = 64;
-/// The console path that names the helper's own stdout: the helper's own stdout, a pipe the supervisor reads;
-/// Seatbelt matches this literal (05-RESEARCH Pattern 7).
+/// The guest console: the helper's own stdout, a pipe the supervisor reads through its cap + 1 bytes, so the cap
+/// is exact and console bytes never touch host disk (05-EVIDENCE.md W0-CONSOLE; 05-RESEARCH Pattern 7).
 ///
-/// Only this exact byte string is treated as stdout. Preflight skips its console-absent and parent checks for it,
-/// and the watchdog does not measure it, because the supervisor reads the pipe through its own cap (KRUN-01).
-/// Every other spelling, `/dev/stdout` and `/dev/fd/2` included, is an ordinary console path that must not exist.
+/// The Seatbelt profile allows writes to exactly this literal; `/dev/stdout` resolves to it under Seatbelt but a
+/// literal rule for that spelling does not match, so the helper names this one. Preflight refuses to launch unless
+/// fd 1 is a pipe, so a misconfigured launch never writes the console to a terminal or a file.
 pub const STDOUT_CONSOLE: &str = "/dev/fd/1";
 
 /// Why a launch config was refused. Field names are the dotted JSON key path.
@@ -130,10 +137,8 @@ impl fmt::Display for PathReason {
 pub struct RawVmmConfig {
     v: u32,
     kernel: RawKernel,
-    boot: RawBoot,
     disks: RawDisks,
     vsock: RawVsock,
-    console: RawConsole,
     max_duration_ms: u64,
     machine: RawMachine,
 }
@@ -146,39 +151,12 @@ pub struct RawKernel {
     sha256: String,
 }
 
-/// Raw `boot` value: the string `"root_disk"`, or `{"initramfs":{...}}`.
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RawBoot {
-    /// Boot from the read-only root disk on `/dev/vda` (D-18).
-    RootDisk,
-    /// Attach an initramfs; negative evidence only (D-18).
-    Initramfs(RawInitramfs),
-}
-
-/// Raw `boot.initramfs` object.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RawInitramfs {
-    path: PathBuf,
-    sha256: String,
-}
-
-/// Raw `disks` object.
+/// Raw `disks` object: the two read-only raw images. There is no scratch disk (D-05).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawDisks {
     root: PathBuf,
     input: PathBuf,
-    scratch: RawScratch,
-}
-
-/// Raw `disks.scratch` object.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RawScratch {
-    path: PathBuf,
-    cap_bytes: u64,
 }
 
 /// Raw `vsock` object.
@@ -189,14 +167,6 @@ pub struct RawVsock {
     socket: PathBuf,
 }
 
-/// Raw `console` object.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RawConsole {
-    path: PathBuf,
-    cap_bytes: u64,
-}
-
 /// Raw `machine` object.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -205,34 +175,16 @@ pub struct RawMachine {
     memory_mib: u32,
 }
 
-/// How the guest kernel finds `/init`.
-pub enum Boot {
-    /// The raw read-only `SquashFS` root on `/dev/vda` holds `/init` (D-18).
-    RootDisk,
-    /// A newc initramfs is attached; recorded as negative evidence only (D-18).
-    Initramfs {
-        /// Absolute canonical path of the initramfs image.
-        path: PathBuf,
-        /// Expected SHA-256 of the image.
-        sha256: [u8; 32],
-    },
-}
-
-/// A validated launch config. Private fields, no setters: if a value exists, every E-2 rule held.
+/// A validated launch config. Private fields, no setters: if a value exists, every rule held.
 #[derive(Deserialize)]
 #[serde(try_from = "RawVmmConfig")]
 pub struct VmmConfig {
     krunfw: PathBuf,
     krunfw_sha256: [u8; 32],
-    boot: Boot,
     root: PathBuf,
     input: PathBuf,
-    scratch: PathBuf,
-    scratch_cap_bytes: u64,
     vsock_port: u32,
     socket: PathBuf,
-    console: PathBuf,
-    console_cap_bytes: u64,
     max_duration: Duration,
     vcpus: u8,
     memory_mib: u16,
@@ -249,11 +201,6 @@ impl VmmConfig {
         &self.krunfw_sha256
     }
 
-    /// Boot mode.
-    pub fn boot(&self) -> &Boot {
-        &self.boot
-    }
-
     /// Read-only root disk image (`/dev/vda`).
     pub fn root(&self) -> &Path {
         &self.root
@@ -264,16 +211,6 @@ impl VmmConfig {
         &self.input
     }
 
-    /// Read-write scratch disk image (`/dev/vdc`).
-    pub fn scratch(&self) -> &Path {
-        &self.scratch
-    }
-
-    /// Largest scratch image length the launcher will attach, in bytes.
-    pub fn scratch_cap_bytes(&self) -> u64 {
-        self.scratch_cap_bytes
-    }
-
     /// Guest vsock port routed to the host socket.
     pub fn vsock_port(&self) -> u32 {
         self.vsock_port
@@ -282,16 +219,6 @@ impl VmmConfig {
     /// Host Unix socket the VMM connects to when the guest connects to the vsock port.
     pub fn socket(&self) -> &Path {
         &self.socket
-    }
-
-    /// File that receives the guest console output, or [`STDOUT_CONSOLE`] for the helper's own stdout.
-    pub fn console(&self) -> &Path {
-        &self.console
-    }
-
-    /// Console length past which the watchdog stops the VM, in bytes.
-    pub fn console_cap_bytes(&self) -> u64 {
-        self.console_cap_bytes
     }
 
     /// Hard maximum lifetime of the launcher, counted from `main` entry, after which the watchdog stops the VM.
@@ -315,8 +242,8 @@ impl VmmConfig {
 /// # Errors
 ///
 /// [`ConfigError::TooLarge`] for input longer than [`MAX_CONFIG_BYTES`] (checked before parsing),
-/// [`ConfigError::Json`] for anything serde rejects, including unknown fields, and the other variants for an
-/// E-2 rule that failed.
+/// [`ConfigError::Json`] for anything serde rejects, including unknown fields, and the other variants for a
+/// rule that failed.
 pub fn parse(bytes: &[u8]) -> Result<VmmConfig, ConfigError> {
     let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if len > MAX_CONFIG_BYTES {
@@ -329,7 +256,7 @@ pub fn parse(bytes: &[u8]) -> Result<VmmConfig, ConfigError> {
 impl TryFrom<RawVmmConfig> for VmmConfig {
     type Error = ConfigError;
 
-    /// Applies every E-2 rule. This is the only way to build a [`VmmConfig`], from serde or by hand.
+    /// Applies every rule. This is the only way to build a [`VmmConfig`], from serde or by hand.
     fn try_from(raw: RawVmmConfig) -> Result<Self, ConfigError> {
         if raw.v != CONFIG_VERSION {
             return Err(ConfigError::Version(raw.v));
@@ -338,44 +265,15 @@ impl TryFrom<RawVmmConfig> for VmmConfig {
         let mut paths = PathSet::default();
         paths.add("kernel.krunfw", &raw.kernel.krunfw, MAX_PATH_BYTES)?;
         let krunfw_sha256 = sha256("kernel.sha256", &raw.kernel.sha256)?;
-        let boot = match raw.boot {
-            RawBoot::RootDisk => Boot::RootDisk,
-            RawBoot::Initramfs(initramfs) => {
-                paths.add("boot.initramfs.path", &initramfs.path, MAX_PATH_BYTES)?;
-                let sha256 = sha256("boot.initramfs.sha256", &initramfs.sha256)?;
-                Boot::Initramfs {
-                    path: initramfs.path,
-                    sha256,
-                }
-            }
-        };
         paths.add("disks.root", &raw.disks.root, MAX_PATH_BYTES)?;
         paths.add("disks.input", &raw.disks.input, MAX_PATH_BYTES)?;
-        paths.add(
-            "disks.scratch.path",
-            &raw.disks.scratch.path,
-            MAX_PATH_BYTES,
-        )?;
         paths.add("vsock.socket", &raw.vsock.socket, MAX_SOCKET_PATH_BYTES)?;
-        paths.add("console.path", &raw.console.path, MAX_PATH_BYTES)?;
 
-        let scratch_cap_bytes = in_range(
-            "disks.scratch.cap_bytes",
-            raw.disks.scratch.cap_bytes,
-            1,
-            MAX_SCRATCH_CAP_BYTES,
-        )?;
         let vsock_port = in_range(
             "vsock.port",
             u64::from(raw.vsock.port),
             1,
             u64::from(MAX_VSOCK_PORT),
-        )?;
-        let console_cap_bytes = in_range(
-            "console.cap_bytes",
-            raw.console.cap_bytes,
-            1,
-            MAX_CONSOLE_CAP_BYTES,
         )?;
         let max_duration_ms: u64 =
             in_range("max_duration_ms", raw.max_duration_ms, 1, MAX_DURATION_MS)?;
@@ -395,15 +293,10 @@ impl TryFrom<RawVmmConfig> for VmmConfig {
         Ok(Self {
             krunfw: raw.kernel.krunfw,
             krunfw_sha256,
-            boot,
             root: raw.disks.root,
             input: raw.disks.input,
-            scratch: raw.disks.scratch.path,
-            scratch_cap_bytes,
             vsock_port,
             socket: raw.vsock.socket,
-            console: raw.console.path,
-            console_cap_bytes,
             max_duration: Duration::from_millis(max_duration_ms),
             vcpus,
             memory_mib,
@@ -778,7 +671,7 @@ mod tests {
 
     #[test]
     fn config_v2_rejects_bad_sha256() -> TestResult {
-        for (from, to) in [(r#"8e5217""#, r#"8e521""#), (r#"bbdd5218"#, r#"BBDD5218"#)] {
+        for (from, to) in [(r#"8e5217""#, r#"8e521""#), ("bbdd5218", "BBDD5218")] {
             let error = rejected(&edit(GOLDEN, from, to)?)?;
             assert!(
                 matches!(

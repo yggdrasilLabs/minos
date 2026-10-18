@@ -1,19 +1,22 @@
 //! Preflight: checks the environment and every host file a launch config names before the VMM sees any of it.
 //!
 //! Each file must already be in canonical form (so `/tmp` versus `/private/tmp` and symlinks are refused, and a
-//! Seatbelt profile can name exact literals), and must be the expected file type. libkrunfw and the initramfs
-//! are hashed last and compared to the config. The hash is taken from the canonical path immediately before the
-//! VM is built; the window between hash and `dlopen` is accepted for the spike (T-02-19).
+//! Seatbelt profile can name exact literals), and must be the expected file type. The console is the helper's own
+//! stdout, so fd 1 must be a pipe the supervisor reads. libkrunfw is hashed last and compared to the config. The
+//! hash is taken from the canonical path immediately before the VM is built; the window between hash and
+//! `dlopen` is accepted for now (T-02-19; CLAUDE.md Open questions).
 
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
+use std::os::fd::AsFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 
+use rustix::fs::FileType;
 use sha2::{Digest, Sha256};
 
-use crate::config::{Boot, STDOUT_CONSOLE, VmmConfig};
+use crate::config::{STDOUT_CONSOLE, VmmConfig};
 
 /// Environment variable name prefixes the launcher refuses to run under. `msb_krun` appends
 /// `MSB_KRUN_KERNEL_CMDLINE` to the guest kernel command line, and `DYLD_` variables change what the loader maps
@@ -67,25 +70,14 @@ pub enum PreflightError {
         /// The configured path.
         path: PathBuf,
     },
-    /// The console path already exists; the VMM must create it.
-    #[error("console.path {} already exists", .path.display())]
-    ConsoleExists {
-        /// The configured path.
-        path: PathBuf,
-    },
-    /// The directory that will hold the console file is missing or not a directory.
-    #[error("console.path {} has no parent directory", .path.display())]
-    ConsoleParent {
-        /// The configured console path.
-        path: PathBuf,
-    },
-    /// The scratch image is longer than its cap.
-    #[error("disks.scratch.path is {len} bytes, over its cap of {cap} bytes")]
-    ScratchTooLarge {
-        /// Length of the scratch image.
-        len: u64,
-        /// The configured cap.
-        cap: u64,
+    /// fd 1, the guest console, is not a pipe. The supervisor gives the helper a pipe and reads it through its cap;
+    /// anything else would write the console to a terminal or a file.
+    #[error(
+        "stdout ({STDOUT_CONSOLE}) is a {found}, not a pipe; the console must be the supervisor's pipe"
+    )]
+    ConsoleNotPipe {
+        /// What fd 1 is instead.
+        found: &'static str,
     },
     /// A file's SHA-256 does not match the config. `main` reports this with its own exit code (67).
     #[error("{field} {}: SHA-256 is {actual}, the config expects {expected}", .path.display())]
@@ -101,38 +93,50 @@ pub enum PreflightError {
     },
 }
 
-/// Runs every preflight check in a fixed order: environment, files, socket, console, then hashes.
+/// Runs every preflight check in a fixed order: environment, console pipe, files, socket, then the hash.
 ///
 /// # Errors
 ///
 /// The first failed check, as a [`PreflightError`]. A digest mismatch is [`PreflightError::Hash`].
 pub fn check(config: &VmmConfig) -> Result<(), PreflightError> {
     check_environment(std::env::vars_os().map(|(name, _)| name))?;
+    stdout_is_pipe()?;
     check_files(config)
 }
 
-/// Every file check after the environment: files, socket, console, then hashes.
+/// Every file check after the environment and the console: files, socket, then the hash.
 fn check_files(config: &VmmConfig) -> Result<(), PreflightError> {
     regular_file("kernel.krunfw", config.krunfw())?;
     regular_file("disks.root", config.root())?;
     regular_file("disks.input", config.input())?;
-    let scratch_len = regular_file("disks.scratch.path", config.scratch())?;
-    if scratch_len > config.scratch_cap_bytes() {
-        return Err(PreflightError::ScratchTooLarge {
-            len: scratch_len,
-            cap: config.scratch_cap_bytes(),
-        });
-    }
-    if let Boot::Initramfs { path, .. } = config.boot() {
-        regular_file("boot.initramfs.path", path)?;
-    }
     unix_socket(config.socket())?;
-    console_ok(config.console())?;
-    hash_matches("kernel.krunfw", config.krunfw(), config.krunfw_sha256())?;
-    if let Boot::Initramfs { path, sha256 } = config.boot() {
-        hash_matches("boot.initramfs.path", path, sha256)?;
-    }
-    Ok(())
+    hash_matches("kernel.krunfw", config.krunfw(), config.krunfw_sha256())
+}
+
+/// fd 1, which the VMM opens as [`STDOUT_CONSOLE`], must be a pipe (`fstat` file type FIFO).
+fn stdout_is_pipe() -> Result<(), PreflightError> {
+    let stat =
+        rustix::fs::fstat(io::stdout().as_fd()).map_err(|errno| PreflightError::Inspect {
+            field: "console",
+            path: PathBuf::from(STDOUT_CONSOLE),
+            source: io::Error::from(errno),
+        })?;
+    console_pipe_ok(FileType::from_raw_mode(stat.st_mode))
+}
+
+/// The decision behind [`stdout_is_pipe`], on the file type `fstat` reported: only a FIFO passes.
+fn console_pipe_ok(file_type: FileType) -> Result<(), PreflightError> {
+    let found = match file_type {
+        FileType::Fifo => return Ok(()),
+        FileType::RegularFile => "regular file",
+        FileType::Directory => "directory",
+        FileType::Symlink => "symbolic link",
+        FileType::Socket => "socket",
+        FileType::CharacterDevice => "character device",
+        FileType::BlockDevice => "block device",
+        FileType::Unknown => "file of unknown type",
+    };
+    Err(PreflightError::ConsoleNotPipe { found })
 }
 
 /// Refuses the first variable name that starts with a forbidden prefix.
@@ -175,12 +179,12 @@ fn canonical(field: &'static str, path: &Path) -> Result<(), PreflightError> {
     }
 }
 
-/// A canonical regular file. Returns its length.
-fn regular_file(field: &'static str, path: &Path) -> Result<u64, PreflightError> {
+/// A canonical regular file.
+fn regular_file(field: &'static str, path: &Path) -> Result<(), PreflightError> {
     canonical(field, path)?;
     let metadata = fs::symlink_metadata(path).map_err(inspect(field, path))?;
     if metadata.file_type().is_file() {
-        Ok(metadata.len())
+        Ok(())
     } else {
         Err(PreflightError::NotRegularFile {
             field,
@@ -197,42 +201,6 @@ fn unix_socket(path: &Path) -> Result<(), PreflightError> {
         Ok(())
     } else {
         Err(PreflightError::NotSocket {
-            path: path.to_path_buf(),
-        })
-    }
-}
-
-/// The console is either the helper's own stdout, named by exactly [`STDOUT_CONSOLE`], or a file that does not
-/// exist yet in a canonical directory. The stdout literal is compared byte for byte, so `/dev/stdout`, another
-/// descriptor, or any other existing path is still refused as an existing console.
-fn console_ok(path: &Path) -> Result<(), PreflightError> {
-    if path.as_os_str().as_bytes() == STDOUT_CONSOLE.as_bytes() {
-        Ok(())
-    } else {
-        console_absent(path)
-    }
-}
-
-/// The console file must not exist yet, and its parent must be a canonical directory.
-fn console_absent(path: &Path) -> Result<(), PreflightError> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => {
-            return Err(PreflightError::ConsoleExists {
-                path: path.to_path_buf(),
-            });
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(inspect("console.path", path)(error)),
-    }
-    let parent = path.parent().ok_or_else(|| PreflightError::ConsoleParent {
-        path: path.to_path_buf(),
-    })?;
-    canonical("console.path", parent)?;
-    let metadata = fs::symlink_metadata(parent).map_err(inspect("console.path", parent))?;
-    if metadata.is_dir() {
-        Ok(())
-    } else {
-        Err(PreflightError::ConsoleParent {
             path: path.to_path_buf(),
         })
     }
@@ -277,9 +245,12 @@ fn hash_matches(
 mod tests {
     use std::error::Error;
     use std::ffi::OsString;
+    use std::fs::File;
     use std::path::Path;
 
-    use super::{PreflightError, check_environment, check_files, console_ok, regular_file};
+    use rustix::fs::FileType;
+
+    use super::{PreflightError, check_environment, check_files, console_pipe_ok, regular_file};
     use crate::config;
 
     type TestResult = Result<(), Box<dyn Error>>;
@@ -331,14 +302,58 @@ mod tests {
         ));
     }
 
-    /// A v1 config with every host path under a job directory that does not exist, and console `/dev/fd/1`.
-    const STDOUT_CONSOLE_CONFIG: &str = r#"{"v":1,"kernel":{"krunfw":"/private/tmp/mns00000000/libkrunfw.5.dylib","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"boot":"root_disk","disks":{"root":"/private/tmp/mns00000000/root.img","input":"/private/tmp/mns00000000/input.img","scratch":{"path":"/private/tmp/mns00000000/scratch.img","cap_bytes":67108864}},"vsock":{"port":1024,"socket":"/private/tmp/mns00000000/o.sock"},"console":{"path":"/dev/fd/1","cap_bytes":1048576},"max_duration_ms":60000,"machine":{"vcpus":1,"memory_mib":256}}"#;
-
-    /// The stdout literal skips only the console-absent and parent checks; every other file is still checked.
+    /// Only a FIFO passes as the console; every other file type `fstat` can report is refused by name.
     #[test]
-    fn preflight_allows_stdout_console() -> TestResult {
-        console_ok(Path::new("/dev/fd/1"))?;
-        let config = config::parse(STDOUT_CONSOLE_CONFIG.as_bytes())?;
+    fn preflight_requires_stdout_pipe() -> TestResult {
+        console_pipe_ok(FileType::Fifo)?;
+        for (file_type, expected) in [
+            (FileType::RegularFile, "regular file"),
+            (FileType::Directory, "directory"),
+            (FileType::Symlink, "symbolic link"),
+            (FileType::Socket, "socket"),
+            (FileType::CharacterDevice, "character device"),
+            (FileType::BlockDevice, "block device"),
+            (FileType::Unknown, "file of unknown type"),
+        ] {
+            let refused = console_pipe_ok(file_type);
+            assert!(
+                matches!(&refused, Err(PreflightError::ConsoleNotPipe { found }) if *found == expected),
+                "{file_type:?} was not refused as {expected}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The `fstat` mapping on this host: the write end of an anonymous pipe is a FIFO and passes, and an open
+    /// regular file is refused.
+    #[test]
+    fn preflight_stdout_pipe_mapping_matches_fstat() -> TestResult {
+        let (_reader, writer) = std::io::pipe()?;
+        let stat = rustix::fs::fstat(&writer)?;
+        console_pipe_ok(FileType::from_raw_mode(stat.st_mode))?;
+
+        let file = File::open(std::env::current_exe()?)?;
+        let stat = rustix::fs::fstat(&file)?;
+        let refused = console_pipe_ok(FileType::from_raw_mode(stat.st_mode));
+        assert!(matches!(
+            refused,
+            Err(PreflightError::ConsoleNotPipe {
+                found: "regular file"
+            })
+        ));
+        Ok(())
+    }
+
+    /// A v2 config whose libkrunfw path does not exist is refused at the first file check, before the disks.
+    #[test]
+    fn preflight_checks_the_files_of_a_v2_config() -> TestResult {
+        let golden = include_str!("../golden/config-v2.json");
+        let installed = "/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib";
+        if !golden.contains(installed) {
+            return Err("the golden config does not name the pinned libkrunfw path".into());
+        }
+        let text = golden.replacen(installed, "/private/tmp/mns00000000/libkrunfw.5.dylib", 1);
+        let config = config::parse(text.as_bytes())?;
         let refused = check_files(&config);
         assert!(
             matches!(
@@ -350,27 +365,6 @@ mod tests {
             ),
             "a missing libkrunfw was not refused"
         );
-        Ok(())
-    }
-
-    /// Only the exact literal `/dev/fd/1` is the helper's stdout. Other descriptors and the `/dev/stdout`
-    /// spelling, and any existing file, are still refused as an existing console.
-    #[test]
-    fn preflight_still_refuses_existing_console_file() -> TestResult {
-        let this_binary = std::env::current_exe()?;
-        for path in [
-            Path::new("/dev/stdout"),
-            Path::new("/dev/fd/2"),
-            Path::new("/dev/fd/0"),
-            this_binary.as_path(),
-        ] {
-            let refused = console_ok(path);
-            assert!(
-                matches!(&refused, Err(PreflightError::ConsoleExists { path: found }) if found == path),
-                "{} was not refused as an existing console",
-                path.display()
-            );
-        }
         Ok(())
     }
 }

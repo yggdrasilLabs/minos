@@ -230,8 +230,8 @@ mod tests {
             EXIT_HASH
         );
         assert_eq!(
-            LaunchError::Preflight(PreflightError::ConsoleExists {
-                path: PathBuf::from("/private/tmp/mns00000000/console.log"),
+            LaunchError::Preflight(PreflightError::ConsoleNotPipe {
+                found: "regular file"
             })
             .exit_code(),
             EXIT_PREFLIGHT
