@@ -764,6 +764,7 @@ dependencies = [
  "minos-sandbox",
  "minos-source",
  "minos-store",
+ "rustix",
  "serde",
  "sha2",
  "tar",
