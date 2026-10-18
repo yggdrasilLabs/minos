@@ -344,14 +344,36 @@ impl SweepReport {
 /// before comparing.
 #[must_use]
 pub fn sweep(root: &JobRoot, vmm: &Path) -> SweepReport {
-    let _ = (root, vmm);
-    SweepReport { entries: Vec::new() }
+    let vmm = fs::canonicalize(vmm).unwrap_or_else(|_| vmm.to_path_buf());
+    let names: BTreeSet<OsString> = match fs::read_dir(&root.dir) {
+        Ok(listing) => listing
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .filter(|name| is_job_name(name))
+            .collect(),
+        Err(_) => {
+            return SweepReport {
+                entries: vec![SweepEntry::Unverified {
+                    dir: root.dir.clone(),
+                    reason: "the job root could not be listed",
+                }],
+            };
+        }
+    };
+    let entries = names
+        .iter()
+        .map(|name| sweep_one(&root.dir.join(name), &vmm))
+        .collect();
+    SweepReport { entries }
 }
 
 /// Whether `name` is `mns` followed by exactly [`JOB_RANDOM_CHARS`] ASCII letters and digits.
 fn is_job_name(name: &OsStr) -> bool {
-    let _ = name;
-    false
+    name.as_bytes()
+        .strip_prefix(JOB_PREFIX.as_bytes())
+        .is_some_and(|rest| {
+            rest.len() == JOB_RANDOM_CHARS && rest.iter().all(u8::is_ascii_alphanumeric)
+        })
 }
 
 /// Sweeps one job directory.
@@ -455,8 +477,18 @@ fn read_pid(path: &Path) -> Result<Option<u32>, &'static str> {
 
 /// Plain decimal digits and an optional newline, naming a pid above 1 that fits an `i32`.
 fn parse_pid(bytes: &[u8]) -> Result<Option<u32>, &'static str> {
-    let _ = bytes;
-    Ok(None)
+    let digits = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return Err("its pid file is not a plain decimal pid");
+    }
+    let pid: u32 = std::str::from_utf8(digits)
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .ok_or("its pid file names a pid out of range")?;
+    if pid <= 1 || i32::try_from(pid).is_err() {
+        return Err("its pid file names a pid out of range");
+    }
+    Ok(Some(pid))
 }
 
 /// The `ps` row of `pid` as `(ppid, command)`, or `None` when `ps` shows no such process.
@@ -480,8 +512,22 @@ fn ps_row(pid: u32) -> Result<Option<(u32, Vec<u8>)>, &'static str> {
 /// One `ps -o ppid=,command=` row: optional leading spaces, the ppid digits, spaces, then the command, with an
 /// optional final newline and no other line.
 fn parse_ps_row(stdout: &[u8]) -> Option<(u32, Vec<u8>)> {
-    let _ = stdout;
-    None
+    let line = stdout.strip_suffix(b"\n").unwrap_or(stdout);
+    if line.contains(&b'\n') {
+        return None;
+    }
+    let line = line.trim_ascii_start();
+    let digits_end = line.iter().position(|byte| !byte.is_ascii_digit())?;
+    let (digits, rest) = line.split_at_checked(digits_end)?;
+    if digits.is_empty() || rest.first().is_none_or(|byte| *byte != b' ') {
+        return None;
+    }
+    let ppid = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    let command = rest.trim_ascii();
+    if command.is_empty() {
+        return None;
+    }
+    Some((ppid, command.to_vec()))
 }
 
 /// Whether `ps` shows no row for `pid` within `window`. A failed `ps` is not proof, so it counts as still there.
@@ -739,6 +785,63 @@ mod tests {
             report.entries(),
             [SweepEntry::Removed { dir: exact.clone() }]
         );
+        Ok(())
+    }
+
+    /// SIGKILLs a process this test orphaned, on drop, so a failed assertion leaves nothing running.
+    struct Orphan(i32);
+
+    impl Drop for Orphan {
+        fn drop(&mut self) {
+            if let Some(pid) = rustix::process::Pid::from_raw(self.0) {
+                rustix::process::kill_process(pid, rustix::process::Signal::KILL).ok();
+            }
+        }
+    }
+
+    #[test]
+    fn sweep_kills_an_orphaned_helper() -> TestResult {
+        let parent = tempfile::tempdir()?;
+        let root = JobRoot::open_at(parent.path())?;
+        let dir = dead_job(&root, "mnsORPHAN01", None)?;
+        let fifo = dir.join("vmm.json");
+        assert!(
+            Command::new("/usr/bin/mkfifo")
+                .arg(&fifo)
+                .status()?
+                .success()
+        );
+        // `set -m` puts the background job in its own process group, as the backend spawns the helper, and the
+        // shell exits at once, so the job's parent becomes launchd (ppid 1). Its argv is exactly
+        // `/bin/cat <dir>/vmm.json`; it blocks opening the FIFO. The path is an argument, never shell text.
+        let started = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "set -m; /bin/cat \"$1\" >/dev/null 2>&1 & echo $!",
+                "sh",
+            ])
+            .arg(&fifo)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()?;
+        assert!(started.status.success());
+        let pid: i32 = std::str::from_utf8(&started.stdout)?.trim().parse()?;
+        let orphan = Orphan(pid);
+        fs::write(dir.join(PID_FILE), format!("{pid}\n"))?;
+
+        let report = sweep(&root, Path::new("/bin/cat"));
+        let pid = u32::try_from(orphan.0)?;
+        assert_eq!(
+            report.entries(),
+            [SweepEntry::Killed {
+                dir: dir.clone(),
+                pid
+            }]
+        );
+        assert!(!dir.exists());
+        let gone = rustix::process::Pid::from_raw(orphan.0)
+            .map(|pid| rustix::process::test_kill_process(pid).is_err());
+        assert_eq!(gone, Some(true), "the orphan is gone");
         Ok(())
     }
 
