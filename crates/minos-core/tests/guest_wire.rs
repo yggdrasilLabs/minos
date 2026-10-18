@@ -20,12 +20,12 @@ use minos_core::guest::{
 };
 use minos_core::guest::{
     DISK_HEADER_BYTES, DISK_MAGIC, DISK_VERSION, DiskError, InputSections, MAX_BASE_TAR_BYTES,
-    MAX_CANDIDATE_OUT_BYTES, MAX_JUDGE_DATA_BYTES, SECTION_ENTRY_BYTES, SECTOR_BYTES, SectionKind,
-    read_input_disk, write_input_disk,
+    MAX_CANDIDATE_OUT_BYTES, MAX_GUEST_INPUT_BYTES, MAX_JUDGE_DATA_BYTES, SECTION_ENTRY_BYTES,
+    SECTOR_BYTES, SectionKind, read_input_disk, write_input_disk,
 };
 use minos_core::id::{BlobId, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
-use minos_core::limits::{Limits, MAX_DIFF_BYTES, MAX_OUTPUT_STREAM_BYTES};
+use minos_core::limits::{GUEST_RESERVE_MIB, Limits, MAX_DIFF_BYTES, MAX_OUTPUT_STREAM_BYTES};
 use minos_core::manifest::{JudgeVersion, Manifest};
 use minos_core::outcome::Stage;
 use minos_core::path::RelPath;
@@ -1419,5 +1419,52 @@ fn check_role_judge() -> TestResult {
             "{kind:?}"
         );
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// PID 1's in-memory input and the guest reserve (05-CONTEXT D-05)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The sum of the caps of `kinds`.
+fn caps(kinds: &[SectionKind]) -> u64 {
+    kinds.iter().map(|kind| kind.cap()).sum()
+}
+
+#[test]
+fn guest_input_fits_reserve() {
+    assert_eq!(MAX_GUEST_INPUT_BYTES, 134_217_728);
+    assert_eq!(
+        MAX_GUEST_INPUT_BYTES,
+        u64::from(GUEST_RESERVE_MIB) * 1024 * 1024 / 2
+    );
+    assert_eq!(MAX_JUDGE_DATA_BYTES, 100_663_296);
+    let candidate = caps(&[SectionKind::Job, SectionKind::Base, SectionKind::Diff]);
+    assert!(candidate <= MAX_GUEST_INPUT_BYTES, "{candidate}");
+    let judge = caps(&[
+        SectionKind::Job,
+        SectionKind::JudgeData,
+        SectionKind::CandidateOut,
+    ]);
+    assert!(judge <= MAX_GUEST_INPUT_BYTES, "{judge}");
+}
+
+#[test]
+fn judge_data_cap_is_enforced_from_the_table() -> TestResult {
+    // Only the header and the table: a reader that read a section byte before checking the caps would fail with
+    // an I/O error instead.
+    let over = MAX_JUDGE_DATA_BYTES + 1;
+    let table = header_and_table(2, &[(1, 512, 7), (4, 1024, over)]);
+    let error = refused(&table)?;
+    assert!(
+        matches!(
+            error,
+            DiskError::TooLarge { kind: 4, length, cap } if length == over && cap == MAX_JUDGE_DATA_BYTES
+        ),
+        "{error}"
+    );
+    // At the cap, the table is accepted and the reader goes on to the sections, which are not there.
+    let at_cap = header_and_table(2, &[(1, 512, 7), (4, 1024, MAX_JUDGE_DATA_BYTES)]);
+    assert!(matches!(refused(&at_cap)?, DiskError::Io(_)));
     Ok(())
 }
