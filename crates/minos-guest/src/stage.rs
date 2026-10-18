@@ -113,14 +113,12 @@ impl StageLimits {
     /// [`MAX_OPEN_FILES`].
     #[must_use]
     pub fn for_stage(job: &GuestJob, stage: &StageSpec) -> Self {
-        // RED stub: no derivation yet.
-        let _ = (job, stage, MIB);
         Self {
-            address_space_bytes: 0,
-            file_size_bytes: 0,
-            processes: 0,
-            cpu_seconds: 0,
-            open_files: 0,
+            address_space_bytes: u64::from(job.allowance_mib()) * MIB,
+            file_size_bytes: u64::from(job.scratch_mib()) * MIB,
+            processes: MAX_PROCESSES,
+            cpu_seconds: stage.budget_ms().div_ceil(1000).saturating_add(1),
+            open_files: MAX_OPEN_FILES,
         }
     }
 
@@ -176,9 +174,18 @@ const SEPARATOR: &str = "--";
 /// each limit in plain decimal.
 #[must_use]
 pub fn trampoline_argv(init: &Path, limits: &StageLimits, argv: &[String]) -> Vec<OsString> {
-    // RED stub: no argv yet.
-    let _ = (init, limits.with_caps(), argv, SEPARATOR);
-    Vec::new()
+    let mut out = Vec::with_capacity(argv.len().saturating_add(8));
+    out.push(init.as_os_str().to_owned());
+    out.push(OsString::from(TRAMPOLINE_FLAG));
+    out.extend(
+        limits
+            .with_caps()
+            .into_iter()
+            .map(|(value, _)| OsString::from(value.to_string())),
+    );
+    out.push(OsString::from(SEPARATOR));
+    out.extend(argv.iter().map(OsString::from));
+    out
 }
 
 /// Why a trampoline argv is not the one [`trampoline_argv`] writes.
@@ -224,10 +231,37 @@ fn parse_limit(arg: &OsStr, position: u8, cap: u64) -> Result<u64, TrampolineErr
 /// [`TrampolineError::Layout`] when the flag or the separator is not where the layout puts it,
 /// [`TrampolineError::EmptyArgv`] when no command or an empty program follows the separator, and
 /// [`TrampolineError::Number`] for the first limit that is not plain decimal within its cap.
-pub fn parse_trampoline(args: &[OsString]) -> Result<(StageLimits, Vec<OsString>), TrampolineError> {
-    // RED stub: refuses everything.
-    let _ = (args, parse_limit);
-    Err(TrampolineError::Layout)
+pub fn parse_trampoline(
+    args: &[OsString],
+) -> Result<(StageLimits, Vec<OsString>), TrampolineError> {
+    let [
+        _init,
+        flag,
+        address_space,
+        file_size,
+        processes,
+        cpu,
+        open_files,
+        separator,
+        argv @ ..,
+    ] = args
+    else {
+        return Err(TrampolineError::Layout);
+    };
+    if flag != TRAMPOLINE_FLAG || separator != SEPARATOR {
+        return Err(TrampolineError::Layout);
+    }
+    if argv.first().is_none_or(|program| program.is_empty()) {
+        return Err(TrampolineError::EmptyArgv);
+    }
+    let limits = StageLimits {
+        address_space_bytes: parse_limit(address_space, 2, MAX_ADDRESS_SPACE_BYTES)?,
+        file_size_bytes: parse_limit(file_size, 3, MAX_FILE_SIZE_BYTES)?,
+        processes: parse_limit(processes, 4, MAX_PROCESSES)?,
+        cpu_seconds: parse_limit(cpu, 5, MAX_CPU_SECONDS)?,
+        open_files: parse_limit(open_files, 6, MAX_OPEN_FILES)?,
+    };
+    Ok((limits, argv.to_vec()))
 }
 
 #[cfg(test)]
