@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-10-18T21:30:30.009Z"
+stopped_at: Completed 05-13-PLAN.md
+last_updated: "2026-10-18T21:44:08.110Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 52
+  completed_plans: 53
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 15 of 22
+Plan: 16 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -110,6 +110,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P22 | 6min | 2 tasks | 10 files |
 | Phase 05 P11 | 15min | 3 tasks | 6 files |
 | Phase 05 P12 | 12min | 3 tasks | 9 files |
+| Phase 05 P13 | 7min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -252,6 +253,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-11: libkrunfw is loaded from the Cellar path after its hash check and is not copied privately (05-RESEARCH Open Question 6; flagged for the user)
 - [Phase 05]: 05-12: PID 1 reads /dev/vdb before run_job and hands it the result through a one-shot ReadJobSource; the node is unlinked (chmod 0 fallback) before any stage — the token must be unreadable to every later process, and the sink needs it first
 - [Phase 05]: 05-12: after every stage PID 1 kills with kill(-1, SIGKILL) and reaps to ECHILD within 5 s; the stage child is waited for by pid only — nothing the candidate started may race the packer, and an orphan must not be reaped in the stage's place
+- [Phase 05]: 05-13: a chunk connection still open at its 5 s deadline is ChunkFault::Length and one over MAX_CHUNK_BYTES is Oversize, both detected by the receiver
+- [Phase 05]: 05-13: fetch_parts re-checks each BlobSource blob's length and SHA-256 and binds the job to the plan (role, LaunchKey, base, diff, budgets, memory) before fetching other parts
 
 ### Pending Todos
 
@@ -282,6 +285,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T21:30:30.004Z
-Stopped at: Completed 05-12-PLAN.md
+Last session: 2026-10-18T21:43:56.770Z
+Stopped at: Completed 05-13-PLAN.md
 Resume file: None
