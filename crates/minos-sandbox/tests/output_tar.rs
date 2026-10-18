@@ -42,7 +42,8 @@ use minos_sandbox::output::{
 };
 use minos_sandbox::{
     Candidate, Capabilities, Cleared, Ended, Finished, GuestOutput, InputDisk, Judge, JudgeData,
-    Machine, OutputCap, OutputFault, OutputInvalid, Role, SandboxSpec, Untrusted, preflight,
+    Machine, OutputCap, OutputFault, OutputInvalid, Role, RoleKind, SandboxSpec, Untrusted,
+    preflight,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -72,12 +73,21 @@ fn host() -> Result<Capabilities, Box<dyn Error>> {
     ))
 }
 
+/// The input disk of the right shape for role `R`: the baseline's candidate parts, or a judge's parts.
+fn input<R: Role>() -> InputDisk {
+    if R::KIND == RoleKind::Judge {
+        InputDisk::judge(BlobId::of(b"guest job"), BlobId::of(b"candidate output"))
+    } else {
+        InputDisk::candidate(BlobId::of(b"guest job"), TreeId::of(b"t"), None)
+    }
+}
+
 /// A spec of role `R` for the baseline job.
 fn spec<R: Role>() -> Result<SandboxSpec<R>, Box<dyn Error>> {
     Ok(SandboxSpec::<R>::new(
         &job()?,
         ImageDigest::of(b"root image"),
-        InputDisk::new(BlobId::of(b"input disk")),
+        input::<R>(),
         Machine::new(2, 512)?,
         Arch::Arm64,
     )?)

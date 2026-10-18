@@ -10,7 +10,7 @@ use minos_core::ledger::Isolation;
 use minos_core::manifest::{Arch, JudgeVersion};
 use minos_sandbox::{
     Candidate, Capabilities, InputDisk, Judge, JudgeData, LaunchPlan, Machine, Refusal, Role,
-    SandboxSpec, preflight,
+    RoleKind, SandboxSpec, preflight,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -22,8 +22,23 @@ fn job() -> Result<JobRequest, Box<dyn Error>> {
     Ok(JobRequest::baseline(TreeId::of(b"t"), judge, 0, budget)?)
 }
 
-fn input() -> InputDisk {
-    InputDisk::new(BlobId::of(b"input disk"))
+/// The guest job blob every test input names.
+fn job_blob() -> BlobId {
+    BlobId::of(b"guest job")
+}
+
+/// The candidate output blob a judge input names.
+fn candidate_out() -> BlobId {
+    BlobId::of(b"candidate output")
+}
+
+/// The input of the right shape for role `R`: the baseline's candidate parts, or a judge's parts.
+fn input<R: Role>() -> InputDisk {
+    if R::KIND == RoleKind::Judge {
+        InputDisk::judge(job_blob(), candidate_out())
+    } else {
+        InputDisk::candidate(job_blob(), TreeId::of(b"t"), None)
+    }
 }
 
 /// A sealed plan in role `R` for 2 vCPUs and 512 MiB on arm64.
@@ -31,7 +46,7 @@ fn plan<R: Role>() -> Result<LaunchPlan<R>, Box<dyn Error>> {
     let spec = SandboxSpec::<R>::new(
         &job()?,
         ImageDigest::of(b"root image"),
-        input(),
+        input::<R>(),
         Machine::new(2, 512)?,
         Arch::Arm64,
     )?;
@@ -43,7 +58,7 @@ fn judge_plan(data: JudgeData) -> Result<LaunchPlan<Judge>, Box<dyn Error>> {
     let spec = SandboxSpec::<Judge>::new(
         &job()?,
         ImageDigest::of(b"root image"),
-        input(),
+        input::<Judge>(),
         Machine::new(2, 512)?,
         Arch::Arm64,
     )?;
@@ -167,11 +182,11 @@ fn judge_without_data_is_refused() -> TestResult {
 }
 
 #[test]
-fn judge_data_equal_to_input_is_refused() -> TestResult {
-    let same = JudgeData::new(*input().blob());
-    let found = refusals(&host()?, judge_plan(same)?)?;
-    assert!(found.contains(&Refusal::JudgeDataIsInput));
-    assert_eq!(found, vec![Refusal::JudgeDataIsInput]);
+fn preflight_judge_data_is_any_input_part() -> TestResult {
+    for part in [job_blob(), candidate_out()] {
+        let found = refusals(&host()?, judge_plan(JudgeData::new(part))?)?;
+        assert_eq!(found, vec![Refusal::JudgeDataIsInput]);
+    }
     Ok(())
 }
 

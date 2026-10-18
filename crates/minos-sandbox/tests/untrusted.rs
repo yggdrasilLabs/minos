@@ -17,8 +17,8 @@ use minos_core::outcome::Reason;
 use minos_core::path::RelPath;
 use minos_sandbox::{
     Candidate, Capabilities, Ended, Finished, GuestOutput, InputDisk, JUDGE_LOG_PATH, Judge,
-    JudgeData, Machine, OutputCap, OutputFault, OutputInvalid, RUN_LOG_PATH, Role, SCORECARD_PATH,
-    SandboxSpec, ScorecardFault, Untrusted, preflight,
+    JudgeData, Machine, OutputCap, OutputFault, OutputInvalid, RUN_LOG_PATH, Role, RoleKind,
+    SCORECARD_PATH, SandboxSpec, ScorecardFault, Untrusted, preflight,
 };
 use tar::Header;
 
@@ -49,12 +49,21 @@ fn host() -> Result<Capabilities, Box<dyn Error>> {
     ))
 }
 
+/// The input disk of the right shape for role `R`: the baseline's candidate parts, or a judge's parts.
+fn input<R: Role>() -> InputDisk {
+    if R::KIND == RoleKind::Judge {
+        InputDisk::judge(BlobId::of(b"guest job"), BlobId::of(b"candidate output"))
+    } else {
+        InputDisk::candidate(BlobId::of(b"guest job"), TreeId::of(b"t"), None)
+    }
+}
+
 /// A spec of role `R` for the baseline job.
 fn spec<R: Role>() -> Result<SandboxSpec<R>, Box<dyn Error>> {
     Ok(SandboxSpec::<R>::new(
         &job()?,
         ImageDigest::of(b"root image"),
-        InputDisk::new(BlobId::of(b"input disk")),
+        input::<R>(),
         Machine::new(2, 512)?,
         Arch::Arm64,
     )?)

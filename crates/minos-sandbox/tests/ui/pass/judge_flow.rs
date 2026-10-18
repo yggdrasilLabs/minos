@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let plan = SandboxSpec::<Judge>::new(
         &job,
         ImageDigest::of(b"root image"),
-        InputDisk::new(BlobId::of(b"input disk")),
+        InputDisk::judge(BlobId::of(b"guest job"), BlobId::of(b"candidate output")),
         Machine::new(2, 512)?,
         Arch::Arm64,
     )?

@@ -4,6 +4,7 @@
 //! shell recipe sits in a comment above each literal so a reviewer can recompute it. These are plain `assert_eq!`
 //! checks on hex literals and never snapshot assertions, so they cannot be auto-accepted.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
@@ -128,8 +129,28 @@ fn root() -> ImageDigest {
     ImageDigest::of(b"root image")
 }
 
-fn input() -> InputDisk {
-    InputDisk::new(BlobId::of(b"input disk"))
+/// The guest job blob every test input names.
+fn job_blob() -> BlobId {
+    BlobId::of(b"guest job")
+}
+
+/// The baseline candidate input of the tree `t`: the job blob and the base tree, no diff.
+fn candidate_input() -> InputDisk {
+    InputDisk::candidate(job_blob(), TreeId::of(b"t"), None)
+}
+
+/// A judge input: the job blob and the candidate's output blob.
+fn judge_input() -> InputDisk {
+    InputDisk::judge(job_blob(), BlobId::of(b"candidate output"))
+}
+
+/// The input of the right shape for role `R`.
+fn input<R: Role>() -> InputDisk {
+    if R::KIND == RoleKind::Judge {
+        judge_input()
+    } else {
+        candidate_input()
+    }
 }
 
 fn machine() -> Result<Machine, SpecError> {
@@ -155,7 +176,8 @@ fn machine_bounds() -> TestResult {
 #[test]
 fn candidate_duration_is_build_plus_run_plus_boot() -> TestResult {
     let job = job(60_000, 120_000, 120_000)?;
-    let spec = SandboxSpec::<Candidate>::new(&job, root(), input(), machine()?, Arch::Arm64)?;
+    let spec =
+        SandboxSpec::<Candidate>::new(&job, root(), input::<Candidate>(), machine()?, Arch::Arm64)?;
     let plan = spec.seal();
     assert_eq!(plan.max_duration_ms(), 210_000);
     assert_eq!(plan.max_duration(), Duration::from_secs(210));
@@ -165,7 +187,7 @@ fn candidate_duration_is_build_plus_run_plus_boot() -> TestResult {
 #[test]
 fn judge_duration_is_judge_plus_boot() -> TestResult {
     let job = job(60_000, 120_000, 120_000)?;
-    let spec = SandboxSpec::<Judge>::new(&job, root(), input(), machine()?, Arch::Arm64)?;
+    let spec = SandboxSpec::<Judge>::new(&job, root(), input::<Judge>(), machine()?, Arch::Arm64)?;
     assert_eq!(spec.seal().max_duration_ms(), 150_000);
     Ok(())
 }
@@ -174,17 +196,24 @@ fn judge_duration_is_judge_plus_boot() -> TestResult {
 fn over_ceiling_is_refused_not_clamped() -> TestResult {
     // build + run + 30 s = 3_630_000 ms, over the 3_600_000 ms launcher ceiling.
     let job = job(1_800_000, 1_800_000, 120_000)?;
-    let refused = SandboxSpec::<Candidate>::new(&job, root(), input(), machine()?, Arch::Arm64);
+    let refused =
+        SandboxSpec::<Candidate>::new(&job, root(), input::<Candidate>(), machine()?, Arch::Arm64);
     assert_eq!(
         refused.err(),
         Some(SpecError::DurationOverCeiling { ms: 3_630_000 })
     );
-    let judge = SandboxSpec::<Judge>::new(&job, root(), input(), machine()?, Arch::Arm64)?;
+    let judge = SandboxSpec::<Judge>::new(&job, root(), input::<Judge>(), machine()?, Arch::Arm64)?;
     assert_eq!(judge.seal().max_duration_ms(), 150_000);
 
     // A one-hour judge plus the boot allowance is over the ceiling too.
     let long_judge = self::job(60_000, 60_000, 3_600_000)?;
-    let refused = SandboxSpec::<Judge>::new(&long_judge, root(), input(), machine()?, Arch::Arm64);
+    let refused = SandboxSpec::<Judge>::new(
+        &long_judge,
+        root(),
+        input::<Judge>(),
+        machine()?,
+        Arch::Arm64,
+    );
     assert_eq!(
         refused.err(),
         Some(SpecError::DurationOverCeiling { ms: 3_630_000 })
@@ -192,9 +221,14 @@ fn over_ceiling_is_refused_not_clamped() -> TestResult {
 
     // Exactly at the ceiling is accepted.
     let at_ceiling = self::job(1_785_000, 1_785_000, 60_000)?;
-    let plan =
-        SandboxSpec::<Candidate>::new(&at_ceiling, root(), input(), machine()?, Arch::Arm64)?
-            .seal();
+    let plan = SandboxSpec::<Candidate>::new(
+        &at_ceiling,
+        root(),
+        input::<Candidate>(),
+        machine()?,
+        Arch::Arm64,
+    )?
+    .seal();
     assert_eq!(plan.max_duration_ms(), 3_600_000);
     Ok(())
 }
@@ -203,19 +237,22 @@ fn over_ceiling_is_refused_not_clamped() -> TestResult {
 fn seal_preserves_every_field() -> TestResult {
     let job = job(60_000, 120_000, 90_000)?;
     let machine = Machine::new(4, 2048)?;
-    let plan = SandboxSpec::<Candidate>::new(&job, root(), input(), machine, Arch::X86_64)?.seal();
+    let plan =
+        SandboxSpec::<Candidate>::new(&job, root(), input::<Candidate>(), machine, Arch::X86_64)?
+            .seal();
     assert_eq!(
         *plan.key(),
         LaunchKey::of::<Candidate>(&job.exp(), &job.judge(), job.trial())
     );
     assert_eq!(*plan.root(), root());
-    assert_eq!(*plan.input(), input());
+    assert_eq!(*plan.input(), candidate_input());
     assert_eq!(*plan.budget(), job.budget());
     assert_eq!(*plan.machine(), machine);
     assert_eq!(plan.arch(), Arch::X86_64);
     assert_eq!(plan.role(), RoleKind::Candidate);
 
-    let judge_plan = SandboxSpec::<Judge>::new(&job, root(), input(), machine, Arch::Arm64)?.seal();
+    let judge_plan =
+        SandboxSpec::<Judge>::new(&job, root(), input::<Judge>(), machine, Arch::Arm64)?.seal();
     assert_eq!(
         *judge_plan.key(),
         LaunchKey::of::<Judge>(&job.exp(), &job.judge(), job.trial())
@@ -229,17 +266,19 @@ fn seal_preserves_every_field() -> TestResult {
 fn only_judge_secrets_set_judge_data() -> TestResult {
     let job = job(60_000, 120_000, 90_000)?;
     let data = JudgeData::new(BlobId::of(b"judge data"));
-    let with = SandboxSpec::<Judge>::new(&job, root(), input(), machine()?, Arch::Arm64)?
+    let with = SandboxSpec::<Judge>::new(&job, root(), input::<Judge>(), machine()?, Arch::Arm64)?
         .secrets(data)
         .seal();
     assert_eq!(with.judge_data(), Some(&data));
     assert_eq!(*data.blob(), BlobId::of(b"judge data"));
 
-    let without = SandboxSpec::<Judge>::new(&job, root(), input(), machine()?, Arch::Arm64)?.seal();
+    let without =
+        SandboxSpec::<Judge>::new(&job, root(), input::<Judge>(), machine()?, Arch::Arm64)?.seal();
     assert_eq!(without.judge_data(), None);
 
     let candidate =
-        SandboxSpec::<Candidate>::new(&job, root(), input(), machine()?, Arch::Arm64)?.seal();
+        SandboxSpec::<Candidate>::new(&job, root(), input::<Candidate>(), machine()?, Arch::Arm64)?
+            .seal();
     assert_eq!(candidate.judge_data(), None);
     Ok(())
 }
@@ -255,4 +294,110 @@ fn launcher_bounds_match_minos_vmm() {
     assert_eq!(minos_sandbox::spec::MAX_MEMORY_MIB, 16_384);
     assert_eq!(minos_sandbox::spec::MAX_LAUNCH_MS, 3_600_000);
     assert_eq!(minos_sandbox::spec::BOOT_ALLOWANCE_MS, 30_000);
+}
+
+/// The machine bounds are core's (05-CONTEXT D-06): the sandbox re-exports them, so the manifest's range check,
+/// the plan, and the launcher pins share one definition.
+#[test]
+fn bounds_come_from_core() {
+    assert_eq!(
+        minos_sandbox::spec::MAX_VCPUS,
+        minos_core::limits::MAX_VCPUS
+    );
+    assert_eq!(
+        minos_sandbox::spec::MIN_MEMORY_MIB,
+        minos_core::limits::MIN_MEMORY_MIB
+    );
+    assert_eq!(
+        minos_sandbox::spec::MAX_MEMORY_MIB,
+        minos_core::limits::MAX_MEMORY_MIB
+    );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The input disk's parts (05-CONTEXT D-15)
+// ---------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn input_disk_candidate_shape() {
+    let base = TreeId::of(b"base tree");
+    let diff = BlobId::of(b"canonical diff");
+    let input = InputDisk::candidate(job_blob(), base, Some(diff));
+    assert_eq!(input.role(), RoleKind::Candidate);
+    assert_eq!(input.job(), job_blob());
+    assert_eq!(input.base(), Some(base));
+    assert_eq!(input.diff(), Some(diff));
+    assert_eq!(input.candidate_out(), None);
+    assert_eq!(
+        input.blobs(),
+        BTreeSet::from([job_blob(), base.to_blob_id(), diff])
+    );
+
+    let baseline = InputDisk::candidate(job_blob(), base, None);
+    assert_eq!(baseline.diff(), None);
+    assert_eq!(
+        baseline.blobs(),
+        BTreeSet::from([job_blob(), base.to_blob_id()])
+    );
+}
+
+#[test]
+fn input_disk_judge_shape() {
+    let out = BlobId::of(b"candidate output");
+    let input = InputDisk::judge(job_blob(), out);
+    assert_eq!(input.role(), RoleKind::Judge);
+    assert_eq!(input.job(), job_blob());
+    assert_eq!(input.base(), None);
+    assert_eq!(input.diff(), None);
+    assert_eq!(input.candidate_out(), Some(out));
+    assert_eq!(input.blobs(), BTreeSet::from([job_blob(), out]));
+}
+
+#[test]
+fn spec_refuses_wrong_role_input() -> TestResult {
+    let job = job(60_000, 120_000, 90_000)?;
+    let refused =
+        SandboxSpec::<Candidate>::new(&job, root(), judge_input(), machine()?, Arch::Arm64);
+    assert_eq!(
+        refused.err(),
+        Some(SpecError::InputRole {
+            role: RoleKind::Judge
+        })
+    );
+    let refused =
+        SandboxSpec::<Judge>::new(&job, root(), candidate_input(), machine()?, Arch::Arm64);
+    assert_eq!(
+        refused.err(),
+        Some(SpecError::InputRole {
+            role: RoleKind::Candidate
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn spec_refuses_mismatched_parts() -> TestResult {
+    let job = job(60_000, 120_000, 90_000)?;
+    let other_base = InputDisk::candidate(job_blob(), TreeId::of(b"other tree"), None);
+    let refused = SandboxSpec::<Candidate>::new(&job, root(), other_base, machine()?, Arch::Arm64);
+    assert_eq!(refused.err(), Some(SpecError::InputMismatch));
+
+    // The baseline job has no diff, so an input naming one disagrees with it.
+    let extra_diff = InputDisk::candidate(job_blob(), job.base(), Some(BlobId::of(b"a diff")));
+    let refused = SandboxSpec::<Candidate>::new(&job, root(), extra_diff, machine()?, Arch::Arm64);
+    assert_eq!(refused.err(), Some(SpecError::InputMismatch));
+
+    // The input checks come before the duration check.
+    let over = self::job(1_800_000, 1_800_000, 120_000)?;
+    let refused = SandboxSpec::<Candidate>::new(&over, root(), other_base, machine()?, Arch::Arm64);
+    assert_eq!(refused.err(), Some(SpecError::InputMismatch));
+    let refused =
+        SandboxSpec::<Candidate>::new(&over, root(), judge_input(), machine()?, Arch::Arm64);
+    assert_eq!(
+        refused.err(),
+        Some(SpecError::InputRole {
+            role: RoleKind::Judge
+        })
+    );
+    Ok(())
 }
