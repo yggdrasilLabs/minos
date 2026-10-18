@@ -39,7 +39,18 @@ fn doctor_without_binaries_refuses_and_names_every_path() -> TestResult {
     ] {
         assert!(report.contains(line), "{line:?} missing in:\n{report}");
     }
-    for path in [bin.join("minos-vmm"), bin.join("minos-guest")] {
+    let musl = bin
+        .parent()
+        .ok_or("bin has a parent")?
+        .join("aarch64-unknown-linux-musl/release/minos-guest");
+    for path in [bin.join("minos-vmm"), bin.join("minos-guest"), musl.clone()] {
+        let rejected = format!("  rejected  {}  not found", path.display());
+        assert!(
+            report.contains(&rejected),
+            "{rejected:?} missing in:\n{report}"
+        );
+    }
+    for path in [bin.join("minos-vmm"), musl] {
         let checked = format!("  checked: {}", path.display());
         assert!(
             report.contains(&checked),

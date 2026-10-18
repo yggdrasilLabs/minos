@@ -41,20 +41,19 @@ use rustix::process::{Pid, Signal, kill_process_group};
 
 /// The committed entitlements plist, `crates/minos-vmm/minos-vmm.entitlements`, byte for byte. `setup` writes a
 /// private copy of it, so an installed `minos` signs with exactly the reviewed entitlements and nothing else.
-const ENTITLEMENTS: &[u8] = b"";
+const ENTITLEMENTS: &[u8] = include_bytes!("../../minos-vmm/minos-vmm.entitlements");
 
-/// CLAUDE.md Commands' signing flags, between `codesign` and the entitlements and helper paths.
-const CODESIGN_FLAGS: [&str; 6] = [
-    "--force",
-    "--sign",
-    "-",
-    "--options",
-    "runtime",
-    "--entitlements",
-];
+/// CLAUDE.md Commands' signing flags before the hardened runtime: replace any signature with an ad-hoc one.
+const SIGN_FLAGS: [&str; 3] = ["--force", "--sign", "-"];
+
+/// The hardened runtime, which the documented argv turns on (02-SPIKE-EVIDENCE.md S04-SIGN, K5).
+const HARDENED_RUNTIME: [&str; 2] = ["--options", "runtime"];
+
+/// The flag the entitlements path follows.
+const ENTITLEMENTS_FLAG: &str = "--entitlements";
 
 /// How long `codesign` may take to sign the helper.
-const SIGN_DEADLINE: Duration = Duration::from_secs(60);
+const SIGN_DEADLINE: Duration = Duration::from_mins(1);
 
 /// How long one `docker` command may take; a daemon that does not answer in time counts as not running.
 const DOCKER_DEADLINE: Duration = Duration::from_secs(10);
@@ -162,8 +161,18 @@ pub fn setup() -> anyhow::Result<ExitCode> {
 /// --entitlements <entitlements> <vmm>`. Only the entitlements path differs from the documented command, and it
 /// names a byte-identical private copy of the committed plist.
 pub fn setup_codesign_argv(vmm: &Path, entitlements: &Path) -> Vec<OsString> {
-    let _ = (vmm, entitlements);
-    Vec::new()
+    let mut argv = Vec::with_capacity(9);
+    argv.push(OsString::from(CODESIGN));
+    argv.extend(
+        SIGN_FLAGS
+            .iter()
+            .chain(&HARDENED_RUNTIME)
+            .map(OsString::from),
+    );
+    argv.push(OsString::from(ENTITLEMENTS_FLAG));
+    argv.push(entitlements.as_os_str().to_owned());
+    argv.push(vmm.as_os_str().to_owned());
+    argv
 }
 
 /// Writes the committed plist to a fresh 0700 directory as a 0600 file and runs the signing argv on `vmm`.
@@ -242,8 +251,13 @@ impl DoctorReport {
 
     /// How many things failed: each refused probe, and a job root that could not be opened.
     fn failures(&self) -> usize {
-        let _ = self;
-        0
+        let refused = self
+            .probes
+            .iter()
+            .filter(|probe| probe.is_refused())
+            .count();
+        let sweep = usize::from(matches!(self.sweep, SweepStatus::Failed { .. }));
+        refused.saturating_add(sweep)
     }
 
     /// 0 when nothing failed, 1 otherwise.
@@ -341,8 +355,71 @@ fn sweep_jobs(vmm: &Path) -> SweepStatus {
 /// Renders the doctor report: the binaries, each check with its paths, the confinement layers, the sweep, the
 /// builder, and the result, in that order. Every path and host-tool string passes through [`SafeText`].
 pub fn render_doctor(report: &DoctorReport) -> String {
-    let _ = report;
-    String::new()
+    let mut out = String::new();
+    push(
+        &mut out,
+        "binaries (fixed locations; no configuration file or environment variable):",
+    );
+    for binary in &report.binaries {
+        let state = if binary.accepted {
+            "found   "
+        } else {
+            "rejected"
+        };
+        push(
+            &mut out,
+            format_args!("  {state}  {}  {}", shown(&binary.path), binary.reason),
+        );
+    }
+    push(
+        &mut out,
+        format_args!("  kernel    {}  checked below", shown(&report.krunfw)),
+    );
+    push(&mut out, "");
+
+    push(&mut out, "checks:");
+    for probe in &report.probes {
+        render_probe(&mut out, probe);
+    }
+    push(&mut out, "");
+
+    let mut active = vec![isolation_name(report.isolation)];
+    active.extend(report.layers.iter().map(|layer| layer_name(*layer)));
+    push(&mut out, format_args!("confinement: {}", active.join(", ")));
+    for layer in EXPECTED_KRUN_LAYERS {
+        if !report.layers.contains(&layer) {
+            push(&mut out, missing_layer(layer));
+        }
+    }
+    push(&mut out, "");
+
+    match &report.sweep {
+        SweepStatus::Swept { root, entries } => {
+            push(&mut out, format_args!("job sweep: {}", shown(root)));
+            if entries.is_empty() {
+                push(&mut out, "  no job directories left over");
+            }
+            for entry in entries {
+                push(&mut out, sweep_line(entry));
+            }
+        }
+        SweepStatus::Failed { error } => {
+            push(&mut out, format_args!("job sweep: failed: {error}"));
+        }
+    }
+    push(&mut out, format_args!("builder: {}", report.builder));
+    push(&mut out, "");
+
+    match report.failures() {
+        0 => push(&mut out, "result: every check passed"),
+        failed => push(
+            &mut out,
+            format_args!(
+                "result: {failed} failed; fix each one above and run minos host doctor again"
+            ),
+        ),
+    }
+    out
 }
 
 /// Renders one check: `ok` or `refused`, its name, what it saw or the refusal with its fix, then its paths.

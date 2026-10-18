@@ -1,8 +1,8 @@
 //! The `minos` command-line interface.
 //!
-//! The command tree is built with clap's builder API; the derive feature stays off, because `clap_derive`'s
-//! generated `#[allow(clippy::restriction)]` is E0453 under the workspace's `forbid` lints (01-GATE-EVIDENCE.md
-//! F-01). Commands so far:
+//! The command tree is built with clap's builder API; the derive feature stays off, because `clap_derive` puts an
+//! allow attribute for `clippy::restriction` on its generated impls, which is E0453 under the workspace's `forbid`
+//! lints (01-GATE-EVIDENCE.md F-01). Commands so far:
 //!
 //! - `minos host doctor`: run the launch preflight and explain every refusal (CLI-03, KRUN-06).
 //! - `minos host setup`: sign the `minos-vmm` helper and verify its entitlements (KRUN-08).
