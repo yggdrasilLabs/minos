@@ -1081,3 +1081,106 @@ helper has exited (so it is one of the zombies); the tests' group probe treats `
 `ps` lists no live member of the group, and still ends only on `ESRCH`. After the change, 200 runs of the `supervise`
 tests and 50 runs of the whole crate's unit tests passed with no failure. The sweep (05-11) is unchanged: it still
 reports `EPERM` as Unverified.
+
+## 05-17 first production boot and the write-only console rule
+
+Requirement: GUEST-01, KRUN-04 (05-09 note: the narrowed `(allow file-write* (literal "/dev/fd/1"))` console rule had
+never been booted)
+
+The first VM launched through `KrunBackend` (`experiment_applies_diff_and_runs_as_candidate_uid`, HEAD 017fc11 plus the
+uncommitted `tests/vm.rs`) booted under the embedded deny-default profile with the write-only console rule, returned a
+valid authenticated stream, and ended `Exited` after 547 ms. No exit 66, no missing console: the narrowed rule holds.
+The root image was the test image packed by `rootfs::pack_root_image` and named from
+`<tmp>/proj/.minos/blobs/sha256/<2>/<62>` (store-path branch, D-14), and the job root was `<tmp>/minos-501` under a
+fresh `/private/tmp/mvt*` directory.
+
+## 05-17 helper `RLIMIT_NOFILE` and the vsock reaper
+
+Requirement: GUEST-04 (S03-ANSWER asked for the chunk cost in production), KRUN-07 (the helper's own rlimits)
+
+Symptom: the first full suite run passed, but `output_16_mib_is_reassembled` took 20.528531416 s for the launch, against
+about 0.59 s of helper run time for the same 16 MiB in W0-CHUNKS. The over-cap run (17000000 bytes, nothing streamed)
+took 0.35 s, so the time was in the stream.
+
+Diagnosis, with throwaway instrumentation that was reverted before any commit (`git checkout` of `chunks.rs`,
+`linux.rs`, `sink.rs`, and the harness; the committed guest prints no diagnostic):
+
+| Run | Host receiver total | Waiting on the listener | Reading connections | Guest connect total | Connects over 2 ms | Guest connect retries |
+|---|---|---|---|---|---|---|
+| NOFILE 1024, 2048 MiB VM | 20.47 s | 20.25 s | 0.19 s | 20.07 s | 4 | 300 (302 in an earlier run) |
+| NOFILE 1024, 1024 MiB VM | 20.53 s | 20.32 s | 0.18 s | not instrumented | | |
+| NOFILE 1024, 640 MiB VM | 20.49 s | 20.28 s | 0.18 s | not instrumented | | |
+| NOFILE 8192, 2048 MiB VM | 0.85 s | 0.67 s | 0.16 s | 0.21 s | 0 | 0 |
+
+The host was idle 99% of the time and VM memory made no difference. Four connects in 3909 took about 5 s each, made of
+about 75 reset-and-retry attempts on the guest's 1 ms to 64 ms backoff. The cause is in the pinned crate's source,
+`msb_krun_devices-0.1.41/src/virtio/vsock/reaper.rs`: `const TIMEOUT: Duration = Duration::new(5, 0);` the reaper
+keeps every released connection's proxy, and with it the host-side socket, for 5 s after the connection closes. With
+the helper's `RLIMIT_NOFILE` at 1024 (05-07's `NOFILE_LIMIT`), every thousand or so connections exhausted the helper's
+descriptors, new guest connects were reset until the reaper freed the oldest ones, and the stream stalled about 5 s
+each time (3909 connections, 4 stalls, 20 s). W0-CHUNKS ran before 05-07 added the limit, under the shell's 1048576.
+
+Fix (Minos configuration, no dependency change): `NOFILE_LIMIT` in `crates/minos-vmm/src/main.rs` is 8192, above one
+whole output stream (`MAX_OUTPUT_STREAM_BYTES` over `MAX_CHUNK_PAYLOAD` is about 4353 connections) inside one reaper
+window, and still a bound on the helper's descriptors. `output_16_mib_is_reassembled` now asserts the launch takes less
+than the 15 s W0 selection bound. After the fix the production 16 MiB launch took 0.606650500 s, then 0.602410 s.
+
+## 05-17 VM suite
+
+Command: `MINOS_VMM=$(pwd)/target/debug/minos-vmm MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest MINOS_KRUNFW=/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib cargo test -p minos-backend-krun --test vm -- --ignored --nocapture --test-threads=1`
+
+Run after `cargo build -p minos-vmm`, the CLAUDE.md `codesign` argv (entitlements listed:
+`com.apple.security.cs.disable-library-validation`, `com.apple.security.hypervisor`), and
+`cargo build -p minos-guest --release --target aarch64-unknown-linux-musl`, at HEAD 754ed85, macOS 27.0.1, rustc 1.97.1.
+Guest-derived text is printed only as parsed probe JSON or through `LogExcerpt`. Afterwards `pgrep -fl minos-vmm`
+printed nothing.
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/vm.rs (target/debug/deps/vm-69052a93a1f98219)
+
+running 10 tests
+test apply_mismatch_is_rejected_and_runs_nothing ... == candidate: ended Exited after 486.721917ms
+ok
+test candidate_output_never_carries_a_scorecard ... == candidate: ended Exited after 334.317375ms
+== out/w.json: {"inside":[{"ok":true,"os_error":null,"target":"/tmp/minos-probe-write"},{"ok":true,"os_error":null,"target":"/out/minos-probe-write"}],"outside":[{"ok":false,"os_error":30,"target":"/minos-probe-write"},{"ok":false,"os_error":30,"target":"/etc/minos-probe-write"},{"ok":false,"os_error":13,"target":"/root/minos-probe-write"},{"ok":false,"os_error":30,"target":"/usr/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/judge/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/candidate/minos-probe-write"}],"reads":[{"ok":false,"os_error":2,"target":"/proc/1/environ"},{"ok":false,"os_error":2,"target":"/dev/vdb"}]}
+ok
+test experiment_applies_diff_and_runs_as_candidate_uid ... == candidate: ended Exited after 338.918417ms
+== out/build.json: {"cmdline":"reboot=k panic=-1 panic_print=0 nomodule console=hvc0 rootfstype=virtiofs rw quiet no-kvmapf rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0 root=/dev/root init=/init root=/dev/vda      KRUN_BOOT_START_NS=1792364216231627000  --","cwd":"/scratch/src","egid":64000,"euid":64000,"gid":64000,"groups":[],"limits":["Max cpu time              61                   61                   seconds   ","Max file size             1073741824           1073741824           bytes     ","Max core file size        0                    0                    bytes     ","Max processes             512                  512                  processes ","Max open files            4096                 4096                 files     ","Max address space         805306368            805306368            bytes     "],"uid":64000,"vars":{"HOME":"/scratch/home","LANG":"C","PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","TMPDIR":"/tmp"}}
+== out/run.json: {"exists":true,"path":"/scratch/src/src/value.txt"}
+ok
+test judge_role_returns_a_scorecard ... == judge: ended Exited after 329.305209ms
+ok
+test output_16_mib_is_reassembled ... == candidate: ended Exited after 602.41ms
+== output status Packed { files: 2, content_bytes: 16000000 }
+== 16 MiB output: 2 files, 16000000 content bytes, launch elapsed 602.41ms
+ok
+test output_over_cap_is_refused_by_the_guest ... == candidate: ended Exited after 353.996833ms
+ok
+test over_budget_candidates_are_stopped_in_the_vm ... == candidate: ended Exited after 468.704708ms
+== out/a.json: {"allocated_mib":764,"error":"allocation refused","requested_mib":832}
+== RLIMIT_AS allowance 768 MiB: the probe allocated 764 of 832 MiB
+== candidate: ended Exited after 353.404041ms
+== out/s.json: {"os_error":11,"requested":2000,"started":511}
+== RLIMIT_NPROC 512: the probe started 511 of 2000 children
+== candidate: ended Exited after 424.1565ms
+== out/f.json: {"bytes_written":134213632,"os_error":28,"path":"/scratch/tmp/minos-probe-fill"}
+== scratch 128 MiB: the probe wrote 134213632 bytes before a write failed
+ok
+test stage_timeout_is_reported_by_the_guest ... == candidate: ended Exited after 2.339398334s
+== a 2 s run budget: the launch took 2.339398334s
+ok
+test two_sequential_experiments_share_no_build_output ... == candidate: ended Exited after 330.532417ms
+== out/m.json: {"exists":true,"path":"/scratch/src/target/marker"}
+== candidate: ended Exited after 340.470583ms
+== out/m.json: {"exists":false,"path":"/scratch/src/target/marker"}
+ok
+test writes_outside_scratch_fail ... == candidate: ended Exited after 338.603583ms
+== out/w.json: {"inside":[{"ok":true,"os_error":null,"target":"/tmp/minos-probe-write"},{"ok":true,"os_error":null,"target":"/out/minos-probe-write"}],"outside":[{"ok":false,"os_error":30,"target":"/minos-probe-write"},{"ok":false,"os_error":30,"target":"/etc/minos-probe-write"},{"ok":false,"os_error":13,"target":"/root/minos-probe-write"},{"ok":false,"os_error":30,"target":"/usr/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/judge/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/candidate/minos-probe-write"}],"reads":[{"ok":false,"os_error":2,"target":"/proc/1/environ"},{"ok":false,"os_error":2,"target":"/dev/vdb"}]}
+ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.19s
+
+```
