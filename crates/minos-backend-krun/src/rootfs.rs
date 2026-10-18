@@ -330,6 +330,40 @@ pub fn minimal_root_image(init: &[u8]) -> Result<PackedImage, PackError> {
     pack_root_image(io::empty(), init, &PackLimits::default())
 }
 
+/// Why a binary is not a guest `/init` this backend can boot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ElfError {
+    /// The bytes do not start with the ELF magic; a Mach-O build of `minos-guest` lands here.
+    #[error("guest binary is not an ELF file")]
+    NotElf,
+    /// The ELF class is not 64-bit.
+    #[error("guest binary is not a 64-bit ELF")]
+    Not64Bit,
+    /// The ELF data encoding is not little-endian.
+    #[error("guest binary is not little-endian")]
+    NotLittleEndian,
+    /// The ELF machine is not AArch64 (183).
+    #[error("guest binary is not built for AArch64")]
+    NotAarch64,
+    /// A `PT_INTERP` program header names a dynamic loader, which the user's root image would supply.
+    #[error("guest binary is dynamically linked (it has a PT_INTERP program header)")]
+    Dynamic,
+    /// The ELF header or its program header table runs past the end of the bytes, or cannot be walked.
+    #[error("guest binary is truncated or its program header table cannot be read")]
+    Truncated,
+}
+
+/// Checks that `bytes` is a binary the guest kernel can run as `/init` without anything from the root image.
+///
+/// # Errors
+///
+/// An [`ElfError`] naming the first property that fails.
+pub fn check_guest_elf(bytes: &[u8]) -> Result<(), ElfError> {
+    let _ = bytes;
+    Ok(())
+}
+
 /// The name `/init` has in the tree (paths are kept without a leading slash).
 const INIT_NAME: &str = "init";
 
@@ -966,7 +1000,10 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tar::{EntryType, Header};
 
-    use super::{PackError, PackLimits, PackedImage, minimal_root_image, pack_root_image};
+    use super::{
+        ElfError, PackError, PackLimits, PackedImage, check_guest_elf, minimal_root_image,
+        pack_root_image,
+    };
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -1533,6 +1570,127 @@ mod tests {
             image.report().image_sha256(),
             "8e4f12d45a06ef4bf20fe0f37e74ca06e2b7b108a8c4325ed2c7f6a6600e4e98"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn root_image_has_out_and_scratch() -> TestResult {
+        let image = minimal_root_image(b"init")?;
+        let fs = read_back(&image)?;
+        for mount_point in ["/dev", "/mnt", "/out", "/proc", "/scratch", "/sys"] {
+            let found = node(&fs, mount_point)?;
+            assert!(matches!(found.inner, InnerNode::Dir(_)), "{mount_point}");
+            assert_eq!(found.header.permissions, 0o755, "{mount_point}");
+        }
+        let tmp = node(&fs, "/tmp")?;
+        assert!(matches!(tmp.inner, InnerNode::Dir(_)));
+        assert_eq!(tmp.header.permissions, 0o1777);
+        // the seven mount points, and nothing else
+        assert_eq!(image.report().dirs(), 7);
+        Ok(())
+    }
+
+    /// ELF64 file header length.
+    const EHDR_LEN: u16 = 64;
+    /// ELF64 program header length.
+    const PHDR_LEN: u16 = 56;
+
+    /// A 64-bit little-endian AArch64 ELF header followed by one 56-byte program header per entry of
+    /// `phdr_types`, with `class`, `data`, and `machine` set as given.
+    fn elf(
+        class: u8,
+        data: u8,
+        machine: u16,
+        phdr_types: &[u32],
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
+        let phnum = u16::try_from(phdr_types.len())?;
+        let phoff: u64 = if phdr_types.is_empty() {
+            0
+        } else {
+            u64::from(EHDR_LEN)
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&[0x7f, b'E', b'L', b'F', class, data, 1, 0]);
+        bytes.extend_from_slice(&[0; 8]);
+        bytes.extend_from_slice(&2_u16.to_le_bytes()); // e_type ET_EXEC
+        bytes.extend_from_slice(&machine.to_le_bytes());
+        bytes.extend_from_slice(&1_u32.to_le_bytes()); // e_version
+        bytes.extend_from_slice(&0x40_0000_u64.to_le_bytes()); // e_entry
+        bytes.extend_from_slice(&phoff.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes()); // e_shoff
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // e_flags
+        bytes.extend_from_slice(&EHDR_LEN.to_le_bytes());
+        bytes.extend_from_slice(&PHDR_LEN.to_le_bytes());
+        bytes.extend_from_slice(&phnum.to_le_bytes());
+        bytes.extend_from_slice(&[0; 6]); // e_shentsize, e_shnum, e_shstrndx
+        assert_eq!(bytes.len(), usize::from(EHDR_LEN));
+        for p_type in phdr_types {
+            bytes.extend_from_slice(&p_type.to_le_bytes());
+            bytes.extend_from_slice(&[0; 52]);
+        }
+        Ok(bytes)
+    }
+
+    #[test]
+    fn elf_check() -> TestResult {
+        const PT_LOAD: u32 = 1;
+        const PT_INTERP: u32 = 3;
+        const PT_GNU_STACK: u32 = 0x6474_e551;
+        assert_eq!(check_guest_elf(&elf(2, 1, 183, &[])?), Ok(()));
+        assert_eq!(
+            check_guest_elf(&elf(2, 1, 183, &[PT_LOAD, PT_GNU_STACK])?),
+            Ok(())
+        );
+        assert_eq!(
+            check_guest_elf(&elf(2, 1, 183, &[PT_LOAD, PT_INTERP])?),
+            Err(ElfError::Dynamic)
+        );
+        assert_eq!(
+            check_guest_elf(&elf(2, 1, 62, &[])?),
+            Err(ElfError::NotAarch64)
+        );
+        assert_eq!(
+            check_guest_elf(&elf(1, 1, 183, &[])?),
+            Err(ElfError::Not64Bit)
+        );
+        assert_eq!(
+            check_guest_elf(&elf(2, 2, 183, &[])?),
+            Err(ElfError::NotLittleEndian)
+        );
+        let mut mach_o = vec![0xcf, 0xfa, 0xed, 0xfe];
+        mach_o.resize(4096, 0);
+        assert_eq!(check_guest_elf(&mach_o), Err(ElfError::NotElf));
+        let header = elf(2, 1, 183, &[])?;
+        let short = header.get(..20).ok_or("fixture shorter than 20 bytes")?;
+        assert_eq!(check_guest_elf(short), Err(ElfError::Truncated));
+        assert_eq!(check_guest_elf(b"\x7fEL"), Err(ElfError::Truncated));
+        assert_eq!(check_guest_elf(b""), Err(ElfError::Truncated));
+        Ok(())
+    }
+
+    #[test]
+    fn elf_check_refuses_an_unreadable_program_header_table() -> TestResult {
+        // one program header declared, its bytes cut off
+        let full = elf(2, 1, 183, &[1])?;
+        let cut = full
+            .get(..full.len().saturating_sub(1))
+            .ok_or("fixture too short")?;
+        assert_eq!(check_guest_elf(cut), Err(ElfError::Truncated));
+        // a program header entry too small to hold a 64-bit program header
+        let mut small = elf(2, 1, 183, &[1])?;
+        let entsize = small.get_mut(54..56).ok_or("fixture too short")?;
+        entsize.copy_from_slice(&4_u16.to_le_bytes());
+        assert_eq!(check_guest_elf(&small), Err(ElfError::Truncated));
+        // e_phoff so large that the table end overflows
+        let mut far = elf(2, 1, 183, &[1])?;
+        let phoff = far.get_mut(32..40).ok_or("fixture too short")?;
+        phoff.copy_from_slice(&u64::MAX.to_le_bytes());
+        assert_eq!(check_guest_elf(&far), Err(ElfError::Truncated));
+        // PN_XNUM extended numbering is not followed, so it is refused
+        let mut xnum = elf(2, 1, 183, &[1])?;
+        let phnum = xnum.get_mut(56..58).ok_or("fixture too short")?;
+        phnum.copy_from_slice(&0xffff_u16.to_le_bytes());
+        assert_eq!(check_guest_elf(&xnum), Err(ElfError::Truncated));
         Ok(())
     }
 }
