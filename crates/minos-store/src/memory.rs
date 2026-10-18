@@ -5,6 +5,7 @@
 //! the rehash on read.
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::sync::{Mutex, MutexGuard};
 
 use minos_core::id::{BlobId, RunId};
@@ -69,6 +70,21 @@ impl Blobs for MemoryStore {
             .entry(id)
             .or_insert_with(|| bytes.to_vec());
         Ok(id)
+    }
+
+    fn put_reader<R: Read>(&self, reader: R, max: u64) -> Result<BlobId, StoreError> {
+        let mut bytes = Vec::new();
+        reader
+            .take(max.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|source| StoreError::Io {
+                op: "reading a streamed blob",
+                source,
+            })?;
+        if len_u64(bytes.len()) > max {
+            return Err(StoreError::PutTooLarge { max });
+        }
+        self.put(&bytes)
     }
 
     fn get(&self, id: &BlobId, max: u64) -> Result<Vec<u8>, StoreError> {

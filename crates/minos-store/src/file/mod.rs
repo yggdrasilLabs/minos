@@ -9,6 +9,7 @@
 //! runs/<run hex>/ledger.jsonl    one append-only JSON Lines ledger per run
 //! runs/<run hex>/ledger.lock     the per-run lock file; it holds no data
 //! blobs/sha256/<2 hex>/<62 hex>  one file per blob, shared by every run
+//! blobs/staging/                 temporary files of streamed puts, created 0700, never read
 //! ```
 //!
 //! Every directory the store creates has mode 0700. The root, every directory under it, and every ledger, lock,
@@ -21,7 +22,9 @@
 //! An append writes its line with the trailing newline and calls `sync_data` before it returns (D-12); on Apple
 //! platforms std implements that with `F_FULLFSYNC`. When an append or a put creates a file or a directory, the
 //! directory that holds the new entry is fsynced as well. A blob is written to a temporary file in its shard
-//! directory, synced, and renamed over its final path, so a reader sees the whole blob or none of it.
+//! directory, synced, and renamed over its final path, so a reader sees the whole blob or none of it. A streamed
+//! blob's name is known only after its last byte, so its temporary file sits in `blobs/staging` until then; it is
+//! synced, renamed into its shard, and both the staging and the shard directories are fsynced.
 
 mod blobs;
 mod ledger;
@@ -107,6 +110,11 @@ impl FileStore {
     /// `root/blobs`.
     fn blobs_dir(&self) -> PathBuf {
         self.root.join("blobs")
+    }
+
+    /// `root/blobs/staging`: the temporary files of streamed puts, renamed into their shard once named.
+    fn staging_dir(&self) -> PathBuf {
+        self.blobs_dir().join("staging")
     }
 
     /// `root/blobs/sha256`.

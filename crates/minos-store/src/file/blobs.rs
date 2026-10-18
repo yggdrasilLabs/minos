@@ -5,6 +5,13 @@
 //! over the final path, and fsyncs the shard directory: a reader sees the whole blob or none of it. A put always
 //! writes, so storing the bytes again heals a tampered or replaced blob.
 //!
+//! A streamed put ([`Blobs::put_reader`]; 05-CONTEXT D-09) cannot know the blob's shard until its last byte, so
+//! it writes its temporary file in `blobs/staging`, copying the reader through a 64 KiB buffer and feeding each
+//! buffer to a [`BlobHasher`] as it goes. More than the caller's cap is refused with [`StoreError::PutTooLarge`]
+//! and a reader error with [`StoreError::Io`]; either way the temporary file deletes itself on drop and nothing
+//! is stored. Otherwise the file is synced, renamed into its shard (a rename within one filesystem), and the
+//! shard and staging directories are fsynced, so a reader sees the whole blob or none of it.
+//!
 //! A get refuses a symlink or any other file type, refuses a stored size over the caller's cap from the metadata
 //! before opening the file, reads at most one byte more than the cap, and rehashes what it read, so a flipped byte
 //! on disk is [`StoreError::BlobTampered`] and never reaches a caller.
@@ -12,13 +19,51 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 
-use minos_core::id::BlobId;
+use minos_core::id::{BlobHasher, BlobId};
 use tempfile::NamedTempFile;
 
 use super::{FileStore, dir_exists, ensure_dir, fsync_dir, io_error, len_u64, open_existing};
 use crate::{Blobs, StoreError};
 
+/// The copy buffer of a streamed put.
+const STREAM_BUFFER_BYTES: usize = 64 * 1024;
+
 impl FileStore {
+    /// Makes sure `blobs/` exists, fsyncing the root when it was created here.
+    fn ensure_blobs_dir(&self) -> Result<(), StoreError> {
+        if ensure_dir(&self.blobs_dir(), "blobs directory")? {
+            fsync_dir(&self.root)?;
+        }
+        Ok(())
+    }
+
+    /// Makes sure `blobs/sha256/` and blob `id`'s shard exist, fsyncing each parent that gained an entry. The
+    /// caller has made sure `blobs/` exists.
+    fn ensure_shard(&self, id: &BlobId) -> Result<(), StoreError> {
+        let sha256_dir = self.sha256_dir();
+        if ensure_dir(&sha256_dir, "blobs directory")? {
+            fsync_dir(&self.blobs_dir())?;
+        }
+        if ensure_dir(&self.blob_shard(id), "blob shard directory")? {
+            fsync_dir(&sha256_dir)?;
+        }
+        Ok(())
+    }
+
+    /// Syncs `temp` and renames it over blob `id`'s path, then fsyncs the shard. The caller has made sure the
+    /// shard exists.
+    fn persist_blob(&self, temp: NamedTempFile, id: &BlobId) -> Result<(), StoreError> {
+        temp.as_file()
+            .sync_all()
+            .map_err(io_error("syncing a blob"))?;
+        temp.persist(self.blob_path(id))
+            .map_err(|failed| StoreError::Io {
+                op: "renaming a blob into place",
+                source: failed.error,
+            })?;
+        fsync_dir(&self.blob_shard(id))
+    }
+
     /// Whether the directories that would hold blob `id` all exist; [`StoreError::Unsafe`] when one is a symlink
     /// or another file type.
     fn blob_dirs_exist(&self, id: &BlobId) -> Result<bool, StoreError> {
@@ -31,31 +76,53 @@ impl FileStore {
 impl Blobs for FileStore {
     fn put(&self, bytes: &[u8]) -> Result<BlobId, StoreError> {
         let id = BlobId::of(bytes);
-        let blobs_dir = self.blobs_dir();
-        let sha256_dir = self.sha256_dir();
-        let shard = self.blob_shard(&id);
-        if ensure_dir(&blobs_dir, "blobs directory")? {
-            fsync_dir(&self.root)?;
-        }
-        if ensure_dir(&sha256_dir, "blobs directory")? {
-            fsync_dir(&blobs_dir)?;
-        }
-        if ensure_dir(&shard, "blob shard directory")? {
-            fsync_dir(&sha256_dir)?;
+        self.ensure_blobs_dir()?;
+        self.ensure_shard(&id)?;
+
+        let mut temp = NamedTempFile::new_in(self.blob_shard(&id))
+            .map_err(io_error("creating a blob temporary file"))?;
+        temp.write_all(bytes).map_err(io_error("writing a blob"))?;
+        self.persist_blob(temp, &id)?;
+        Ok(id)
+    }
+
+    fn put_reader<R: Read>(&self, reader: R, max: u64) -> Result<BlobId, StoreError> {
+        self.ensure_blobs_dir()?;
+        let staging = self.staging_dir();
+        if ensure_dir(&staging, "blob staging directory")? {
+            fsync_dir(&self.blobs_dir())?;
         }
 
         let mut temp =
-            NamedTempFile::new_in(&shard).map_err(io_error("creating a blob temporary file"))?;
-        temp.write_all(bytes).map_err(io_error("writing a blob"))?;
-        temp.as_file()
-            .sync_all()
-            .map_err(io_error("syncing a blob"))?;
-        temp.persist(self.blob_path(&id))
-            .map_err(|failed| StoreError::Io {
-                op: "renaming a blob into place",
-                source: failed.error,
+            NamedTempFile::new_in(&staging).map_err(io_error("creating a blob temporary file"))?;
+        let mut limited = reader.take(max.saturating_add(1));
+        let mut buffer = vec![0_u8; STREAM_BUFFER_BYTES];
+        let mut hasher = BlobHasher::default();
+        let mut received: u64 = 0;
+        loop {
+            let read = match limited.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(io_error("reading a streamed blob")(error)),
+            };
+            // A reader that reports more bytes than the buffer holds breaks the `Read` contract.
+            let chunk = buffer.get(..read).ok_or_else(|| {
+                io_error("reading a streamed blob")(io::Error::from(io::ErrorKind::InvalidData))
             })?;
-        fsync_dir(&shard)?;
+            received = received.saturating_add(len_u64(read));
+            if received > max {
+                return Err(StoreError::PutTooLarge { max });
+            }
+            hasher.update(chunk);
+            temp.write_all(chunk)
+                .map_err(io_error("writing a streamed blob"))?;
+        }
+
+        let id = hasher.finish();
+        self.ensure_shard(&id)?;
+        self.persist_blob(temp, &id)?;
+        fsync_dir(&staging)?;
         Ok(id)
     }
 

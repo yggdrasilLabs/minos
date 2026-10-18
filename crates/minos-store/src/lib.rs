@@ -22,6 +22,7 @@
 //!   The first write wins.
 //! - An append is durable before it returns. For the memory store that is a no-op.
 //! - A blob is addressed by the plain SHA-256 of its bytes ([`BlobId::of`]) and is rehashed on every read.
+//!   [`Blobs::put_reader`] streams a blob in under a cap and names it exactly as [`Blobs::put`] would.
 //!
 //! # Errors
 //!
@@ -201,6 +202,13 @@ pub enum StoreError {
         /// The caller's cap.
         max: u64,
     },
+    /// A streamed put received more than its cap, so nothing was stored. Not retried: the same stream is the same
+    /// size again.
+    #[error("the streamed blob is over its {max}-byte cap")]
+    PutTooLarge {
+        /// The caller's cap.
+        max: u64,
+    },
     /// The stored bytes do not hash to their ID.
     #[error("blob {id} does not hash to its id")]
     BlobTampered {
@@ -253,9 +261,11 @@ pub trait Ledger {
     fn read(&self, run: &RunId) -> Result<LedgerRead, StoreError>;
 }
 
-/// A content-addressed blob store. Blobs are in-memory byte slices in this phase: core exposes only
-/// [`BlobId::of`] over a slice, so a streaming put would need a new core constructor (04-RESEARCH Open
-/// Question 3; the source snapshot is capped at 64 MiB).
+/// A content-addressed blob store. A blob goes in whole ([`Blobs::put`]) or streamed from a reader
+/// ([`Blobs::put_reader`], for root images of hundreds of MB; 05-CONTEXT D-09), and either way it is named by
+/// [`BlobId::of`] its bytes.
+///
+/// The trait has a generic method, so it is used as a bound (`S: Blobs`), never as a trait object.
 pub trait Blobs {
     /// Stores `bytes` and returns [`BlobId::of`] them. Storing the same bytes again returns the same ID and
     /// changes nothing.
@@ -265,6 +275,18 @@ pub trait Blobs {
     /// [`StoreError::Io`] when the blob cannot be written, [`StoreError::Unsafe`] when a store path is not the
     /// expected file, and [`StoreError::Poisoned`] when an in-memory lock was poisoned.
     fn put(&self, bytes: &[u8]) -> Result<BlobId, StoreError>;
+
+    /// Streams `reader` into the store, hashing with [`minos_core::id::BlobHasher`] as it writes (05-CONTEXT
+    /// D-09), and returns the ID. The ID equals [`BlobId::of`] the bytes read, and so equals what [`Blobs::put`]
+    /// of the same bytes returns. At most `max` bytes are accepted: once more arrive the put is refused and
+    /// nothing is stored. A reader of exactly `max` bytes is stored.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::PutTooLarge`] when the reader yields more than `max` bytes, [`StoreError::Io`] when the
+    /// reader fails or the blob cannot be written (retryable; nothing is stored), [`StoreError::Unsafe`] when a
+    /// store path is not the expected file, and [`StoreError::Poisoned`] when an in-memory lock was poisoned.
+    fn put_reader<R: std::io::Read>(&self, reader: R, max: u64) -> Result<BlobId, StoreError>;
 
     /// The bytes of blob `id`, refused before any byte is copied when the stored size is over `max`, and
     /// rehashed before they are returned.
@@ -341,6 +363,7 @@ mod tests {
                 size: 2,
                 max: 1,
             },
+            StoreError::PutTooLarge { max: 1 },
             StoreError::BlobTampered { id },
             StoreError::Unsafe { what: "blob file" },
             StoreError::Poisoned,
@@ -379,6 +402,12 @@ mod tests {
         assert!(text.contains(&id.to_hex()), "{text}");
         assert!(text.contains("4096"), "{text}");
         assert!(text.contains("1024"), "{text}");
+    }
+
+    #[test]
+    fn put_too_large_display_names_the_cap() {
+        let text = StoreError::PutTooLarge { max: 1024 }.to_string();
+        assert_eq!(text, "the streamed blob is over its 1024-byte cap");
     }
 
     #[test]
