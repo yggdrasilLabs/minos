@@ -10,9 +10,12 @@
 //! untrusted output), never an `Err`. [`LaunchError`] and [`InfraError`] are infrastructure failures only, and the
 //! runner retries them.
 //!
-//! The trait takes no blob store. `deny.toml` keeps `minos-store` out of backend crates, so how a backend receives
-//! blob bytes or paths is a Phase 5 decision (04-RESEARCH Open Question 7, resolved).
+//! The trait takes no blob store. `deny.toml` keeps `minos-store` out of backend crates, so a backend is
+//! constructed with a [`BlobSource`](crate::BlobSource), through which it fetches the bytes of the IDs a plan
+//! names under caps and the verified root image path (05-CONTEXT D-13, resolving 04-RESEARCH Open Question 7).
+//! Its failures reach the runner as [`LaunchError::Blob`].
 
+use crate::blob_source::BlobSourceError;
 use crate::finished::Finished;
 use crate::preflight::{Capabilities, Cleared};
 use crate::role::Role;
@@ -37,6 +40,11 @@ pub enum LaunchError {
         /// What failed, as a fixed description.
         what: &'static str,
     },
+    /// The [`BlobSource`](crate::BlobSource) could not supply a blob or the root image path the plan names. An
+    /// infrastructure failure the runner retries, except [`BlobSourceError::RootImageMissing`], which
+    /// `minos check` (Phase 8) reports as "run minos env build".
+    #[error("a blob the plan names could not be read")]
+    Blob(#[from] BlobSourceError),
 }
 
 /// Why a backend could not observe how a launch ended. An infrastructure failure that the runner retries, never

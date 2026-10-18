@@ -129,7 +129,7 @@ impl Machine {
 /// The per-job read-only input disk, as the IDs of its parts (05-CONTEXT D-15).
 ///
 /// The input disk is not itself stored as a blob. The backend fetches each part through
-/// `BlobSource` under caps and writes the per-job disk itself, without unpacking or applying
+/// [`BlobSource`](crate::BlobSource) under caps and writes the per-job disk itself, without unpacking or applying
 /// anything. Every input names the guest job blob, the runner's `GuestJob` JSON. A Candidate input adds the base
 /// [`TreeId`] (the source tarball) and, unless the job is the baseline, the canonical diff blob; a Judge input adds
 /// the candidate's output blob. Judge data is never a part of an input: it stays [`JudgeData`], attachable only by

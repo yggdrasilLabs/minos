@@ -12,7 +12,8 @@
 //! 3. [`preflight()`] checks the plan against [`Backend::capabilities`] and returns a [`Cleared`], the only
 //!    constructor of one, which owns the plan.
 //! 4. [`Backend::launch`] takes the `Cleared` by value and starts the VM under the plan's [`LaunchKey`] and hard
-//!    maximum duration.
+//!    maximum duration. The backend fetches the bytes of the IDs the plan names, and the verified root image path,
+//!    through the [`BlobSource`] it was constructed with.
 //! 5. [`RunningVm::wait`] returns a [`Finished`]: the host-observed [`Ended`], the key, and the hostile stream.
 //!    The `Finished` is built by [`Finished::new`], which consumes the launch's `Cleared`.
 //! 6. [`Finished::into_output`] reads the stream under caps into an [`Untrusted`] [`GuestOutput`] of role `R`.
@@ -21,6 +22,7 @@
 //!    judge output.
 
 pub mod backend;
+pub mod blob_source;
 pub mod finished;
 pub mod key;
 pub mod output;
@@ -30,6 +32,7 @@ pub mod spec;
 pub mod untrusted;
 
 pub use backend::{Backend, InfraError, LaunchError, RunningVm};
+pub use blob_source::{BlobSource, BlobSourceError, VerifiedPath};
 pub use finished::{CrashCause, Ended, Finished};
 pub use key::LaunchKey;
 pub use output::{OutputCap, OutputFault, OutputInvalid};
