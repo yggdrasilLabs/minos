@@ -6,9 +6,9 @@ current_phase: 5
 current_phase_name: Guest, krun Backend, and Environment Build
 status: verifying
 stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-10-15T15:26:11.477Z"
-last_activity: 2026-10-15
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
+last_updated: "2026-10-18T14:45:00.000Z"
+last_activity: 2026-10-18
+last_activity_desc: Completed quick task 261018-eiw: Fix Phase 4 review warnings WR-01, WR-02, WR-03
 progress:
   total_phases: 8
   completed_phases: 4
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 Phase: 5 — Guest, krun Backend, and Environment Build
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-10-15 — Phase 04 complete, transitioned to Phase 5
+Last activity: 2026-10-18 — Completed quick task 261018-eiw: Fix Phase 4 review warnings WR-01, WR-02, WR-03
 
 Progress: [██████████] 100% (29 of 29 plans)
 
@@ -220,6 +220,12 @@ None yet.
 - [Phase 5] The container engine for `env build` on macOS depends on the SPIKE-06 answer
 - [Phase 8] The default baseline repeat count for the noise floor should come from measured variance across VM boots, not a guess
 - [Phase 8] F-01 decided (01-UAT.md test 6, option A; plan 01-05): minos-cli uses the clap builder API, and clap's `derive` feature is off, because clap_derive's `#[allow(clippy::restriction)]` is E0453 under forbid. Any later wish for a clap derive goes back to the user; no lint level changes for it
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261018-eiw | Fix Phase 4 review warnings WR-01, WR-02, WR-03 | 2026-10-18 | a2c3761 | [261018-eiw-fix-phase-4-review-warnings](./quick/261018-eiw-fix-phase-4-review-warnings/) |
 
 ## Deferred Items
 
