@@ -10,7 +10,8 @@ use minos_core::id::{MetricName, ModelId, TreeId};
 use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::limits::{
     DEFAULT_JUDGE_MS, DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB, EMPTY_GENERATIONS_DEFAULT,
-    GUEST_RESERVE_MIB, INFRA_FAILURES_DEFAULT, MIN_CANDIDATE_ALLOWANCE_MIB, STALL_STEP_DEFAULT,
+    GUEST_RESERVE_MIB, INFRA_FAILURES_DEFAULT, MAX_MEMORY_MIB, MAX_SCRATCH_MIB,
+    MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, STALL_STEP_DEFAULT,
     TOKEN_CAP_DEFAULT, candidate_allowance_mib,
 };
 use minos_core::manifest::{
@@ -1583,13 +1584,13 @@ fn with_environment(lines: &str) -> Result<String, Box<dyn Error>> {
 
 /// The example with `memory_mib` and `scratch_mib` set; `None` leaves a key absent.
 fn with_memory(memory: Option<u32>, scratch: Option<u32>) -> Result<String, Box<dyn Error>> {
-    let mut lines = String::new();
-    if let Some(memory) = memory {
-        lines.push_str(&format!("memory_mib = {memory}\n"));
-    }
-    if let Some(scratch) = scratch {
-        lines.push_str(&format!("scratch_mib = {scratch}\n"));
-    }
+    let lines: String = [
+        memory.map(|memory| format!("memory_mib = {memory}\n")),
+        scratch.map(|scratch| format!("scratch_mib = {scratch}\n")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     with_environment(&lines)
 }
 
@@ -1707,4 +1708,27 @@ fn manifest_environment_memory_budget() -> TestResult {
 #[test]
 fn manifest_environment_memory_unknown_key_is_refused() -> TestResult {
     assert_unknown_field(&with_environment("vcpus = 2\n")?)
+}
+
+#[test]
+fn manifest_environment_memory_limits_name_the_bounds() -> TestResult {
+    // The leaf messages are static text; this pins them to the constants so the two cannot drift.
+    let cases = [
+        (
+            with_memory(Some(127), None)?,
+            format!("{MIN_MEMORY_MIB} to {MAX_MEMORY_MIB} MiB"),
+        ),
+        (
+            with_memory(None, Some(63))?,
+            format!("{MIN_SCRATCH_MIB} to {MAX_SCRATCH_MIB} MiB"),
+        ),
+    ];
+    for (text, expected) in cases {
+        let error = rejected(&text)?;
+        assert!(
+            matches!(&error, ManifestError::Field(field) if field.limit() == expected),
+            "expected {expected}, got: {error}"
+        );
+    }
+    Ok(())
 }

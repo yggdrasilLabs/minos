@@ -7,6 +7,9 @@
 //! 1. Leaf validation, with dotted field paths: commands are argv arrays, budgets lie within `limits`, counts are
 //!    capped, and absent optional fields take their defaults (`stall_step`, `max_empty_generations`, and
 //!    `max_infra_failures` have minimums of 1, so the circuit breaker cannot be disabled; 03-CONTEXT D-13, D-14).
+//!    `[environment] memory_mib` and `scratch_mib` lie within the machine bounds in [`crate::limits`], and the
+//!    VM's memory holds the guest reserve, the scratch cap, and the least candidate allowance (05-CONTEXT D-05,
+//!    D-06; [`ManifestError::MemoryBudget`]).
 //! 2. The surface (03-CONTEXT D-01): `writable` holds 1 to 64 exact files with no duplicates, `readable` has no
 //!    duplicates, and the two are disjoint as exact path sets.
 //! 3. Judge integrity: `writable` contains no judge path, and neither `program` nor the Dockerfile; `readable`
@@ -52,13 +55,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{IdHasher, MetricName, ModelId, TreeId};
 use crate::limits::{
-    BATCH_MAX, BATCH_MIN, DEFAULT_JUDGE_MS, EMPTY_GENERATIONS_DEFAULT, EMPTY_GENERATIONS_MAX,
-    EMPTY_GENERATIONS_MIN, INFRA_FAILURES_DEFAULT, INFRA_FAILURES_MAX, INFRA_FAILURES_MIN,
-    MAX_ANCHOR_BYTES, MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_CHOICE_BYTES, MAX_CHOICES, MAX_EXCLUDES,
-    MAX_GATES, MAX_JUDGE_LABEL, MAX_MIN_IMPROVEMENT_PERCENT, MAX_NAME_BYTES, MAX_OBJECTIVES,
-    MAX_PARAM_POINTS, MAX_PARAMS, MAX_PROPOSERS, MAX_READABLE, MAX_SPEND_USD, MAX_STAGE_MS,
-    MAX_WRITABLE, MIN_STAGE_MS, STALL_STEP_DEFAULT, STALL_STEP_MAX, STALL_STEP_MIN,
-    TOKEN_CAP_DEFAULT, TOKEN_CAP_MAX, TOKEN_CAP_MIN, WIDTH_MAX, WIDTH_MIN,
+    BATCH_MAX, BATCH_MIN, DEFAULT_JUDGE_MS, DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB,
+    EMPTY_GENERATIONS_DEFAULT, EMPTY_GENERATIONS_MAX, EMPTY_GENERATIONS_MIN, GUEST_RESERVE_MIB,
+    INFRA_FAILURES_DEFAULT, INFRA_FAILURES_MAX, INFRA_FAILURES_MIN, MAX_ANCHOR_BYTES,
+    MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_CHOICE_BYTES, MAX_CHOICES, MAX_EXCLUDES, MAX_GATES,
+    MAX_JUDGE_LABEL, MAX_MEMORY_MIB, MAX_MIN_IMPROVEMENT_PERCENT, MAX_NAME_BYTES, MAX_OBJECTIVES,
+    MAX_PARAM_POINTS, MAX_PARAMS, MAX_PROPOSERS, MAX_READABLE, MAX_SCRATCH_MIB, MAX_SPEND_USD,
+    MAX_STAGE_MS, MAX_WRITABLE, MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB,
+    MIN_STAGE_MS, STALL_STEP_DEFAULT, STALL_STEP_MAX, STALL_STEP_MIN, TOKEN_CAP_DEFAULT,
+    TOKEN_CAP_MAX, TOKEN_CAP_MIN, WIDTH_MAX, WIDTH_MIN, candidate_allowance_mib,
 };
 use crate::path::RelPath;
 
@@ -961,6 +966,8 @@ pub struct RawSource {
 pub struct RawEnvironment {
     dockerfile: RelPath,
     requires: RawRequires,
+    memory_mib: Option<u16>,
+    scratch_mib: Option<u16>,
 }
 
 /// `[environment] requires` as written.
@@ -1254,11 +1261,20 @@ impl JudgeSpec {
     }
 }
 
-/// The build environment: the project's Dockerfile and the guest architecture it targets.
+/// The build environment: the project's Dockerfile, the guest architecture it targets, and the VM's memory.
+///
+/// `memory_mib` and `scratch_mib` size the VM (05-CONTEXT D-06): both lie within the bounds in
+/// [`crate::limits`], and the D-05 budget, guest reserve plus tmpfs scratch cap plus candidate allowance, fits
+/// the memory, so [`Environment::candidate_allowance_mib`] is at least [`MIN_CANDIDATE_ALLOWANCE_MIB`]. The
+/// Dockerfile's `USER` is ignored: the guest runs the build and run commands as one fixed unprivileged user it
+/// creates itself (05-CONTEXT D-08).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Environment {
     dockerfile: RelPath,
     arch: Arch,
+    memory_mib: u16,
+    scratch_mib: u16,
+    candidate_allowance_mib: u16,
 }
 
 impl Environment {
@@ -1272,6 +1288,25 @@ impl Environment {
     #[must_use]
     pub const fn arch(&self) -> Arch {
         self.arch
+    }
+
+    /// The VM's memory, in MiB.
+    #[must_use]
+    pub const fn memory_mib(&self) -> u16 {
+        self.memory_mib
+    }
+
+    /// The tmpfs scratch cap, in MiB.
+    #[must_use]
+    pub const fn scratch_mib(&self) -> u16 {
+        self.scratch_mib
+    }
+
+    /// The candidate's memory allowance, in MiB: what the budget leaves after the guest reserve and the scratch
+    /// cap. Computed once at parse time; callers read it here and never recompute it.
+    #[must_use]
+    pub const fn candidate_allowance_mib(&self) -> u16 {
+        self.candidate_allowance_mib
     }
 }
 
@@ -1539,6 +1574,18 @@ pub enum ManifestError {
         /// Zero-based argv index of the entry.
         index: usize,
     },
+    /// The VM's memory cannot hold the guest reserve, the scratch cap, and the least candidate allowance
+    /// (05-CONTEXT D-05).
+    #[error(
+        "environment.memory_mib {memory_mib} cannot hold the {GUEST_RESERVE_MIB} MiB guest reserve, \
+         environment.scratch_mib {scratch_mib}, and at least {MIN_CANDIDATE_ALLOWANCE_MIB} MiB for the candidate"
+    )]
+    MemoryBudget {
+        /// The VM's memory, in MiB.
+        memory_mib: u16,
+        /// The tmpfs scratch cap, in MiB.
+        scratch_mib: u16,
+    },
 }
 
 /// A command field, with a [`ValueError`] attributed to `field`.
@@ -1591,6 +1638,32 @@ fn path_set(field: &'static str, paths: Vec<RelPath>) -> Result<BTreeSet<RelPath
         set.insert(path);
     }
     Ok(set)
+}
+
+/// The VM's memory, the scratch cap, and the candidate allowance, in MiB: defaults, leaf ranges, then the D-05
+/// budget rule (05-CONTEXT D-05, D-06).
+fn memory_from(
+    memory_mib: Option<u16>,
+    scratch_mib: Option<u16>,
+) -> Result<(u16, u16, u16), ManifestError> {
+    let memory_mib = bounded(
+        "environment.memory_mib",
+        memory_mib,
+        (MIN_MEMORY_MIB, MAX_MEMORY_MIB, DEFAULT_MEMORY_MIB),
+        "128 to 16384 MiB",
+    )?;
+    let scratch_mib = bounded(
+        "environment.scratch_mib",
+        scratch_mib,
+        (MIN_SCRATCH_MIB, MAX_SCRATCH_MIB, DEFAULT_SCRATCH_MIB),
+        "64 to 15872 MiB",
+    )?;
+    let allowance =
+        candidate_allowance_mib(memory_mib, scratch_mib).ok_or(ManifestError::MemoryBudget {
+            memory_mib,
+            scratch_mib,
+        })?;
+    Ok((memory_mib, scratch_mib, allowance))
 }
 
 fn budget_from(raw: RawBudget) -> Result<Budget, InvalidField> {
@@ -1748,6 +1821,8 @@ impl TryFrom<RawManifest> for Manifest {
                 .transpose()?,
         };
         let budget = budget_from(budget)?;
+        let (memory_mib, scratch_mib, candidate_allowance_mib) =
+            memory_from(environment.memory_mib, environment.scratch_mib)?;
         if !(WIDTH_MIN..=WIDTH_MAX).contains(&policy.width) {
             return Err(InvalidField::new("policy.width", "1 to 16").into());
         }
@@ -1989,6 +2064,9 @@ impl TryFrom<RawManifest> for Manifest {
             environment: Environment {
                 dockerfile,
                 arch: environment.requires.arch,
+                memory_mib,
+                scratch_mib,
+                candidate_allowance_mib,
             },
             commands,
             budget,
