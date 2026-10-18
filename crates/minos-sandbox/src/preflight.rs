@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use minos_core::ledger::Isolation;
 use minos_core::manifest::Arch;
 
+use crate::key::LaunchKey;
 use crate::role::{Role, RoleKind};
 use crate::spec::{LaunchPlan, Machine};
 
@@ -164,6 +165,13 @@ impl<R: Role> Cleared<R> {
     #[must_use]
     pub const fn plan(&self) -> &LaunchPlan<R> {
         &self.plan
+    }
+
+    /// The plan's launch key, consuming the clearance. Only [`Finished::new`](crate::Finished::new) calls it, so
+    /// a clearance ends in at most one `Finished`.
+    #[must_use]
+    pub(crate) fn into_key(self) -> LaunchKey {
+        *self.plan.key()
     }
 }
 

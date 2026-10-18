@@ -8,7 +8,8 @@
 //! stream, and infrastructure failures stay on the `Err` path exactly as D-17 intends.
 //!
 //! A `Finished<R>` can only be built from a [`Cleared<R>`], so output of a role exists only for a cleared launch of
-//! that role, and the output reader itself is crate-private.
+//! that role, and the output reader itself is crate-private. It is built by consuming that `Cleared<R>`, so one
+//! clearance mints at most one `Finished` (review WR-03).
 
 use std::marker::PhantomData;
 
@@ -46,7 +47,7 @@ pub enum Ended {
 /// The end of one launch of role `R`: the host-observed [`Ended`], the plan's [`LaunchKey`], and the hostile output
 /// stream, still unread.
 ///
-/// No derives. [`Finished::new`] is the only constructor and needs the launch's [`Cleared<R>`].
+/// No derives. [`Finished::new`] is the only constructor and consumes the launch's [`Cleared<R>`].
 pub struct Finished<R: Role> {
     key: LaunchKey,
     ended: Ended,
@@ -59,10 +60,11 @@ impl<R: Role> Finished<R> {
     /// output tar, unread.
     ///
     /// Requiring the `Cleared` of role `R` means output of a role exists only for a cleared launch of that role.
+    /// It consumes the launch's clearance, so one cleared launch yields at most one `Finished` (review WR-03).
     #[must_use]
-    pub fn new(cleared: &Cleared<R>, ended: Ended, stream: Vec<u8>) -> Self {
+    pub fn new(cleared: Cleared<R>, ended: Ended, stream: Vec<u8>) -> Self {
         Self {
-            key: *cleared.plan().key(),
+            key: cleared.into_key(),
             ended,
             stream,
             role: PhantomData,

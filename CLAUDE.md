@@ -260,7 +260,7 @@ impl<R: Role> Untrusted<OutputFile<R>> {
 }
 ```
 
-`Backend` has two methods, `capabilities()` and `launch(ok: Cleared<R>)`, and a generic associated type `Running<R>`; `RunningVm::wait(self) -> Result<Finished<R>, InfraError>`. `Finished<R>` holds the host-observed `Ended` (`Exited`, `Crashed`, `TimedOut`, from the K7 classification), the launch key, and the hostile stream, which leaves only through `into_output` (the raw-mode tar reader: ustar regular files only, `RelPath` names, 1024 entries, 8 MiB per entry, 16 MiB total, two zero end blocks and nothing after). It can only be built from a `Cleared<R>`, so output of a role exists only for a cleared launch of that role (refinement of 04-CONTEXT D-17). The runner is generic over `B: Backend`. Each binary picks its backend concretely, and a binary that can choose among several at runtime defines its own enum (for example `LocalBackend { Krun, Chv }`). Never use trait objects, and never put a backend enum in `minos-sandbox`. Dropping a `Running` handle destroys the VM.
+`Backend` has two methods, `capabilities()` and `launch(ok: Cleared<R>)`, and a generic associated type `Running<R>`; `RunningVm::wait(self) -> Result<Finished<R>, InfraError>`. `Finished<R>` holds the host-observed `Ended` (`Exited`, `Crashed`, `TimedOut`, from the K7 classification), the launch key, and the hostile stream, which leaves only through `into_output` (the raw-mode tar reader: ustar regular files only, `RelPath` names, 1024 entries, 8 MiB per entry, 16 MiB total, two zero end blocks and nothing after). `Finished::new` consumes a `Cleared<R>`, so output of a role exists only for a cleared launch of that role, and one clearance yields at most one `Finished` (refinement of 04-CONTEXT D-17; review WR-03). The runner is generic over `B: Backend`. Each binary picks its backend concretely, and a binary that can choose among several at runtime defines its own enum (for example `LocalBackend { Krun, Chv }`). Never use trait objects, and never put a backend enum in `minos-sandbox`. Dropping a `Running` handle destroys the VM.
 
 Launches are idempotent: derive the client token from `ExperimentId` plus role. Every launch sets a hard maximum duration, so nothing depends on cleanup running.
 
@@ -460,7 +460,7 @@ minos stop <run>
 
 - Property tests (`proptest`) for parsers, `RelPath`, `Diff::parse`, policy permutation-invariance, and the ledger fold.
 - Golden vectors for every ID hash and golden files for every persisted wire format.
-- Compile-fail tests (`trybuild`) proving a `SandboxSpec<Candidate>` cannot get judge data and that `launch` cannot be called without `Cleared`; that no role has a network method; that `LaunchPlan` and `Cleared` cannot be built by literal and `Cleared` cannot be cloned; that `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`; and that candidate output has no `into_scorecard`.
+- Compile-fail tests (`trybuild`) proving a `SandboxSpec<Candidate>` cannot get judge data and that `launch` cannot be called without `Cleared`; that no role has a network method; that `LaunchPlan` and `Cleared` cannot be built by literal and `Cleared` cannot be cloned; that one `Cleared` cannot build two `Finished` values; that `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`; and that candidate output has no `into_scorecard`.
 - `LocalRunner` tests for orchestrator logic, including the per-generation operation budget.
 - In-memory `Ledger` and `Blobs` implementations for everything above the store.
 

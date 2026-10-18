@@ -74,7 +74,7 @@ struct FakeRunning<R: Role> {
 
 impl<R: Role> RunningVm<R> for FakeRunning<R> {
     fn wait(self) -> Result<Finished<R>, InfraError> {
-        Ok(Finished::new(&self.cleared, self.ended, self.stream))
+        Ok(Finished::new(self.cleared, self.ended, self.stream))
     }
 }
 
