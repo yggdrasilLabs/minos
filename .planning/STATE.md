@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-10-18T20:25:04.686Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-10-18T20:42:45.000Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 47
+  completed_plans: 48
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 10 of 22
+Plan: 11 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -105,6 +105,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P07 | 14 min | 3 tasks | 16 files |
 | Phase 05 P08 | 10min | 2 tasks | 8 files |
 | Phase 05 P09 | 20 min | 3 tasks | 5 files |
+| Phase 05 P10 | 16min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -236,6 +237,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-08: parse_trampoline refuses 0, leading zeros, signs, over-cap limits, and an empty program; stages run as uid and gid 64000 with STAGE_ENV PATH, HOME, TMPDIR, LANG
 - [Phase 05]: 05-09: Seatbelt profile moved to crates/minos-backend-krun/src/minos-vmm.sb, embedded with include_str!, passed with sandbox-exec -p, SHA-256 cda08b0f pinned; console rule is write-only on the /dev/fd/1 literal; ROOT_IMG ancestor rule kept; no scratch image
 - [Phase 05]: 05-09: root images carry seven mount points (dev, mnt, out, proc, scratch, sys, tmp); check_guest_elf refuses non-ELF, non-64-bit, big-endian, non-aarch64, PT_INTERP, and unwalkable program header tables
+- [Phase 05]: 05-10: a source failure that kept the token sends role candidate, apply baseline, setup failed {input}; the host reads any failed setup as infrastructure and consults neither field
+- [Phase 05]: 05-10: the /out walk keeps 3 entries free for PID 1's files (MAX_OUT_FILES 1021) and its content budget is the content cap minus MAX_STATUS_BYTES and the capped logs
+- [Phase 05]: 05-10: build_output refuses a scorecard for a candidate and any out entry not under out/, so only the judge-role channel carries .minos/scorecard.json
 
 ### Pending Todos
 
@@ -266,6 +270,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T20:25:04.681Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-10-18T20:42:39.292Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None
