@@ -36,6 +36,11 @@ pub enum CrashCause {
     /// (K7: "exit 0 with no valid frame means `Crashed`").
     NoStatusFrame,
     /// The console passed its cap, as the host observed it: the guest flooded the console (K7). Never retried.
+    ///
+    /// The console is the helper's stdout pipe (05-EVIDENCE.md Mechanism selections, `console: pipe`): the krun
+    /// supervisor reads it through cap + 1 bytes, and on reading the extra byte it kills the helper's whole process
+    /// group, so the cap is exact and no console byte touches host disk. The Phase 2 file console's exit 125 with
+    /// a `console-cap` marker no longer exists.
     ConsoleCap,
 }
 

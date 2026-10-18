@@ -6,16 +6,23 @@
 //! returns an `Outcome` inside `Err`.
 //!
 //! The runner maps what the host observed of a VM run to an outcome by the Phase 2 K7 classification rule
-//! (02-SPIKE-EVIDENCE.md, "Classification rule for Phase 5"). The helper's exit code alone never carries the
-//! guest's result:
+//! (02-SPIKE-EVIDENCE.md, "Classification rule for Phase 5"), as refined in Phase 5 for the console pipe and the
+//! chunked output stream (the krun backend's `supervise::classify`). The helper's exit code alone never carries
+//! the guest's result:
 //!
 //! | Host observation | Result |
 //! |---|---|
-//! | Exit 0 and exactly one valid status frame | The guest decided; the frame says what happened |
-//! | Exit 0 with no valid frame | [`Outcome::Crashed`] |
-//! | Exit 125 with `minos-vmm: watchdog console-cap` | [`Outcome::Crashed`], never retried |
+//! | Exit 0 and a complete output stream (its END chunk arrived) | The guest decided; its status file says what happened |
+//! | Exit 0 with no END chunk | [`Outcome::Crashed`] |
+//! | The console passed its cap, read by the host from the console pipe, and the host killed the VM | [`Outcome::Crashed`], never retried |
+//! | The output stream broke the chunk protocol (a wrong token, a gap, a duplicate, a bad END, an over-cap chunk) | [`Outcome::Rejected`] with [`Reason::ChunkProtocol`], never retried |
 //! | The host deadline, or exit 124 with `minos-vmm: watchdog deadline` | [`Outcome::TimedOut`] |
-//! | Exit 64 to 71, exit 126 with `minos-vmm: watchdog parent-gone`, a spawn failure, a signal the host did not send, any other code | Infrastructure failure, not an `Outcome`; retried |
+//! | Exit 64 to 71, exit 126 (with or without `minos-vmm: watchdog parent-gone`), exit 124 without its marker, a spawn failure, a signal the host did not send, any other code | Infrastructure failure, not an `Outcome`; retried |
+//!
+//! A marker counts only as an exact whole line of the helper's stderr together with its exit code. `minos-vmm`
+//! writes the markers, the guest reaches only the console, and every line the helper logs starts with
+//! `minos-vmm: log `, so no logged text can be a marker. With the console on a pipe the helper no longer exits 125
+//! with a `console-cap` marker; the console cap is observed by the host.
 //!
 //! [`Outcome::Crashed`] and [`Outcome::TimedOut`] carry the [`Stage`] they happened in.
 
