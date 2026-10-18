@@ -14,7 +14,7 @@ use minos_core::experiment::Experiment;
 use minos_core::guest::{
     ApplyStatus, GUEST_JOB_VERSION, GUEST_STATUS_VERSION, GuestJob, GuestJobError, GuestRole,
     GuestStatus, GuestStatusError, MAX_GUEST_JOB_BYTES, MAX_STATUS_BYTES, OUTPUT_VSOCK_PORT,
-    OutputStatus, STATUS_PATH, SetupStatus, SetupStep, StageEnd, StageReport,
+    OutputStatus, STATUS_PATH, SetupStatus, SetupStep, StageEnd, StageReport, StageSpec,
 };
 use minos_core::id::{BlobId, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
@@ -270,12 +270,12 @@ fn guest_job_candidate_from_manifest() -> TestResult {
     let job = GuestJob::candidate(&manifest, &request);
     assert_eq!(job.role(), GuestRole::Candidate);
     assert_eq!(job.exp(), request.exp());
-    assert_eq!(job.judge(), request.judge());
+    assert_eq!(job.judge_version(), request.judge());
     assert_eq!(job.trial(), 1);
     assert_eq!(job.base(), Some(base()));
     assert_eq!(job.diff(), Some(diff_blob()?));
     assert_eq!(job.writable(), manifest.writable());
-    let stages: Vec<Stage> = job.stages().iter().map(|stage| stage.stage()).collect();
+    let stages: Vec<Stage> = job.stages().iter().map(StageSpec::stage).collect();
     assert_eq!(stages, vec![Stage::Build, Stage::Run]);
     let build = job.stages().first().ok_or("no build stage")?;
     let run = job.stages().get(1).ok_or("no run stage")?;
@@ -489,10 +489,7 @@ fn guest_job_refuses_a_bad_argv() -> TestResult {
     })?;
     assert!(matches!(job_rejected(&long_entry)?, GuestJobError::Argv));
     let too_many = mutate(&candidate, |object| {
-        first_stage(object)?.insert(
-            "argv".to_owned(),
-            Value::from(vec![Value::from("a"); 65]),
-        );
+        first_stage(object)?.insert("argv".to_owned(), Value::from(vec![Value::from("a"); 65]));
         Ok(())
     })?;
     assert!(matches!(job_rejected(&too_many)?, GuestJobError::Argv));
@@ -507,7 +504,10 @@ fn guest_job_refuses_a_budget_out_of_range() -> TestResult {
             first_stage(object)?.insert("budget_ms".to_owned(), Value::from(ms));
             Ok(())
         })?;
-        assert!(matches!(job_rejected(&json)?, GuestJobError::Budget), "{ms}");
+        assert!(
+            matches!(job_rejected(&json)?, GuestJobError::Budget),
+            "{ms}"
+        );
     }
     Ok(())
 }
@@ -541,14 +541,13 @@ fn guest_job_refuses_a_trial_over_the_cap() -> TestResult {
 }
 
 #[test]
-fn guest_job_refuses_json_over_the_cap_before_parsing() -> TestResult {
+fn guest_job_refuses_json_over_the_cap_before_parsing() {
     // Not JSON at all: the cap must refuse it before the parser sees a byte.
     let oversized = vec![b'x'; MAX_GUEST_JOB_BYTES + 1];
     assert!(matches!(
         GuestJob::parse_json(&oversized),
         Err(GuestJobError::TooLarge)
     ));
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -657,7 +656,10 @@ fn guest_status_new_runs_the_checks() {
             GuestRole::Judge,
             SetupStatus::Ok,
             ApplyStatus::NotApplicable,
-            vec![StageReport::new(Stage::Judge, StageEnd::Signaled { signal })],
+            vec![StageReport::new(
+                Stage::Judge,
+                StageEnd::Signaled { signal },
+            )],
             OutputStatus::NotPacked,
         );
         assert!(
@@ -716,7 +718,10 @@ fn guest_status_refusals() -> TestResult {
         first_stage(object)?.insert("stage".to_owned(), Value::from("judge"));
         Ok(())
     })?;
-    assert!(matches!(status_rejected(&judged)?, GuestStatusError::Stages));
+    assert!(matches!(
+        status_rejected(&judged)?,
+        GuestStatusError::Stages
+    ));
     // A stage listed twice.
     let twice = mutate(&candidate, |object| {
         first_stage(object)?.insert("stage".to_owned(), Value::from("run"));
@@ -840,7 +845,10 @@ fn goldens() -> Result<Vec<(&'static str, String)>, Box<dyn Error>> {
     Ok(vec![
         ("guest_job_candidate", text(candidate_job()?.to_json()?)?),
         ("guest_job_judge", text(judge_job()?.to_json()?)?),
-        ("guest_status_candidate", text(candidate_status()?.to_json()?)?),
+        (
+            "guest_status_candidate",
+            text(candidate_status()?.to_json()?)?,
+        ),
         (
             "guest_status_apply_failed",
             text(apply_failed_status()?.to_json()?)?,
@@ -873,6 +881,9 @@ fn guest_wire_golden_bytes_pinned() -> TestResult {
         all.push_str(&golden);
         all.push('\n');
     }
-    assert_eq!(sha256_hex(all.as_bytes()), "unpinned");
+    assert_eq!(
+        sha256_hex(all.as_bytes()),
+        "cfae3d32369d3ef720e2afc455327bcd30f106a7050227bbc4663aee922b3a4a"
+    );
     Ok(())
 }

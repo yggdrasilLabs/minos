@@ -1,0 +1,5 @@
+---
+source: crates/minos-core/tests/guest_wire.rs
+expression: golden
+---
+{"v":1,"role":"candidate","setup":"ok","apply":{"failed":{"path":"src/parse.rs","hunk":1}},"stages":[{"stage":"build","end":"skipped"},{"stage":"run","end":"skipped"}],"output":{"packed":{"files":1,"content_bytes":0}}}

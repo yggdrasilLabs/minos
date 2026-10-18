@@ -53,6 +53,8 @@ pub mod chunk;
 
 pub mod lock;
 
+pub mod guest;
+
 pub mod report;
 
 // id: SHA-256 identifiers and validated names
@@ -106,6 +108,9 @@ pub use chunk::{ChunkToken, Reassembler};
 
 // lock: the minos.lock wire type
 pub use lock::Lock;
+
+// guest: the backend-to-guest contract
+pub use guest::{GuestJob, GuestStatus};
 
 // job: the loop-to-runner contract
 pub use job::{JobRequest, JobResult};
