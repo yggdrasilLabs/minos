@@ -497,8 +497,40 @@ pub fn watch(
     deadline: Instant,
     faulted: impl Fn() -> bool,
 ) -> Result<Option<HostKill>, SuperviseError> {
-    let _ = (helper, deadline, faulted);
-    Ok(None)
+    let mut killed: Option<(HostKill, Instant)> = None;
+    loop {
+        if helper.try_wait()?.is_some() {
+            // The console reader kills the group itself, so its kill can end the helper before this loop sees
+            // the flag; the flag is raised before that kill is sent.
+            let why = killed
+                .map(|(why, _)| why)
+                .or_else(|| helper.console_over().then_some(HostKill::ConsoleCap));
+            return Ok(why);
+        }
+        match killed {
+            None => {
+                let why = if helper.console_over() {
+                    Some(HostKill::ConsoleCap)
+                } else if faulted() {
+                    Some(HostKill::ChunkFault)
+                } else if Instant::now() >= deadline {
+                    Some(HostKill::Deadline)
+                } else {
+                    None
+                };
+                if let Some(why) = why {
+                    // A failed signal is re-sent on the next poll; the exit, not the signal, ends the loop.
+                    helper.kill_group().ok();
+                    killed = Some((why, Instant::now()));
+                }
+            }
+            Some((_, at)) if at.elapsed() >= KILL_WAIT => return Err(SuperviseError::Survived),
+            Some(_) => {
+                helper.kill_group().ok();
+            }
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
 }
 
 /// Reads the console pipe through `cap + 1` bytes. On reaching them it raises `over` and kills the group before
@@ -555,8 +587,16 @@ fn join_reader(handle: Option<JoinHandle<io::Result<Vec<u8>>>>) -> Result<Vec<u8
 /// Splits `bytes` into newline-terminated lines, replacing every control character with U+FFFD, so a line that
 /// held one can never equal a marker. An unterminated tail is not a line.
 fn whole_lines(bytes: &[u8]) -> Vec<String> {
-    let _ = bytes;
-    Vec::new()
+    bytes
+        .split_inclusive(|byte| *byte == b'\n')
+        .filter_map(|segment| segment.strip_suffix(b"\n"))
+        .map(|line| {
+            String::from_utf8_lossy(line)
+                .chars()
+                .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+                .collect()
+        })
+        .collect()
 }
 
 /// Everything the host observed of one launch, the input to [`classify`].
@@ -632,8 +672,56 @@ impl fmt::Debug for Classification {
 /// attributes it to `Run` for a Candidate and `Judge` for a Judge.
 #[must_use]
 pub fn classify(observed: Observed) -> Classification {
-    drop(observed);
-    Classification::Infra("RED: classify is not implemented")
+    let Observed {
+        exit,
+        stderr_lines,
+        killed_for,
+        chunks,
+    } = observed;
+    match killed_for {
+        Some(HostKill::Deadline) => return ended(Ended::TimedOut),
+        Some(HostKill::ConsoleCap) => return ended(Ended::Crashed(CrashCause::ConsoleCap)),
+        Some(HostKill::ChunkFault) => return ended(Ended::ChunkProtocol),
+        None => {}
+    }
+    let marked = |marker: &str| stderr_lines.iter().any(|line| line == marker);
+    let guest_ran = match exit {
+        HelperExit::Code(0) => true,
+        HelperExit::Code(124) => marked(DEADLINE_MARKER),
+        _ => false,
+    };
+    if guest_ran && matches!(chunks, ReceiveOutcome::Fault(_)) {
+        return ended(Ended::ChunkProtocol);
+    }
+    match exit {
+        HelperExit::Code(0) => match chunks {
+            ReceiveOutcome::Complete(stream) => Classification::Ended(Ended::Exited, stream),
+            ReceiveOutcome::Incomplete | ReceiveOutcome::Fault(_) => {
+                ended(Ended::Crashed(CrashCause::NoStatusFrame))
+            }
+        },
+        HelperExit::Code(124) if guest_ran => ended(Ended::TimedOut),
+        HelperExit::Code(124) => {
+            Classification::Infra("the helper exited 124 without its deadline marker")
+        }
+        HelperExit::Code(126) if marked(PARENT_GONE_MARKER) => {
+            Classification::Infra("the helper's parent went away")
+        }
+        HelperExit::Code(126) => {
+            Classification::Infra("the helper exited 126 without its parent-gone marker")
+        }
+        HelperExit::Code(64..=71) => {
+            Classification::Infra("the helper failed before the VM started")
+        }
+        HelperExit::Code(_) => Classification::Infra("the helper exited with an unexpected code"),
+        HelperExit::Signal {
+            sent_by_host: false,
+            ..
+        } => Classification::Infra("the helper died of a signal the host did not send"),
+        HelperExit::Signal {
+            sent_by_host: true, ..
+        } => Classification::Infra("the host killed the helper without recording why"),
+    }
 }
 
 /// A candidate-side ending with no stream.
