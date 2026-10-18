@@ -18,6 +18,8 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 
 use minos_core::id::{BlobHasher, BlobId};
 use tempfile::NamedTempFile;
@@ -62,6 +64,44 @@ impl FileStore {
                 source: failed.error,
             })?;
         fsync_dir(&self.blob_shard(id))
+    }
+
+    /// The canonical absolute path of blob `id`, for a reader that opens it by path, such as the VM launcher
+    /// booting a root image read-only (05-CONTEXT D-14). The store root is re-checked, and the blob directories
+    /// and the blob file pass the same `symlink_metadata` checks as [`Blobs::get`]; the file is opened, and the
+    /// canonical path must name a regular file with the opened handle's device and inode. The path is canonical
+    /// because the Seatbelt profile and `minos-vmm`'s preflight match canonical paths only (`/var` resolves to
+    /// `/private/var` on macOS).
+    ///
+    /// The bytes are not rehashed here: `env build` verified the hash when it wrote the blob, and a per-launch
+    /// rehash of a multi-hundred-MB image was rejected as a copy per experiment (D-14). [`Blobs::get`] still
+    /// rehashes for every other reader.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::BlobMissing`] when no blob has the ID, [`StoreError::Unsafe`] when the root, a blob
+    /// directory, or the blob file is a symlink or not the expected file type, or when the canonical path names
+    /// another file, and [`StoreError::Io`] when the store cannot be inspected.
+    pub fn verified_path(&self, id: &BlobId) -> Result<PathBuf, StoreError> {
+        if !dir_exists(&self.root, "store root")? || !self.blob_dirs_exist(id)? {
+            return Err(StoreError::BlobMissing { id: *id });
+        }
+        let path = self.blob_path(id);
+        let mut options = OpenOptions::new();
+        options.read(true);
+        let file = open_existing(&path, "blob file", &options)?
+            .ok_or(StoreError::BlobMissing { id: *id })?;
+        let opened = file.metadata().map_err(io_error("inspecting a blob"))?;
+        let canonical = fs::canonicalize(&path).map_err(io_error("resolving a blob path"))?;
+        let resolved = fs::symlink_metadata(&canonical).map_err(io_error("inspecting a blob"))?;
+        if resolved.file_type().is_file()
+            && resolved.dev() == opened.dev()
+            && resolved.ino() == opened.ino()
+        {
+            Ok(canonical)
+        } else {
+            Err(StoreError::Unsafe { what: "blob file" })
+        }
     }
 
     /// Whether the directories that would hold blob `id` all exist; [`StoreError::Unsafe`] when one is a symlink
