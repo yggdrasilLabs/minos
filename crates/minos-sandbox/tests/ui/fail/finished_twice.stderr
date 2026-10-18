@@ -1,9 +1,9 @@
 error[E0382]: use of moved value: `ok`
- --> tests/ui/fail/finished_twice.rs:7:32
+ --> tests/ui/fail/finished_twice.rs:9:32
   |
-5 | fn probe(ok: Cleared<Judge>) -> (Finished<Judge>, Finished<Judge>) {
+7 | fn probe(ok: Cleared<Judge>) -> (Finished<Judge>, Finished<Judge>) {
   |          -- move occurs because `ok` has type `Cleared<minos_sandbox::Judge>`, which does not implement the `Copy` trait
-6 |     let first = Finished::new(ok, Ended::Exited, Vec::new());
+8 |     let first = Finished::new(ok, Ended::Exited, Vec::new(), Duration::ZERO, Vec::new());
   |                               -- value moved here
-7 |     let second = Finished::new(ok, Ended::Exited, Vec::new());
+9 |     let second = Finished::new(ok, Ended::Exited, Vec::new(), Duration::ZERO, Vec::new());
   |                                ^^ value used here after move

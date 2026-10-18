@@ -14,8 +14,9 @@
 //! 4. [`Backend::launch`] takes the `Cleared` by value and starts the VM under the plan's [`LaunchKey`] and hard
 //!    maximum duration. The backend fetches the bytes of the IDs the plan names, and the verified root image path,
 //!    through the [`BlobSource`] it was constructed with.
-//! 5. [`RunningVm::wait`] returns a [`Finished`]: the host-observed [`Ended`], the key, and the hostile stream.
-//!    The `Finished` is built by [`Finished::new`], which consumes the launch's `Cleared`.
+//! 5. [`RunningVm::wait`] returns a [`Finished`]: the host-observed [`Ended`] and elapsed time, the key, the
+//!    hostile stream, and the hostile console, whose only exit is [`Finished::console_excerpt`]. The `Finished` is
+//!    built by [`Finished::new`], which consumes the launch's `Cleared`.
 //! 6. [`Finished::into_output`] reads the stream under caps into an [`Untrusted`] [`GuestOutput`] of role `R`.
 //! 7. The exits: [`Untrusted::take`] projects one file, whose only exit is [`Untrusted::into_log_excerpt`];
 //!    [`Untrusted::into_diff_texts`] returns the submitted diffs; and [`Untrusted::into_scorecard`] exists only on

@@ -399,8 +399,10 @@ fn finished_reports_elapsed_and_sanitized_console() -> TestResult {
 #[test]
 fn console_reaches_callers_only_through_the_excerpt() -> TestResult {
     // Arrange
-    let backend = FakeBackend::new(host(BTreeSet::new())?, Ended::Exited, tar(&[])?)
-        .with_console(Duration::from_millis(250), b"line\x07\x1b]0;title\x07\n".to_vec());
+    let backend = FakeBackend::new(host(BTreeSet::new())?, Ended::Exited, tar(&[])?).with_console(
+        Duration::from_millis(250),
+        b"line\x07\x1b]0;title\x07\n".to_vec(),
+    );
 
     // Act
     let finished = run(&backend, spec::<Candidate>()?.seal())?;
@@ -410,7 +412,9 @@ fn console_reaches_callers_only_through_the_excerpt() -> TestResult {
     let excerpt = finished.console_excerpt(4096);
     let text = excerpt.text().as_str();
     assert!(
-        !text.chars().any(|c| c.is_control() && c != '\n' && c != '\t'),
+        !text
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t'),
         "a control character reached the excerpt"
     );
     assert!(text.starts_with("line"));

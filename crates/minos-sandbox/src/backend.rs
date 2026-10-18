@@ -77,7 +77,7 @@ pub trait RunningVm<R: Role> {
     /// Blocks until the guest ends or the plan's hard maximum duration passes, and returns how it ended.
     ///
     /// A candidate fault is reported inside the [`Finished`]: its host-observed [`crate::Ended`] (`Crashed`,
-    /// `TimedOut`) and its untrusted output stream. It is never an `Err`. An implementer moves the launch's
+    /// `TimedOut`, `ChunkProtocol`) and its untrusted output stream. It is never an `Err`. An implementer moves the launch's
     /// [`crate::Cleared`] into [`Finished::new`], which consumes it.
     ///
     /// # Errors
