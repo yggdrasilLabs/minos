@@ -10,7 +10,8 @@
 
 use std::collections::BTreeSet;
 
-use minos_core::ledger::Isolation;
+use minos_core::id::ImageDigest;
+use minos_core::ledger::{BackendInfo, BackendKind, ConfinementLayer, Isolation};
 use minos_core::manifest::Arch;
 
 use crate::key::LaunchKey;
@@ -69,8 +70,11 @@ pub enum Refusal {
     /// ordinary input. Fix the runner.
     #[error("the judge plan's judge data is part of its input disk; fix the runner")]
     JudgeDataIsInput,
-    /// The VMM helper lacks the hypervisor entitlement. Re-sign it as `minos host setup` describes.
-    #[error("the VMM helper lacks the hypervisor entitlement; re-sign it")]
+    /// The VMM helper lacks one of its two entitlements, `com.apple.security.hypervisor` and
+    /// `com.apple.security.cs.disable-library-validation` (05-CONTEXT D-02). Re-sign it with `minos host setup`.
+    #[error(
+        "the VMM helper lacks com.apple.security.hypervisor or com.apple.security.cs.disable-library-validation; run minos host setup"
+    )]
     EntitlementMissing,
     /// The guest kernel library was not found. Install libkrunfw.
     #[error("the guest kernel library was not found; install libkrunfw")]
@@ -86,26 +90,65 @@ pub enum Refusal {
     /// The vsock socket path would not fit in a Unix socket address. Use a shorter data directory.
     #[error("the vsock socket path is too long for a Unix socket; use a shorter data directory")]
     SocketPathTooLong,
+    /// `/usr/bin/sandbox-exec` is missing. Seatbelt confinement is mandatory in v1 (05-CONTEXT D-03), so no krun
+    /// plan launches without it; preflight also refuses when the host's layers lack Seatbelt.
+    #[error(
+        "/usr/bin/sandbox-exec is missing, and Seatbelt confinement is required to launch; restore the system tool"
+    )]
+    SeatbeltMissing,
+    /// The Seatbelt profile no longer denies what it must: `minos host doctor`'s probes found a loopback connection
+    /// or an unlisted file read allowed under it (05-CONTEXT D-03). Nothing launches until the probes pass again.
+    #[error(
+        "the Seatbelt profile no longer denies a loopback connection or an unlisted file; do not launch until minos host doctor passes"
+    )]
+    SeatbeltNotEnforcing,
+    /// The `minos-vmm` helper binary was not found. Build it.
+    #[error(
+        "the minos-vmm helper was not found next to minos or in the cargo target directory; build it with cargo build -p minos-vmm"
+    )]
+    VmmMissing,
+    /// No static aarch64 Linux `minos-guest` binary was found to write into the root image as `/init`. Build it.
+    #[error(
+        "no static aarch64 Linux minos-guest was found; build it with cargo build -p minos-guest --release --target aarch64-unknown-linux-musl"
+    )]
+    GuestMissing,
 }
 
 /// What a host can run, as a backend checked it.
 ///
-/// A backend builds this from what it checked on the host; the `Backend` trait (04-08) returns it from
-/// `capabilities()`. Host refusals are the facts `minos host doctor` reports (KRUN-06): each refuses every plan.
+/// A backend probes the host once and returns this value from `capabilities()` (05-RESEARCH Pattern 9), so the
+/// runner learns the confinement layers through the two-method `Backend` trait and records them through
+/// [`Capabilities::backend_info`] (KRUN-07). Host refusals are the facts `minos host doctor` reports (KRUN-06):
+/// each refuses every plan.
+///
+/// The layers are the confinement around the guest's code beyond the VM itself: [`ConfinementLayer::Seatbelt`],
+/// the deny-default profile around the VMM process on the host, and [`ConfinementLayer::Rlimits`], which covers
+/// both halves 05-CONTEXT D-01 names (the helper's own limits, plan 05-07, and the guest's per-stage limits on the
+/// candidate, plans 05-08 and 05-12) and is listed only when both are applied (plan 05-11). A krun host never
+/// lists [`ConfinementLayer::DedicatedUser`] in v1 (D-01, deferred), so every krun run shows it as reduced
+/// hardening. Seatbelt is never optional: [`preflight`] refuses every krun plan on a host whose layers lack it
+/// (D-03), so no run is ever recorded without it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
+    backend: BackendKind,
     arch: Arch,
     max: Machine,
     max_duration_ms: u64,
     isolation: Isolation,
     host_refusals: BTreeSet<Refusal>,
+    layers: BTreeSet<ConfinementLayer>,
+    kernel: Option<ImageDigest>,
 }
 
 impl Capabilities {
-    /// A host of `arch` that runs VMs up to `max` for at most `max_duration_ms`, isolated at `isolation`, with the
-    /// host checks that failed in `host_refusals`.
+    /// A `backend` host of `arch` that runs VMs up to `max` for at most `max_duration_ms`, isolated at
+    /// `isolation`, with the host checks that failed in `host_refusals`.
+    ///
+    /// It starts with no confinement layers and no kernel digest; add them with [`Capabilities::with_layers`] and
+    /// [`Capabilities::with_kernel`]. A krun host with no layers clears no plan.
     #[must_use]
     pub const fn new(
+        backend: BackendKind,
         arch: Arch,
         max: Machine,
         max_duration_ms: u64,
@@ -113,12 +156,36 @@ impl Capabilities {
         host_refusals: BTreeSet<Refusal>,
     ) -> Self {
         Self {
+            backend,
             arch,
             max,
             max_duration_ms,
             isolation,
             host_refusals,
+            layers: BTreeSet::new(),
+            kernel: None,
         }
+    }
+
+    /// The same host with `layers` as its active confinement layers, replacing any set before.
+    #[must_use]
+    pub fn with_layers(self, layers: BTreeSet<ConfinementLayer>) -> Self {
+        Self { layers, ..self }
+    }
+
+    /// The same host with `kernel` as the digest of the guest kernel it boots.
+    #[must_use]
+    pub fn with_kernel(self, kernel: ImageDigest) -> Self {
+        Self {
+            kernel: Some(kernel),
+            ..self
+        }
+    }
+
+    /// The backend that checked the host.
+    #[must_use]
+    pub const fn backend(&self) -> BackendKind {
+        self.backend
     }
 
     /// The host's architecture.
@@ -150,6 +217,32 @@ impl Capabilities {
     pub const fn host_refusals(&self) -> &BTreeSet<Refusal> {
         &self.host_refusals
     }
+
+    /// The confinement layers active around every launch on this host.
+    #[must_use]
+    pub const fn layers(&self) -> &BTreeSet<ConfinementLayer> {
+        &self.layers
+    }
+
+    /// The digest of the guest kernel, when the backend reports one.
+    #[must_use]
+    pub const fn kernel(&self) -> Option<&ImageDigest> {
+        self.kernel.as_ref()
+    }
+
+    /// The provenance a run on this host records for a VM that booted `root_image`: the backend, architecture,
+    /// isolation level, active layers, and kernel digest, so the report shows any layer that was missing.
+    #[must_use]
+    pub fn backend_info(&self, root_image: ImageDigest) -> BackendInfo {
+        BackendInfo::new(
+            self.backend,
+            self.arch,
+            self.isolation,
+            self.layers.clone(),
+            root_image,
+            self.kernel,
+        )
+    }
 }
 
 /// Proof that this exact plan passed [`preflight`].
@@ -178,8 +271,10 @@ impl<R: Role> Cleared<R> {
 /// Checks `plan` against `host` and clears it, failing closed.
 ///
 /// The only constructor of [`Cleared`]. Refuses when the architecture differs, when the plan's vCPUs, memory, or
-/// duration exceed the host's, when the host isolates below [`Isolation::Hardware`], when a Judge plan has no
-/// judge data or its judge data is any part of its input disk, and for every host refusal.
+/// duration exceed the host's, when the host isolates below [`Isolation::Hardware`], when a krun host's layers lack
+/// [`ConfinementLayer::Seatbelt`] (05-CONTEXT D-03: there is no fallback without it), when a Judge plan has no
+/// judge data or its judge data is any part of its input disk, and for every host refusal. A missing
+/// [`ConfinementLayer::DedicatedUser`] is not a refusal: it is deferred (D-01) and recorded as missing.
 ///
 /// # Errors
 ///
@@ -215,6 +310,10 @@ pub fn preflight<R: Role>(
     }
     if host.isolation < Isolation::Hardware {
         refusals.insert(Refusal::WeakIsolation);
+    }
+    // Seatbelt is the krun backend's host layer; a later backend brings its own mandatory layers.
+    if host.backend == BackendKind::Krun && !host.layers.contains(&ConfinementLayer::Seatbelt) {
+        refusals.insert(Refusal::SeatbeltMissing);
     }
     if R::KIND == RoleKind::Judge {
         match plan.judge_data() {
