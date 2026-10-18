@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::io::{self, Read};
 
 use minos_core::id::{BlobId, ManifestId, RunId, TreeId};
 use minos_core::ledger::{Event, EventKey, Record};
@@ -205,6 +206,80 @@ fn put_is_idempotent<B: Blobs>(blobs: &B) -> TestResult {
     Ok(())
 }
 
+/// A reader that yields `prefix` once and then fails, as a pipe from a dying builder would.
+struct FailsAfter<'a> {
+    prefix: &'a [u8],
+}
+
+impl Read for FailsAfter<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.prefix.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        }
+        let n = self.prefix.read(buf)?;
+        Ok(n)
+    }
+}
+
+/// Bytes larger than one 64 KiB copy buffer, so a streamed put crosses buffer boundaries.
+fn streamed_bytes() -> Vec<u8> {
+    (0_u32..200_000)
+        .map(|i| u8::try_from(i % 251).unwrap_or(0))
+        .collect()
+}
+
+fn put_reader_equals_put<B: Blobs>(blobs: &B) -> TestResult {
+    let bytes = streamed_bytes();
+    let max = u64::try_from(bytes.len())?;
+
+    let streamed = blobs.put_reader(bytes.as_slice(), max)?;
+    let whole = blobs.put(&bytes)?;
+
+    assert_eq!(streamed, whole);
+    assert_eq!(streamed, BlobId::of(&bytes));
+    assert_eq!(blobs.get(&streamed, max)?, bytes);
+    Ok(())
+}
+
+fn put_reader_exact_max<B: Blobs>(blobs: &B) -> TestResult {
+    let bytes = b"exactly at the cap".as_slice();
+    let max = u64::try_from(bytes.len())?;
+
+    let id = blobs.put_reader(bytes, max)?;
+
+    assert_eq!(id, BlobId::of(bytes));
+    assert_eq!(blobs.get(&id, max)?, bytes);
+    Ok(())
+}
+
+fn put_reader_over_max<B: Blobs>(blobs: &B) -> TestResult {
+    let bytes = streamed_bytes();
+    let max = u64::try_from(bytes.len())?.saturating_sub(1);
+
+    let result = blobs.put_reader(bytes.as_slice(), max);
+
+    assert!(
+        matches!(result, Err(StoreError::PutTooLarge { max: refused }) if refused == max),
+        "a stream one byte over its cap must be PutTooLarge"
+    );
+    assert!(!blobs.contains(&BlobId::of(&bytes))?);
+    Ok(())
+}
+
+fn put_reader_reader_error<B: Blobs>(blobs: &B) -> TestResult {
+    let prefix = b"half a root image".as_slice();
+
+    let result = blobs.put_reader(FailsAfter { prefix }, u64::MAX);
+
+    match result {
+        Err(error @ StoreError::Io { .. }) => assert!(error.is_retryable()),
+        Err(other) => return Err(format!("a reader error must be Io, got {other}").into()),
+        Ok(id) => return Err(format!("a failing reader stored blob {id}").into()),
+    }
+    assert!(!blobs.contains(&BlobId::of(prefix))?);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Arms
 // ---------------------------------------------------------------------------------------------------------------
@@ -256,6 +331,10 @@ blob_contract!(get_over_max_is_refused);
 blob_contract!(get_missing_is_refused);
 blob_contract!(contains_tracks_put);
 blob_contract!(put_is_idempotent);
+blob_contract!(put_reader_equals_put);
+blob_contract!(put_reader_exact_max);
+blob_contract!(put_reader_over_max);
+blob_contract!(put_reader_reader_error);
 
 fn is_send_sync<T: Send + Sync>() {}
 

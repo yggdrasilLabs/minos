@@ -209,3 +209,86 @@ fn missing_blob_is_refused() -> TestResult {
     assert!(!store.contains(&absent)?);
     Ok(())
 }
+
+/// `<root>/blobs/staging`, where streamed puts keep their temporary files.
+fn staging(root: &Path) -> PathBuf {
+    root.join("blobs").join("staging")
+}
+
+/// The names in the directory at `path`.
+fn names(path: &Path) -> Result<Vec<std::ffi::OsString>, Box<dyn Error>> {
+    Ok(fs::read_dir(path)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<Result<_, _>>()?)
+}
+
+#[test]
+fn put_reader_writes_the_sharded_path_and_leaves_staging_empty() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+
+    let id = store.put_reader(b"abc".as_slice(), 3)?;
+
+    assert_eq!(id.to_hex(), ABC_HEX);
+    assert_eq!(fs::read(abc_path(dir.path()))?, b"abc");
+    assert_eq!(mode(&staging(dir.path()))?, 0o700);
+    assert!(names(&staging(dir.path()))?.is_empty());
+    assert_eq!(
+        names(&abc_shard(dir.path()))?,
+        ["7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"]
+    );
+    Ok(())
+}
+
+#[test]
+fn put_reader_over_max_leaves_no_staging_file() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+
+    let result = store.put_reader(b"abcd".as_slice(), 3);
+
+    assert!(
+        matches!(result, Err(StoreError::PutTooLarge { max: 3 })),
+        "a 4-byte stream under a 3-byte cap must be PutTooLarge"
+    );
+    assert!(names(&staging(dir.path()))?.is_empty());
+    assert!(!store.contains(&BlobId::of(b"abcd"))?);
+    Ok(())
+}
+
+#[test]
+fn put_reader_heals_a_tampered_blob() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let id = store.put(b"abc")?;
+    flip_first_byte(&abc_path(dir.path()))?;
+
+    assert_eq!(store.put_reader(b"abc".as_slice(), 3)?, id);
+
+    assert_eq!(store.get(&id, 3)?, b"abc");
+    Ok(())
+}
+
+#[test]
+fn put_reader_refuses_a_symlinked_staging_directory() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let elsewhere = dir.path().join("elsewhere");
+    fs::create_dir(&elsewhere)?;
+    fs::create_dir_all(dir.path().join("blobs"))?;
+    symlink(&elsewhere, staging(dir.path()))?;
+
+    let result = store.put_reader(b"abc".as_slice(), 3);
+
+    assert!(
+        matches!(
+            result,
+            Err(StoreError::Unsafe {
+                what: "blob staging directory"
+            })
+        ),
+        "put_reader must refuse a symlinked staging directory"
+    );
+    assert!(names(&elsewhere)?.is_empty());
+    Ok(())
+}
