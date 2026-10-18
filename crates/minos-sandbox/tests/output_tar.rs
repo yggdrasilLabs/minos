@@ -126,7 +126,8 @@ fn read(stream: Vec<u8>) -> Result<ReadResult, Box<dyn Error>> {
         stream,
         Duration::ZERO,
         Vec::new(),
-    ).into_output())
+    )
+    .into_output())
 }
 
 /// The fault `stream` is refused with, or an error when it was accepted.

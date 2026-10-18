@@ -108,7 +108,8 @@ fn judge_output(files: &[(&str, &[u8])]) -> Result<Untrusted<GuestOutput<Judge>>
         tar(files)?,
         Duration::ZERO,
         Vec::new(),
-    ).into_output()?)
+    )
+    .into_output()?)
 }
 
 /// `files` read as the output of an exited Candidate launch.
@@ -123,7 +124,8 @@ fn candidate_output(
         tar(files)?,
         Duration::ZERO,
         Vec::new(),
-    ).into_output()?)
+    )
+    .into_output()?)
 }
 
 /// A valid scorecard in the wire form.
