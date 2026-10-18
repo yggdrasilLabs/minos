@@ -10,18 +10,24 @@
 //!    writes one, so it cannot be a torn write.
 //! 2. A version probe reads only `record.v`. Any value but `"1"` is [`CorruptKind::UnknownVersion`], wherever
 //!    the line is, so a newer ledger is never mistaken for a torn one (04-RESEARCH Pitfall 3).
-//! 3. A line that is not a [`Line`] is [`CorruptKind::BadJson`], except the torn tail below.
+//! 3. A line that is not a [`Line`] is [`CorruptKind::BadJson`], wherever it is, the final line included.
 //! 4. [`Line::verify`] for the run must pass ([`CorruptKind::KeyMismatch`]).
 //! 5. The line's `seq` must equal its 0-based position ([`CorruptKind::SeqGap`]).
 //!
 //! # The torn tail
 //!
-//! A crash during an append can leave the end of the file incomplete. Two shapes are tolerated (D-13): bytes
-//! after the last newline, and a final newline-terminated line that is not valid JSON at all, with nothing after
-//! it. [`Ledger::read`] drops that tail and reports it as a count, never its bytes. The next append truncates it
-//! with `set_len` under the exclusive lock before writing; that is the only mutation of existing bytes, and it
-//! removes only bytes no append ever reported written. Unterminated bytes over the line cap cannot be a torn
-//! write of this store either, so they are refused as [`CorruptKind::LineTooLong`].
+//! A crash during an append can leave the end of the file incomplete. [`Ledger::append`] serializes one line,
+//! pushes its newline, and issues one `write_all`, and `serde_json` never emits a raw newline inside a line, so a
+//! torn write is always a strict prefix with no newline after it. Bytes after the last newline are therefore the
+//! one tolerated shape (04-CONTEXT D-13 as amended 2026-10-18; review WR-01). [`Ledger::read`] drops them and
+//! reports a count, never the bytes. The next append truncates them with `set_len` under the exclusive lock
+//! before writing; that is the only mutation of existing bytes, and it removes only bytes no append ever reported
+//! written. Unterminated bytes over the line cap cannot be a torn write of this store either, so they are refused
+//! as [`CorruptKind::LineTooLong`].
+//!
+//! A newline-terminated final line that is not a [`Line`] is not a torn write of this store. The store cannot
+//! tell it from damage to a line `sync_data` already reported durable, so it is refused as
+//! [`CorruptKind::BadJson`] and needs a human, because truncating it would erase history.
 //!
 //! The ledger file is never opened with truncation and never rewritten.
 
@@ -75,22 +81,20 @@ const fn corrupt(run: &RunId, line: u64, kind: CorruptKind) -> StoreError {
 /// Checks every line of `bytes` (see the module docs) and returns the verified lines and the torn tail's offset.
 /// No error carries file bytes.
 fn parse(run: &RunId, bytes: &[u8]) -> Result<Parsed, StoreError> {
-    let mut newlines = bytes
+    let newlines = bytes
         .iter()
         .enumerate()
-        .filter_map(|(at, byte)| (*byte == b'\n').then_some(at))
-        .peekable();
+        .filter_map(|(at, byte)| (*byte == b'\n').then_some(at));
     let mut lines = Vec::new();
     let mut start = 0_usize;
     let mut index = 0_u64;
 
-    while let Some(end) = newlines.next() {
+    for end in newlines {
         let number = index.saturating_add(1);
         let text = bytes
             .get(start..end)
             .ok_or_else(|| corrupt(run, number, CorruptKind::BadJson))?;
         let after = end.saturating_add(1);
-        let is_tail = newlines.peek().is_none() && after == bytes.len();
 
         let length = len_u64(text.len());
         if length > MAX_LEDGER_LINE_BYTES {
@@ -105,18 +109,8 @@ fn parse(run: &RunId, bytes: &[u8]) -> Result<Parsed, StoreError> {
         {
             return Err(corrupt(run, number, CorruptKind::UnknownVersion));
         }
-        let line = match serde_json::from_slice::<Line>(text) {
-            Ok(line) => line,
-            Err(_not_a_line)
-                if is_tail && serde_json::from_slice::<serde_json::Value>(text).is_err() =>
-            {
-                return Ok(Parsed {
-                    lines,
-                    torn_start: Some(len_u64(start)),
-                });
-            }
-            Err(_not_a_line) => return Err(corrupt(run, number, CorruptKind::BadJson)),
-        };
+        let line = serde_json::from_slice::<Line>(text)
+            .map_err(|_not_a_line| corrupt(run, number, CorruptKind::BadJson))?;
         if line.verify(run).is_err() {
             return Err(corrupt(run, number, CorruptKind::KeyMismatch));
         }

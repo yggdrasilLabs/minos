@@ -2,6 +2,7 @@
 
 **Gathered:** 2026-10-14
 **Status:** Ready for planning
+**Amended:** 2026-10-18 (D-13; quick 261018-eiw, review WR-01)
 
 <domain>
 ## Phase Boundary
@@ -35,6 +36,7 @@ Requirements: STORE-01 through STORE-04, SBX-01 through SBX-06, CLI-11. Cross-cu
 - **D-11:** Ledger locking is per run and per append: `FileLedger::append` takes `std::fs::File::lock` on `runs/<run-id>/ledger.lock` around read-and-rebuild-the-key-set, check the key, write one line, fsync, unlock. Any process (`run`, `steer`, `stop`) can append safely. Phase 7's whole-run `driver.lock` (LOOP-06) is a separate file on top of this; it is not this phase's concern.
 - **D-12:** Every append is durable before it returns: write the line with its trailing newline, then `sync_data` (and fsync the directory when the file is created). The write count per run is small, so there is no "sync only before irreversible actions" mode.
 - **D-13:** A torn final line (no trailing newline, or an incomplete JSON object at the tail) is tolerated: `read` returns every complete line that passes `Line::verify` and reports the torn tail as a count, never its bytes; the next locked `append` truncates the file to the last complete line before writing. An invalid or torn line anywhere but the tail, a `Line::verify` key mismatch, a non-contiguous `seq`, and an unknown `v` tag are hard errors that refuse the ledger. The key set is rebuilt from the file under the lock on each append, so no process holds a stale index.
+  - **Amendment (2026-10-18, quick 261018-eiw, review WR-01):** only bytes after the last newline are a torn tail. A final line that ends in a newline but is not a `Line` is `BadJson`, like any other line, for both `read` and `append` (a `Duplicate` append included), and the file is left unchanged. An append serializes one line, pushes its newline, and issues one `write_all`, and serde_json never emits a raw newline inside a line, so a torn write of this store is always an unterminated prefix. A newline-terminated non-line therefore cannot be a torn write; the store cannot tell it from damage to a line `sync_data` already reported durable, and truncating it would erase history, so it is refused and needs a human. Implemented in `crates/minos-store/src/file/ledger.rs` `parse`; tests `a_newline_terminated_final_line_that_is_not_a_line_is_refused` and `a_duplicate_append_never_erases_a_damaged_final_line`.
 
 ### Sandbox types and the untrusted reader
 - **D-14:** Untrusted output carries the role in its type. `Running<R: Role>::wait` returns `Untrusted<GuestOutput<R>>`, and `into_scorecard` is implemented only for `Untrusted<GuestOutput<Judge>>`, so a candidate's bytes have no path to a `Scorecard` and the runner never checks a role at runtime (GUEST-04 enforced by the compiler). A fifth `trybuild` case proves that `into_scorecard` on candidate output does not compile. `into_log_excerpt` and `into_diff_texts` (SBX-04) exist for every role.

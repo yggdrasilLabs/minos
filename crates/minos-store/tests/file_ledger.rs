@@ -245,40 +245,6 @@ fn torn_tail_without_newline_is_tolerated() -> TestResult {
 }
 
 #[test]
-fn torn_tail_with_newline_is_tolerated() -> TestResult {
-    let dir = tempfile::tempdir()?;
-    let store = FileStore::open(dir.path())?;
-    for ordinal in 0..2 {
-        assert_eq!(
-            store.append(&run(), steered(1, ordinal, b"note"))?,
-            Appended::New {
-                seq: u64::from(ordinal)
-            }
-        );
-    }
-    let complete = ledger_bytes(dir.path(), &run())?;
-    append_raw(&ledger_path(dir.path(), &run()), b"{\"seq\":2,\"key\":\"\n")?;
-
-    let read = store.read(&run())?;
-
-    assert_eq!(read.lines().len(), 2);
-    assert_eq!(read.torn_tail(), 1);
-
-    assert_eq!(
-        store.append(&run(), steered(1, 2, b"note"))?,
-        Appended::New { seq: 2 }
-    );
-    let healed = store.read(&run())?;
-    assert_eq!(healed.lines().len(), 3);
-    assert_eq!(healed.torn_tail(), 0);
-    assert_eq!(
-        ledger_bytes(dir.path(), &run())?,
-        joined(&[complete, encoded(2, &run(), steered(1, 2, b"note"))?])
-    );
-    Ok(())
-}
-
-#[test]
 fn a_duplicate_append_still_truncates_the_torn_tail() -> TestResult {
     let dir = tempfile::tempdir()?;
     let store = FileStore::open(dir.path())?;
@@ -320,6 +286,50 @@ fn final_valid_json_that_is_not_a_line_is_refused() -> TestResult {
         b"{\"seq\":1}\n".to_vec(),
     ]);
     assert_refused(&bytes, 2, CorruptKind::BadJson)
+}
+
+/// An append writes its line and newline in one `write_all`, so a crash cannot leave a newline-terminated
+/// non-line, and truncating one could erase a line already reported durable (review WR-01).
+#[test]
+fn a_newline_terminated_final_line_that_is_not_a_line_is_refused() -> TestResult {
+    let two = joined(&[
+        encoded(0, &run(), steered(1, 0, b"note"))?,
+        encoded(1, &run(), steered(1, 1, b"note"))?,
+        b"{\"seq\":2,\"key\":\"\n".to_vec(),
+    ]);
+    assert_refused(&two, 3, CorruptKind::BadJson)?;
+
+    let blank = joined(&[encoded(0, &run(), steered(1, 0, b"note"))?, b"\n".to_vec()]);
+    assert_refused(&blank, 2, CorruptKind::BadJson)?;
+
+    let zeroed = joined(&[
+        encoded(0, &run(), steered(1, 0, b"note"))?,
+        b"\0\0\0\0\n".to_vec(),
+    ]);
+    assert_refused(&zeroed, 2, CorruptKind::BadJson)
+}
+
+/// An append writes its line and newline in one `write_all`, so a crash cannot leave a newline-terminated
+/// non-line, and truncating one could erase a line already reported durable, even on a duplicate append
+/// (review WR-01).
+#[test]
+fn a_duplicate_append_never_erases_a_damaged_final_line() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let bytes = joined(&[
+        encoded(0, &run(), steered(1, 0, b"note"))?,
+        b"{\"seq\":1,\"key\":\"\n".to_vec(),
+    ]);
+    write_raw(&ledger_path(dir.path(), &run()), &bytes)?;
+
+    expect_corrupt(
+        store.append(&run(), steered(1, 0, b"note")),
+        2,
+        CorruptKind::BadJson,
+    )?;
+
+    assert_eq!(ledger_bytes(dir.path(), &run())?, bytes);
+    Ok(())
 }
 
 #[test]
