@@ -33,6 +33,7 @@ use minos_sandbox::{Capabilities, Refusal};
 use rustix::process::{Pid, Signal, kill_process_group};
 use tempfile::TempDir;
 
+use crate::jobdir::{JOB_PREFIX, JOB_RANDOM_CHARS, ROOT_PREFIX, SOCKET_FILE};
 use crate::rootfs::check_guest_elf;
 use crate::seatbelt::{self, ProfileParams, SANDBOX_EXEC};
 use crate::supervise::{MAX_SOCKET_PATH_BYTES, sha256_file};
@@ -98,10 +99,6 @@ const LISTED_BYTES: &[u8] = b"minos-seatbelt-listed\n";
 
 /// The bytes of the file the profile does not list, which must never come back.
 const UNLISTED_BYTES: &[u8] = b"minos-seatbelt-unlisted\n";
-
-/// The bytes after the job root in the longest job socket path: `/minos-<uid>` is added separately, then
-/// `/mns` plus eight random characters for the job directory, then `/o.sock`.
-const JOB_SOCKET_TAIL: &str = "mnsXXXXXXXX/o.sock";
 
 /// The smallest machine, used as the host maximum when the hypervisor probe could not read the host's size; the
 /// probe then refuses, so nothing launches on it.
@@ -623,7 +620,11 @@ fn max_machine(ncpu: u64, memsize: u64) -> Machine {
 
 /// The longest socket path a job under `job_root` gets: `<job_root>/minos-<uid>/mnsXXXXXXXX/o.sock`.
 fn longest_socket_path(job_root: &Path, uid: u32) -> PathBuf {
-    job_root.join(format!("minos-{uid}")).join(JOB_SOCKET_TAIL)
+    let job = format!("{JOB_PREFIX}{}", "X".repeat(JOB_RANDOM_CHARS));
+    job_root
+        .join(format!("{ROOT_PREFIX}{uid}"))
+        .join(job)
+        .join(SOCKET_FILE)
 }
 
 /// The longest job socket path fits [`MAX_SOCKET_PATH_BYTES`].
@@ -935,16 +936,23 @@ fn excerpt(stderr: &[u8]) -> String {
 }
 
 /// What a host tool wrote, and how it ended.
-struct ToolOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(crate) struct ToolOutput {
+    /// How the tool ended.
+    pub(crate) status: ExitStatus,
+    /// At most the caller's cap of stdout bytes.
+    pub(crate) stdout: Vec<u8>,
+    /// At most `TOOL_STDERR_CAP` plus one stderr bytes.
+    pub(crate) stderr: Vec<u8>,
 }
 
 /// Runs `program` with `args` as a host tool: the environment cleared to `PATH=`[`TOOL_PATH`], stdin from
 /// `/dev/null`, stdout read up to `cap` bytes and stderr up to `TOOL_STDERR_CAP`, its own process group, and
 /// killed with that group at [`TOOL_DEADLINE`]. Modeled on `minos-source`'s `run_capped`.
-fn run_tool<A: AsRef<OsStr>>(program: &Path, args: &[A], cap: u64) -> io::Result<ToolOutput> {
+pub(crate) fn run_tool<A: AsRef<OsStr>>(
+    program: &Path,
+    args: &[A],
+    cap: u64,
+) -> io::Result<ToolOutput> {
     let child = Command::new(program)
         .args(args)
         .env_clear()

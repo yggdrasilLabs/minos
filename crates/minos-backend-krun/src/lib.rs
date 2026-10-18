@@ -6,6 +6,7 @@
 pub mod host;
 pub mod initramfs;
 pub mod input_disk;
+pub mod jobdir;
 pub mod launch_config;
 pub mod rootfs;
 pub mod seatbelt;
