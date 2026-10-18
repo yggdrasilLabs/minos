@@ -62,10 +62,10 @@ pub const PARENT_GONE_MARKER: &str = "minos-vmm: watchdog parent-gone";
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// How long the helper may take to die after a SIGKILL before [`watch`] reports it as a host failure.
-const KILL_WAIT: Duration = Duration::from_secs(5);
+pub const KILL_WAIT: Duration = Duration::from_secs(5);
 
 /// How long the pipe readers may take to see end-of-file once the helper and its group are gone.
-const PIPE_DRAIN_WINDOW: Duration = Duration::from_secs(2);
+pub const PIPE_DRAIN_WINDOW: Duration = Duration::from_secs(2);
 
 /// Read size for [`sha256_file`].
 const READ_CHUNK_BYTES: usize = 65_536;
