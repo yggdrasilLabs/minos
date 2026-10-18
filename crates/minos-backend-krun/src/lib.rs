@@ -4,7 +4,6 @@
 //! writers, the job input disk, the `minos-vmm` launch config, and a supervisor for one helper process.
 
 pub mod host;
-pub mod initramfs;
 pub mod input_disk;
 pub mod jobdir;
 pub mod launch_config;

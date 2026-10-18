@@ -1,4 +1,288 @@
 //! The per-job input disk, written by the backend from blob bytes (05-CONTEXT D-13, D-15).
+//!
+//! The runner passes IDs only: a [`LaunchPlan`] names the guest job blob and the parts its role needs. The backend
+//! fetches each part through its [`BlobSource`] under the part's section cap with [`fetch_parts`], checks that the
+//! guest job matches the plan before anything is written, and writes the disk into the job's 0700 directory with
+//! [`write_input_disk`], through core's one codec ([`minos_core::guest::write_input_disk`]). The disk is never
+//! stored as a blob, it is deleted with the job directory, and the host never unpacks the tarball or applies the
+//! diff (04-CONTEXT D-17): the bytes go onto the disk exactly as fetched, and only the guest reads them.
+//!
+//! The per-launch output token comes from [`new_token`] and goes nowhere but the disk header and the host's chunk
+//! receiver: never into a blob, a log, the launch config, or an argv (05-RESEARCH Pattern 2, Pitfall 1).
+
+use std::fmt;
+use std::fs::File;
+use std::io::{self, BufWriter, Read, Write};
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::path::PathBuf;
+
+use minos_core::chunk::{ChunkToken, TOKEN_BYTES};
+use minos_core::guest::{self, DiskError, GuestJob, GuestRole, SectionKind};
+use minos_core::id::BlobId;
+use minos_core::outcome::Stage;
+use minos_sandbox::{
+    BlobSource, BlobSourceError, LaunchError, LaunchKey, LaunchPlan, Role, RoleKind,
+};
+
+use crate::jobdir::JobDir;
+
+/// Where the per-launch token comes from: the kernel's random source.
+const URANDOM: &str = "/dev/urandom";
+
+/// The refusal for a guest job that disagrees with the plan naming it: a runner bug, so an infrastructure failure.
+const MISMATCH: LaunchError = LaunchError::Backend {
+    what: "the guest job does not match the plan",
+};
+
+/// A fresh per-launch output token: 32 bytes read from `/dev/urandom`.
+///
+/// `std::random` is unstable on the pinned toolchain, and a seeded generator would not be a secret. The source is
+/// checked to be a character device, so a planted regular file cannot supply a known token.
+///
+/// # Errors
+///
+/// An [`io::Error`] when `/dev/urandom` cannot be opened or read, or is not a character device.
+pub fn new_token() -> io::Result<ChunkToken> {
+    let mut file = File::open(URANDOM)?;
+    if !file.metadata()?.file_type().is_char_device() {
+        return Err(io::Error::other("/dev/urandom is not a character device"));
+    }
+    let mut bytes = [0_u8; TOKEN_BYTES];
+    file.read_exact(&mut bytes)?;
+    Ok(ChunkToken::from_bytes(bytes))
+}
+
+/// The bytes of every part a plan names, fetched under caps and checked against the plan.
+///
+/// Built only by [`fetch_parts`], so a value always holds exactly its role's parts: the job, the base, and (unless
+/// the baseline) the diff for a candidate; the job, the judge data, and the candidate's output for a judge.
+/// `Debug` shows the role and the part lengths only, never their bytes: the judge data is the judge's secret.
+pub struct FetchedParts {
+    job: GuestJob,
+    job_bytes: Vec<u8>,
+    base: Option<Vec<u8>>,
+    diff: Option<Vec<u8>>,
+    judge_data: Option<Vec<u8>>,
+    candidate_out: Option<Vec<u8>>,
+}
+
+impl FetchedParts {
+    /// The parsed guest job.
+    #[must_use]
+    pub const fn job(&self) -> &GuestJob {
+        &self.job
+    }
+
+    /// The guest job blob's bytes, written to the disk exactly as fetched.
+    #[must_use]
+    pub fn job_bytes(&self) -> &[u8] {
+        &self.job_bytes
+    }
+
+    /// The base tarball, for a candidate.
+    #[must_use]
+    pub fn base(&self) -> Option<&[u8]> {
+        self.base.as_deref()
+    }
+
+    /// The canonical cumulative diff, for a candidate that is not the baseline.
+    #[must_use]
+    pub fn diff(&self) -> Option<&[u8]> {
+        self.diff.as_deref()
+    }
+
+    /// The judge's private data, for a judge.
+    #[must_use]
+    pub fn judge_data(&self) -> Option<&[u8]> {
+        self.judge_data.as_deref()
+    }
+
+    /// The candidate's output stream, for a judge.
+    #[must_use]
+    pub fn candidate_out(&self) -> Option<&[u8]> {
+        self.candidate_out.as_deref()
+    }
+
+    /// The disk sections, by kind.
+    fn sections(&self) -> Vec<(SectionKind, &[u8])> {
+        let mut sections = vec![(SectionKind::Job, self.job_bytes.as_slice())];
+        let optional = [
+            (SectionKind::Base, self.base()),
+            (SectionKind::Diff, self.diff()),
+            (SectionKind::JudgeData, self.judge_data()),
+            (SectionKind::CandidateOut, self.candidate_out()),
+        ];
+        sections.extend(
+            optional
+                .into_iter()
+                .filter_map(|(kind, bytes)| bytes.map(|bytes| (kind, bytes))),
+        );
+        sections
+    }
+}
+
+impl fmt::Debug for FetchedParts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FetchedParts")
+            .field("role", &self.job.role())
+            .field("job_bytes", &self.job_bytes.len())
+            .field("base", &self.base.as_ref().map(Vec::len))
+            .field("diff", &self.diff.as_ref().map(Vec::len))
+            .field("judge_data", &self.judge_data.as_ref().map(Vec::len))
+            .field("candidate_out", &self.candidate_out.as_ref().map(Vec::len))
+            .finish()
+    }
+}
+
+/// The bytes of blob `id`, at most `kind`'s section cap of them.
+///
+/// The cap and the hash are re-checked here even though the [`BlobSource`] contract promises both, so a source
+/// that breaks it fails closed rather than putting unchecked bytes on a disk.
+fn fetch<B: BlobSource>(blobs: &B, id: BlobId, kind: SectionKind) -> Result<Vec<u8>, LaunchError> {
+    let max = kind.cap();
+    let bytes = blobs.get(&id, max)?;
+    let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if size > max {
+        return Err(BlobSourceError::TooLarge { id, size, max }.into());
+    }
+    if BlobId::of(&bytes) != id {
+        return Err(BlobSourceError::Tampered { id }.into());
+    }
+    Ok(bytes)
+}
+
+/// The guest role of a sandbox role, or `None` for a role the guest does not run.
+const fn guest_role(kind: RoleKind) -> Option<GuestRole> {
+    match kind {
+        RoleKind::Candidate => Some(GuestRole::Candidate),
+        RoleKind::Judge => Some(GuestRole::Judge),
+        _ => None,
+    }
+}
+
+/// Whether `job` is the job `plan` describes: its role, its launch key (recomputed from the job's experiment,
+/// judge version, and trial), its base and diff, every stage budget, and its memory.
+fn job_matches<R: Role>(job: &GuestJob, plan: &LaunchPlan<R>) -> bool {
+    let input = plan.input();
+    let budget = plan.budget();
+    guest_role(R::KIND) == Some(job.role())
+        && LaunchKey::of::<R>(&job.exp(), &job.judge_version(), job.trial()) == *plan.key()
+        && job.base() == input.base()
+        && job.diff() == input.diff()
+        && job.stages().iter().all(|stage| {
+            let planned = match stage.stage() {
+                Stage::Build => budget.build_ms(),
+                Stage::Run => budget.run_ms(),
+                Stage::Judge => budget.judge_ms(),
+            };
+            stage.budget_ms() == planned
+        })
+        && job.memory_mib() == plan.machine().memory_mib()
+}
+
+/// Fetches every part `plan` names through `blobs`, each under its section cap, after checking that the guest job
+/// matches the plan.
+///
+/// The guest job blob is fetched and parsed first, and compared with the plan: the role, the [`LaunchKey`]
+/// recomputed from the job's experiment, judge version, and trial, the base and diff, each stage budget, and the
+/// memory. Only then are the base and diff (a candidate) or the judge data and the candidate output (a judge)
+/// fetched. Nothing is written.
+///
+/// # Errors
+///
+/// [`LaunchError::Blob`] when a part cannot be read, is over its cap, or does not hash to its ID;
+/// [`LaunchError::Backend`] when the job blob is not a valid guest job, when the job does not match the plan, or
+/// when a judge plan has no judge data. Each is an infrastructure failure: the candidate has not run.
+pub fn fetch_parts<B: BlobSource, R: Role>(
+    blobs: &B,
+    plan: &LaunchPlan<R>,
+) -> Result<FetchedParts, LaunchError> {
+    let input = plan.input();
+    let job_bytes = fetch(blobs, input.job(), SectionKind::Job)?;
+    let job = GuestJob::parse_json(&job_bytes).map_err(|_| LaunchError::Backend {
+        what: "the guest job blob is not a valid guest job",
+    })?;
+    if !job_matches(&job, plan) {
+        return Err(MISMATCH);
+    }
+    let mut parts = FetchedParts {
+        job,
+        job_bytes,
+        base: None,
+        diff: None,
+        judge_data: None,
+        candidate_out: None,
+    };
+    match parts.job.role() {
+        GuestRole::Candidate => {
+            let base = input.base().ok_or(MISMATCH)?;
+            parts.base = Some(fetch(blobs, base.to_blob_id(), SectionKind::Base)?);
+            parts.diff = input
+                .diff()
+                .map(|diff| fetch(blobs, diff, SectionKind::Diff))
+                .transpose()?;
+        }
+        GuestRole::Judge => {
+            let data = plan.judge_data().ok_or(LaunchError::Backend {
+                what: "the judge plan has no judge data",
+            })?;
+            let out = input.candidate_out().ok_or(MISMATCH)?;
+            parts.judge_data = Some(fetch(blobs, *data.blob(), SectionKind::JudgeData)?);
+            parts.candidate_out = Some(fetch(blobs, out, SectionKind::CandidateOut)?);
+        }
+    }
+    Ok(parts)
+}
+
+/// Maps a disk writer failure: an I/O error stays one, and anything else is a host bug, since the parts were
+/// fetched under the very caps the writer checks.
+fn disk_error(error: DiskError) -> LaunchError {
+    match error {
+        DiskError::Io(source) => LaunchError::Io {
+            op: "write the input disk",
+            source,
+        },
+        _ => LaunchError::Backend {
+            what: "the input disk writer refused the fetched parts",
+        },
+    }
+}
+
+/// Writes the input disk of `parts` under `token` into the job directory `dir`, and returns its path,
+/// [`JobDir::input`].
+///
+/// The disk is written to a new mode 0600 temporary file in the 0700 job directory, flushed and synced, and then
+/// renamed to `input.img` without replacing anything: an existing `input.img` fails the write and is left as it
+/// was, and the temporary file is removed. The disk goes away with the job directory.
+///
+/// # Errors
+///
+/// [`LaunchError::Io`] when the temporary file cannot be created, written, synced, or renamed into place
+/// (including when `input.img` already exists); [`LaunchError::Backend`] if core's writer refuses the parts.
+pub fn write_input_disk(
+    dir: &JobDir,
+    token: &ChunkToken,
+    parts: &FetchedParts,
+) -> Result<PathBuf, LaunchError> {
+    let io_error = |op: &'static str| move |source: io::Error| LaunchError::Io { op, source };
+    let mut temp = tempfile::Builder::new()
+        .prefix(".input-")
+        .permissions(std::fs::Permissions::from_mode(0o600))
+        .tempfile_in(dir.path())
+        .map_err(io_error("create the input disk"))?;
+    {
+        let mut out = BufWriter::new(temp.as_file_mut());
+        guest::write_input_disk(&mut out, token, &parts.sections()).map_err(disk_error)?;
+        out.flush().map_err(io_error("write the input disk"))?;
+    }
+    temp.as_file()
+        .sync_all()
+        .map_err(io_error("sync the input disk"))?;
+    let target = dir.input();
+    temp.persist_noclobber(&target)
+        .map_err(|error| io_error("rename the input disk into place")(error.error))?;
+    Ok(target)
+}
 
 #[cfg(test)]
 mod tests {
@@ -109,7 +393,8 @@ diff --git a/src/parse.rs b/src/parse.rs
     impl BlobSource for MapBlobSource {
         fn get(&self, id: &BlobId, max: u64) -> Result<Vec<u8>, BlobSourceError> {
             let bytes = self.0.get(id).ok_or(BlobSourceError::Missing { id: *id })?;
-            let size = u64::try_from(bytes.len()).map_err(|_| BlobSourceError::Unsafe { what: "size" })?;
+            let size =
+                u64::try_from(bytes.len()).map_err(|_| BlobSourceError::Unsafe { what: "size" })?;
             if size > max {
                 return Err(BlobSourceError::TooLarge { id: *id, size, max });
             }
@@ -143,7 +428,11 @@ diff --git a/src/parse.rs b/src/parse.rs
     }
 
     fn diff() -> Result<Diff, Box<dyn Error>> {
-        Ok(Diff::parse(DIFF, manifest()?.writable(), &Limits::standard())?)
+        Ok(Diff::parse(
+            DIFF,
+            manifest()?.writable(),
+            &Limits::standard(),
+        )?)
     }
 
     /// The request for trial `trial` of the one-diff candidate of [`BASE`].
@@ -239,7 +528,7 @@ diff --git a/src/parse.rs b/src/parse.rs
         Ok(bytes)
     }
 
-    fn is_mismatch(result: Result<FetchedParts, LaunchError>) -> bool {
+    fn is_mismatch(result: &Result<FetchedParts, LaunchError>) -> bool {
         matches!(
             result,
             Err(LaunchError::Backend {
@@ -294,24 +583,24 @@ diff --git a/src/parse.rs b/src/parse.rs
         // Role: a judge job named by a Candidate plan.
         let judge_job = GuestJob::judge(&manifest()?, &request(1)?).to_json()?;
         let plan = candidate_plan(&request(1)?, &judge_job, memory)?;
-        assert!(is_mismatch(fetch_parts(&source(&judge_job)?, &plan)));
+        assert!(is_mismatch(&fetch_parts(&source(&judge_job)?, &plan)));
         // Launch key: the job of trial 1 named by the plan of trial 2.
         let job = candidate_job_bytes(1)?;
         let plan = candidate_plan(&request(2)?, &job, memory)?;
-        assert!(is_mismatch(fetch_parts(&source(&job)?, &plan)));
+        assert!(is_mismatch(&fetch_parts(&source(&job)?, &plan)));
         // Base and diff: a job edited to name another base or another diff, under the right key.
         let other_base = edited_job(|v| {
             *v.get_mut("base")? = Value::String(TreeId::of(b"other").to_hex());
             Some(())
         })?;
         let plan = candidate_plan(&request(1)?, &other_base, memory)?;
-        assert!(is_mismatch(fetch_parts(&source(&other_base)?, &plan)));
+        assert!(is_mismatch(&fetch_parts(&source(&other_base)?, &plan)));
         let other_diff = edited_job(|v| {
             *v.get_mut("diff")? = Value::String(BlobId::of(b"other").to_hex());
             Some(())
         })?;
         let plan = candidate_plan(&request(1)?, &other_diff, memory)?;
-        assert!(is_mismatch(fetch_parts(&source(&other_diff)?, &plan)));
+        assert!(is_mismatch(&fetch_parts(&source(&other_diff)?, &plan)));
         // A stage budget: the run stage one second longer than the plan's.
         let other_budget = edited_job(|v| {
             let run = v.get_mut("stages")?.as_array_mut()?.get_mut(1)?;
@@ -320,10 +609,10 @@ diff --git a/src/parse.rs b/src/parse.rs
             Some(())
         })?;
         let plan = candidate_plan(&request(1)?, &other_budget, memory)?;
-        assert!(is_mismatch(fetch_parts(&source(&other_budget)?, &plan)));
+        assert!(is_mismatch(&fetch_parts(&source(&other_budget)?, &plan)));
         // Memory: the plan's machine is larger than the job's memory.
         let plan = candidate_plan(&request(1)?, &job, memory.checked_mul(2).ok_or("memory")?)?;
-        assert!(is_mismatch(fetch_parts(&source(&job)?, &plan)));
+        assert!(is_mismatch(&fetch_parts(&source(&job)?, &plan)));
         // A Judge plan with no judge data attached.
         let plan = judge_plan(&request(1)?, &judge_job, false)?;
         assert!(matches!(
@@ -387,7 +676,10 @@ diff --git a/src/parse.rs b/src/parse.rs
             let parts = if judge {
                 fetch_parts(&blobs, &judge_plan(&request(1)?, &job_bytes, true)?)?
             } else {
-                fetch_parts(&blobs, &candidate_plan(&request(1)?, &job_bytes, default_memory()?)?)?
+                fetch_parts(
+                    &blobs,
+                    &candidate_plan(&request(1)?, &job_bytes, default_memory()?)?,
+                )?
             };
             let dir = root.create_job()?;
             let path = write_input_disk(&dir, &ChunkToken::from_bytes(TOKEN), &parts)?;
@@ -397,10 +689,16 @@ diff --git a/src/parse.rs b/src/parse.rs
             let mut sections = read_input_disk(&mut File::open(&path)?)?;
             assert!(sections.token().ct_eq(&TOKEN));
             sections.check_role(parts.job())?;
-            assert_eq!(sections.take(SectionKind::Job).as_deref(), Some(job_bytes.as_slice()));
+            assert_eq!(
+                sections.take(SectionKind::Job).as_deref(),
+                Some(job_bytes.as_slice())
+            );
             assert_eq!(sections.take(SectionKind::Base).as_deref(), parts.base());
             assert_eq!(sections.take(SectionKind::Diff).as_deref(), parts.diff());
-            assert_eq!(sections.take(SectionKind::JudgeData).as_deref(), parts.judge_data());
+            assert_eq!(
+                sections.take(SectionKind::JudgeData).as_deref(),
+                parts.judge_data()
+            );
             assert_eq!(
                 sections.take(SectionKind::CandidateOut).as_deref(),
                 parts.candidate_out()
