@@ -102,7 +102,7 @@ fn constants_fit_one_connection() {
     assert_eq!(MAX_CHUNK_PAYLOAD, 4096);
     assert_eq!(MAX_CHUNK_BYTES, CHUNK_HEADER_BYTES + MAX_CHUNK_PAYLOAD);
     assert_eq!(END_PAYLOAD_BYTES, 44);
-    assert!(MAX_CHUNK_BYTES <= 8192);
+    const { assert!(MAX_CHUNK_BYTES <= 8192) };
 }
 
 #[test]
@@ -126,7 +126,11 @@ fn chunk_header_layout() {
     assert_eq!(seven.len(), 50);
     assert_eq!(seven.get(40..44), Some(&7_u32.to_be_bytes()[..]));
     assert_eq!(seven.get(48..), Some(&b"hi"[..]));
-    let mut differs = first.iter().zip(&seven).enumerate().filter(|(_, (a, b))| a != b);
+    let mut differs = first
+        .iter()
+        .zip(&seven)
+        .enumerate()
+        .filter(|(_, (a, b))| a != b);
     // The token differs (0x11 vs 0x5a) in bytes 8..40 and the seq in byte 43.
     assert!(differs.all(|(i, _)| (8..40).contains(&i) || i == 43));
 }
@@ -202,7 +206,9 @@ proptest! {
 
 #[test]
 fn in_order_stream_reassembles_and_completes() -> Result<(), ChunkFault> {
-    let payload: Vec<u8> = (0..10_000_u32).map(|i| u8::try_from(i % 251).unwrap_or(0)).collect();
+    let payload: Vec<u8> = (0..10_000_u32)
+        .map(|i| u8::try_from(i % 251).unwrap_or(0))
+        .collect();
     let chunks = stream(&payload);
     let mut r = reassembler();
     let (last, rest) = chunks.split_last().ok_or(ChunkFault::NoEnd)?;
@@ -253,7 +259,10 @@ fn short_header_is_refused() {
 #[test]
 fn oversize_chunk_is_refused() {
     let payload = vec![0_u8; 4097];
-    assert_eq!(reassembler().accept(&data(0, &payload)), Err(ChunkFault::Oversize));
+    assert_eq!(
+        reassembler().accept(&data(0, &payload)),
+        Err(ChunkFault::Oversize)
+    );
     // An END claiming a length over the cap is oversize too.
     assert_eq!(
         reassembler().accept(&frame(0, KIND_END, 0, 4097, &payload)),
@@ -331,18 +340,10 @@ fn second_end_is_refused() {
 #[test]
 fn data_after_the_end_is_refused() {
     // The END says one DATA chunk; a DATA with seq 1 arrives after it.
-    let chunks = vec![
-        data(0, b"abc"),
-        end(1, 3, sha256(b"abc"), 1),
-        data(1, b"x"),
-    ];
+    let chunks = vec![data(0, b"abc"), end(1, 3, sha256(b"abc"), 1), data(1, b"x")];
     assert_eq!(reassemble(&chunks), Err(ChunkFault::AfterEnd { seq: 1 }));
     // The same DATA arriving before the END is refused when the END arrives.
-    let chunks = vec![
-        data(0, b"abc"),
-        data(5, b"x"),
-        end(1, 3, sha256(b"abc"), 1),
-    ];
+    let chunks = vec![data(0, b"abc"), data(5, b"x"), end(1, 3, sha256(b"abc"), 1)];
     assert_eq!(reassemble(&chunks), Err(ChunkFault::AfterEnd { seq: 5 }));
 }
 
@@ -393,7 +394,10 @@ fn one_connection_past_the_limit_is_refused() {
     let mut r = Reassembler::new(token(), 4096);
     let chunks = stream(&[0_u8; 4096]);
     assert_eq!(feed(&mut r, &chunks), Ok(()));
-    assert_eq!(r.accept(&data(9, b"x")), Err(ChunkFault::TooManyConnections));
+    assert_eq!(
+        r.accept(&data(9, b"x")),
+        Err(ChunkFault::TooManyConnections)
+    );
 }
 
 #[test]
@@ -413,7 +417,10 @@ fn missing_seq_is_a_gap() {
 #[test]
 fn missing_end_is_no_end() {
     let chunks = stream(&[3_u8; 10_000]);
-    let without_end = chunks.split_last().map(|(_, rest)| rest).unwrap_or_default();
+    let without_end = chunks
+        .split_last()
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
     assert_eq!(reassemble(without_end), Err(ChunkFault::NoEnd));
     assert_eq!(reassembler().finish(), Err(ChunkFault::NoEnd));
 }

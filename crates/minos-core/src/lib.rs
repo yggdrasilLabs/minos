@@ -49,6 +49,8 @@ pub mod sweep;
 
 pub mod job;
 
+pub mod chunk;
+
 pub mod report;
 
 // id: SHA-256 identifiers and validated names
@@ -96,6 +98,9 @@ pub use ledger::{BackendInfo, Decision, Event, EventKey, Line, Record, SpendId, 
 
 // state: run state folded from ledger records
 pub use state::{RunState, fold};
+
+// chunk: the authenticated vsock output codec
+pub use chunk::{ChunkToken, Reassembler};
 
 // job: the loop-to-runner contract
 pub use job::{JobRequest, JobResult};
