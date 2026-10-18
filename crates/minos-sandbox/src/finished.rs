@@ -76,6 +76,9 @@ impl<R: Role> Finished<R> {
     ///
     /// Requiring the `Cleared` of role `R` means output of a role exists only for a cleared launch of that role.
     /// It consumes the launch's clearance, so one cleared launch yields at most one `Finished` (review WR-03).
+    ///
+    /// For [`Ended::ChunkProtocol`] the stream is discarded here, whatever the backend passed, so no byte of a
+    /// broken stream is ever kept.
     #[must_use]
     pub fn new(
         cleared: Cleared<R>,
@@ -84,6 +87,11 @@ impl<R: Role> Finished<R> {
         elapsed: Duration,
         console: Vec<u8>,
     ) -> Self {
+        let stream = if ended == Ended::ChunkProtocol {
+            Vec::new()
+        } else {
+            stream
+        };
         Self {
             key: cleared.into_key(),
             ended,

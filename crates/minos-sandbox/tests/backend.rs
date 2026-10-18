@@ -434,3 +434,21 @@ fn ended_chunk_protocol_exists() -> TestResult {
     assert_ne!(Ended::ChunkProtocol, Ended::Exited);
     Ok(())
 }
+
+#[test]
+fn chunk_protocol_keeps_no_stream_byte() -> TestResult {
+    // Arrange: a backend that wrongly hands over the bytes of a broken stream.
+    let stream = tar(&[("diffs/0001.diff", b"partial")])?;
+    let backend = FakeBackend::new(host(BTreeSet::new())?, Ended::ChunkProtocol, stream);
+
+    // Act
+    let finished = run(&backend, spec::<Candidate>()?.seal())?;
+
+    // Assert: the stream was discarded, so reading it finds no end blocks.
+    assert_eq!(finished.ended(), Ended::ChunkProtocol);
+    assert!(
+        finished.into_output().is_err(),
+        "bytes of a broken chunk stream were kept"
+    );
+    Ok(())
+}
