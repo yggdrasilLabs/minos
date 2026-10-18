@@ -79,6 +79,15 @@ pub enum PreflightError {
         /// What fd 1 is instead.
         found: &'static str,
     },
+    /// The helper could not set one of its own resource limits; `main` sets them before reading the config.
+    #[error("setting the helper's own {resource}")]
+    Rlimit {
+        /// The limit, for example `RLIMIT_CORE`.
+        resource: &'static str,
+        /// The underlying error.
+        #[source]
+        source: io::Error,
+    },
     /// A file's SHA-256 does not match the config. `main` reports this with its own exit code (67).
     #[error("{field} {}: SHA-256 is {actual}, the config expects {expected}", .path.display())]
     Hash {

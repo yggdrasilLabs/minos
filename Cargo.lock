@@ -874,6 +874,7 @@ name = "minos-vmm"
 version = "0.1.0"
 dependencies = [
  "base16ct",
+ "log",
  "msb_krun",
  "rustix",
  "serde",

@@ -97,6 +97,8 @@ ignore       = "=0.4.33"
 regex        = "=1.13.1"
 rand_chacha  = { version = "=0.10.0", default-features = false }
 rand_core    = "=0.10.1"
+# minos-vmm's capped stderr logger (DIAG-01); already in Cargo.lock through msb_krun.
+log = "=0.4.34"
 rustix       = { version = "=1.1.5", features = ["event", "fs", "mount", "process", "system"] }
 vsock        = "=0.5.4"
 # Bumping this pin requires re-running the VM spike `spike_boot::boot_root_disk` by hand (02-SPIKE-EVIDENCE.md

@@ -22,6 +22,7 @@
 
 mod config;
 mod launch;
+mod log;
 mod preflight;
 mod watchdog;
 
@@ -236,6 +237,15 @@ mod tests {
             .exit_code(),
             EXIT_PREFLIGHT
         );
+        assert_eq!(
+            LaunchError::Preflight(PreflightError::Rlimit {
+                resource: "RLIMIT_FSIZE",
+                source: io::Error::from(io::ErrorKind::PermissionDenied),
+            })
+            .exit_code(),
+            EXIT_PREFLIGHT
+        );
+        assert_eq!(EXIT_PREFLIGHT, 66);
         let watchdog = LaunchError::Watchdog(io::Error::from(io::ErrorKind::WouldBlock));
         assert_eq!(watchdog.exit_code(), EXIT_WATCHDOG);
         assert_eq!(EXIT_WATCHDOG, 71);
