@@ -8,18 +8,22 @@ use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
 
+use minos_core::guest::{
+    ApplyStatus, GuestRole, GuestStatus, GuestStatusError, MAX_STATUS_BYTES, OutputStatus,
+    SetupStatus, StageEnd, StageReport,
+};
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
 use minos_core::ledger::{BackendKind, ConfinementLayer, Isolation};
 use minos_core::limits::Limits;
 use minos_core::manifest::{Arch, JudgeVersion};
 use minos_core::metric::{Scorecard, ScorecardError};
-use minos_core::outcome::Reason;
+use minos_core::outcome::{Reason, Stage};
 use minos_core::path::RelPath;
 use minos_sandbox::{
     Candidate, Capabilities, Ended, Finished, GuestOutput, InputDisk, JUDGE_LOG_PATH, Judge,
     JudgeData, Machine, OutputCap, OutputFault, OutputInvalid, RUN_LOG_PATH, Role, RoleKind,
-    SCORECARD_PATH, SandboxSpec, ScorecardFault, Untrusted, preflight,
+    SCORECARD_PATH, STATUS_PATH, SandboxSpec, ScorecardFault, StatusFault, Untrusted, preflight,
 };
 use tar::Header;
 
@@ -330,4 +334,132 @@ fn candidate_output_has_diff_and_log_exits() -> TestResult {
         vec!["first\n".to_owned()]
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// take_status
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A valid candidate status: the baseline built and ran, and one file was packed.
+fn candidate_status() -> Result<GuestStatus, Box<dyn Error>> {
+    Ok(GuestStatus::new(
+        GuestRole::Candidate,
+        SetupStatus::Ok,
+        ApplyStatus::Baseline,
+        vec![
+            StageReport::new(Stage::Build, StageEnd::Exited { code: 0 }),
+            StageReport::new(Stage::Run, StageEnd::Exited { code: 0 }),
+        ],
+        OutputStatus::Packed {
+            files: 1,
+            content_bytes: 2,
+        },
+    )?)
+}
+
+/// A valid judge status: the judge ran, and two files were packed.
+fn judge_status() -> Result<GuestStatus, Box<dyn Error>> {
+    Ok(GuestStatus::new(
+        GuestRole::Judge,
+        SetupStatus::Ok,
+        ApplyStatus::NotApplicable,
+        vec![StageReport::new(Stage::Judge, StageEnd::Exited { code: 0 })],
+        OutputStatus::Packed {
+            files: 2,
+            content_bytes: 64,
+        },
+    )?)
+}
+
+/// The status fault `result` holds, or an error when the status was accepted.
+fn status_fault(result: Result<GuestStatus, StatusFault>) -> Result<StatusFault, Box<dyn Error>> {
+    match result {
+        Ok(status) => Err(format!("a {:?} status was accepted", status.role()).into()),
+        Err(fault) => Ok(fault),
+    }
+}
+
+#[test]
+fn take_status_valid() -> TestResult {
+    // Arrange
+    let status = candidate_status()?;
+    let json = status.to_json()?;
+    let mut output = candidate_output(&[(STATUS_PATH, &json), ("out/r", b"{}")])?;
+
+    // Act
+    let taken = output.take_status()?;
+
+    // Assert: the status is the one written, and the file is gone from the output.
+    assert_eq!(taken, status);
+    assert_eq!(output.entry_count(), 1);
+    assert!(output.take(&RelPath::try_from(STATUS_PATH)?).is_none());
+    assert_eq!(
+        status_fault(output.take_status())?,
+        StatusFault::Missing,
+        "a second take_status found a status"
+    );
+    Ok(())
+}
+
+#[test]
+fn take_status_valid_for_judge_output() -> TestResult {
+    // Arrange
+    let status = judge_status()?;
+    let mut output = judge_output(&[
+        (STATUS_PATH, &status.to_json()?),
+        (SCORECARD_PATH, SCORECARD),
+    ])?;
+
+    // Act
+    let taken = output.take_status()?;
+
+    // Assert: the judge's other exits still work after the status is taken.
+    assert_eq!(taken, status);
+    assert_eq!(
+        output.into_scorecard(&Limits::standard())?,
+        Scorecard::parse_json(SCORECARD, &Limits::standard())?
+    );
+    Ok(())
+}
+
+#[test]
+fn take_status_refusals() -> TestResult {
+    // Missing.
+    let mut output = candidate_output(&[("out/r", b"{}")])?;
+    let missing = status_fault(output.take_status())?;
+    assert_eq!(missing, StatusFault::Missing);
+    assert_eq!(output.entry_count(), 1, "a missing status removed a file");
+
+    // Not the status wire form.
+    let mut output = candidate_output(&[(STATUS_PATH, b"{not json")])?;
+    let invalid = status_fault(output.take_status())?;
+    assert!(
+        matches!(invalid, StatusFault::Invalid(GuestStatusError::Json { .. })),
+        "bad JSON was not refused as invalid"
+    );
+
+    // Over the byte cap: a valid status padded past MAX_STATUS_BYTES is refused before parsing.
+    let mut padded = candidate_status()?.to_json()?;
+    padded.resize(MAX_STATUS_BYTES + 1, b' ');
+    let mut output = candidate_output(&[(STATUS_PATH, &padded)])?;
+    let too_large = status_fault(output.take_status())?;
+    assert_eq!(too_large, StatusFault::Invalid(GuestStatusError::TooLarge));
+
+    // A judge status in candidate output, and a candidate status in judge output.
+    let mut output = candidate_output(&[(STATUS_PATH, &judge_status()?.to_json()?)])?;
+    let wrong_role = status_fault(output.take_status())?;
+    assert_eq!(wrong_role, StatusFault::WrongRole);
+    let mut output = judge_output(&[(STATUS_PATH, &candidate_status()?.to_json()?)])?;
+    assert_eq!(status_fault(output.take_status())?, StatusFault::WrongRole);
+
+    // Every fault is the same ledger reason.
+    for fault in [missing, invalid, too_large, wrong_role] {
+        assert_eq!(fault.reason(), Reason::OutputInvalid);
+    }
+    Ok(())
+}
+
+#[test]
+fn status_path_is_core_s() {
+    assert_eq!(STATUS_PATH, minos_core::guest::STATUS_PATH);
 }
