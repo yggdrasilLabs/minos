@@ -1,9 +1,15 @@
-//! The minos-vmm launch config (v1): serialized here, parsed and validated by minos-vmm.
+//! The minos-vmm launch config (v2): serialized here, parsed and validated by minos-vmm.
 //!
-//! The wire shape is fixed by field declaration order, which is the key order of the compact JSON. The same
-//! canonical texts (02-05 and 02-03 Exact texts E-1 and E-1b) are embedded in this module's tests and in
-//! minos-vmm's parser tests, so the two sides cannot drift apart (02-CONTEXT.md D-04). This crate never links
-//! minos-vmm; the shared texts are the only binding. Validation lives in minos-vmm: this type only shapes output.
+//! v2 names two read-only disks, the root image and the job input, and nothing else: no scratch disk (scratch is a
+//! size-capped tmpfs in guest memory, 05-CONTEXT D-05), no initramfs mode, and no console file, because the
+//! console is the helper's stdout pipe (05-RESEARCH Open Question 7; 05-EVIDENCE.md Mechanism selections,
+//! `console: pipe`). minos-vmm v2 refuses any of those fields.
+//!
+//! The wire shape is fixed by field declaration order, which is the key order of the compact JSON. This crate
+//! never links minos-vmm; one golden file is the binding (02-CONTEXT.md D-04). This module's tests serialize a
+//! fixed config and compare it byte for byte with `crates/minos-vmm/golden/config-v2.json`, whose SHA-256 both
+//! crates pin, and minos-vmm's tests parse the same file. Validation lives in minos-vmm: this type only shapes
+//! output.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -11,40 +17,34 @@ use std::time::Duration;
 use serde::Serialize;
 
 /// The launch config version this crate writes.
-pub const LAUNCH_CONFIG_VERSION: u32 = 1;
+pub const LAUNCH_CONFIG_VERSION: u32 = 2;
 
 /// One VM launch, as minos-vmm reads it from its single argument.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LaunchConfig {
     v: u32,
     kernel: Kernel,
-    boot: Boot,
     disks: Disks,
     vsock: Vsock,
-    console: Console,
     max_duration_ms: u64,
     machine: Machine,
 }
 
 impl LaunchConfig {
-    /// Assembles a v1 config from its parts.
+    /// Assembles a v2 config from its parts.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         kernel: Kernel,
-        boot: Boot,
         disks: Disks,
         vsock: Vsock,
-        console: Console,
         max_duration_ms: u64,
         machine: Machine,
     ) -> Self {
         Self {
             v: LAUNCH_CONFIG_VERSION,
             kernel,
-            boot,
             disks,
             vsock,
-            console,
             max_duration_ms,
             machine,
         }
@@ -56,13 +56,16 @@ impl LaunchConfig {
         Duration::from_millis(self.max_duration_ms)
     }
 
-    /// Serializes the config as compact JSON, the exact bytes minos-vmm parses.
+    /// Serializes the config as one line of compact JSON followed by a newline, the exact bytes minos-vmm parses
+    /// and the form of its golden file.
     ///
     /// # Errors
     ///
     /// Returns the [`serde_json::Error`] if a path is not valid UTF-8.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(self)
+        let mut json = serde_json::to_string(self)?;
+        json.push('\n');
+        Ok(json)
     }
 }
 
@@ -84,67 +87,22 @@ impl Kernel {
     }
 }
 
-/// How the guest kernel finds `/init`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Boot {
-    /// Boot from the read-only root disk on `/dev/vda` (02-CONTEXT.md D-18). Serializes as `"root_disk"`.
-    RootDisk,
-    /// Attach an initramfs; negative evidence only (D-18). Serializes as `{"initramfs":{...}}`.
-    Initramfs(Initramfs),
-}
-
-impl Boot {
-    /// The initramfs boot value for the archive at `path` with digest `sha256_hex`.
-    #[must_use]
-    pub fn initramfs(path: impl Into<PathBuf>, sha256_hex: impl Into<String>) -> Self {
-        Self::Initramfs(Initramfs {
-            path: path.into(),
-            sha256: sha256_hex.into(),
-        })
-    }
-}
-
-/// The `boot.initramfs` object; built through [`Boot::initramfs`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Initramfs {
-    path: PathBuf,
-    sha256: String,
-}
-
-/// The three block devices: read-only root, read-only job input, and the size-capped scratch disk.
+/// The two block devices, both attached read-only: the root image on `/dev/vda` and the job input on `/dev/vdb`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Disks {
     root: PathBuf,
     input: PathBuf,
-    scratch: Scratch,
 }
 
 impl Disks {
-    /// Names the root, input, and scratch images, and the most bytes the scratch image may hold.
+    /// Names the root and input images.
     #[must_use]
-    pub fn new(
-        root: impl Into<PathBuf>,
-        input: impl Into<PathBuf>,
-        scratch: impl Into<PathBuf>,
-        scratch_cap_bytes: u64,
-    ) -> Self {
+    pub fn new(root: impl Into<PathBuf>, input: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
             input: input.into(),
-            scratch: Scratch {
-                path: scratch.into(),
-                cap_bytes: scratch_cap_bytes,
-            },
         }
     }
-}
-
-/// The `disks.scratch` object.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct Scratch {
-    path: PathBuf,
-    cap_bytes: u64,
 }
 
 /// The guest vsock port and the host Unix socket the VMM connects to when the guest connects on it.
@@ -161,24 +119,6 @@ impl Vsock {
         Self {
             port,
             socket: socket.into(),
-        }
-    }
-}
-
-/// The console log file and the size at which minos-vmm's watchdog stops the VM.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Console {
-    path: PathBuf,
-    cap_bytes: u64,
-}
-
-impl Console {
-    /// The console goes to `path`, a file that must not exist yet; the VM stops at `cap_bytes`.
-    #[must_use]
-    pub fn new(path: impl Into<PathBuf>, cap_bytes: u64) -> Self {
-        Self {
-            path: path.into(),
-            cap_bytes,
         }
     }
 }
@@ -262,15 +202,18 @@ mod tests {
         ];
         let mut last = 0;
         for key in keys {
-            let at = json
-                .find(key)
-                .ok_or_else(|| format!("{key} is missing"))?;
+            let at = json.find(key).ok_or_else(|| format!("{key} is missing"))?;
             assert!(at >= last, "{key} is out of order");
             last = at;
         }
         // The console is the helper's stdout pipe (05-EVIDENCE.md Mechanism selections), and v2 has no boot mode,
         // scratch disk, or initramfs (05-CONTEXT D-05).
-        for gone in [r#""console""#, r#""boot""#, r#""scratch""#, r#""initramfs""#] {
+        for gone in [
+            r#""console""#,
+            r#""boot""#,
+            r#""scratch""#,
+            r#""initramfs""#,
+        ] {
             assert!(!json.contains(gone), "{gone} must not be written");
         }
         assert_eq!(json.lines().count(), 1);

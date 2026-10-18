@@ -37,8 +37,9 @@ pub const ROOT_DISK_CMDLINE: &str = "rootfstype=squashfs ro ignore_loglevel dumm
 /// path is formatted unquoted as `init={init}`, and it comes after the user cmdline. A release that validated
 /// or encoded the path, or moved `init=` earlier, would boot every VM against `root=/dev/root` with
 /// `rootfstype=squashfs` and fail. The unit tests below mirror that assembly so the gate sees our side of it;
-/// the fact itself is proven only by the VM spike `spike_boot::boot_root_disk` (02-SPIKE-EVIDENCE.md
-/// S01-CMDLINE), which must be re-run by hand whenever the `msb_krun` pin moves.
+/// the fact itself is proven only by the ignored VM test `exit_env` in crates/minos-backend-krun/tests/exit.rs
+/// (plan 05-19), which asserts the guest's exact /proc/cmdline tokens (02-SPIKE-EVIDENCE.md S01-CMDLINE) and
+/// must be re-run by hand whenever the `msb_krun` pin moves.
 pub const ROOT_DISK_INIT: &str = "/init root=/dev/vda";
 
 /// Assembles the VM described by `config`. Nothing starts until `Vm::enter`.

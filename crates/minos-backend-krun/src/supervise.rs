@@ -5,8 +5,8 @@
 //! 1. [`short_job_dir`] makes a private directory under `/private/tmp`, and [`JobFiles::in_dir`] names the job's
 //!    files in it (E-5). The directory is short and canonical so the socket path fits `sun_path` (RESEARCH
 //!    Pitfall 5) and passes minos-vmm's canonical-path preflight.
-//! 2. [`write_disks`] and [`write_config`] create the root, input, and scratch images and `vmm.json`. Every file is
-//!    created new; nothing is overwritten.
+//! 2. [`write_disks`] and [`write_config`] create the root and input images and `vmm.json`. Every file is created
+//!    new; nothing is overwritten. There is no scratch image: scratch is a tmpfs in guest memory (05-CONTEXT D-05).
 //! 3. [`bind_output`] binds the vsock output listener. It must exist before the helper starts: the VMM connects to
 //!    it only when the guest connects, and a missing listener resets the guest (Pitfall 6).
 //! 4. [`run`] spawns the helper argv with an empty environment, stdin from `/dev/null`, stdout and stderr to files,
@@ -16,8 +16,8 @@
 //! Every byte that comes back (vsock connections, the console log, the helper's stdout and stderr) is guest
 //! influenced and hostile. It is read through a cap plus one byte, so overflow is detected rather than silently
 //! truncated, and it is returned only as [`GuestBytes`], which has no `Debug`, `Display`, `Deref`, or `Clone`.
-//! The host never opens a disk image the guest could have written: the scratch image is created sparse with
-//! `set_len` and never read back.
+//! The host never opens a disk image the guest could have written: both disks are attached read-only, and the
+//! guest has no writable disk at all.
 //!
 //! The helper's files are never re-opened by a path the helper could have replaced. The supervisor creates
 //! `vmm.stdout` and `vmm.stderr` itself and reads them back through its own handles. The console log is the one
@@ -87,8 +87,6 @@ pub const HYPERVISOR_ENTITLEMENT: &str = "com.apple.security.hypervisor";
 pub const ROOT_FILE: &str = "root.img";
 /// Job input image file name.
 pub const INPUT_FILE: &str = "input.img";
-/// Scratch image file name.
-pub const SCRATCH_FILE: &str = "scratch.img";
 /// vsock output socket file name.
 pub const SOCKET_FILE: &str = "o.sock";
 /// Console log file name.
@@ -99,8 +97,6 @@ pub const CONFIG_FILE: &str = "vmm.json";
 pub const VMM_STDOUT_FILE: &str = "vmm.stdout";
 /// Helper stderr file name.
 pub const VMM_STDERR_FILE: &str = "vmm.stderr";
-/// Initramfs file name, used only by 02-06's negative-evidence run.
-pub const INITRAMFS_FILE: &str = "initramfs.cpio";
 
 const CODESIGN: &str = "/usr/bin/codesign";
 /// The entitlement key as `codesign --xml` prints it; [`entitled`] requires `<true/>` after it.
@@ -262,13 +258,11 @@ pub struct JobFiles {
     dir: PathBuf,
     root: PathBuf,
     input: PathBuf,
-    scratch: PathBuf,
     socket: PathBuf,
     console: PathBuf,
     config: PathBuf,
     vmm_stdout: PathBuf,
     vmm_stderr: PathBuf,
-    initramfs: PathBuf,
 }
 
 impl JobFiles {
@@ -288,13 +282,11 @@ impl JobFiles {
         Ok(Self {
             root: dir.join(ROOT_FILE),
             input: dir.join(INPUT_FILE),
-            scratch: dir.join(SCRATCH_FILE),
             socket,
             console: dir.join(CONSOLE_FILE),
             config: dir.join(CONFIG_FILE),
             vmm_stdout: dir.join(VMM_STDOUT_FILE),
             vmm_stderr: dir.join(VMM_STDERR_FILE),
-            initramfs: dir.join(INITRAMFS_FILE),
             dir,
         })
     }
@@ -315,12 +307,6 @@ impl JobFiles {
     #[must_use]
     pub fn input(&self) -> &Path {
         &self.input
-    }
-
-    /// The scratch image. The host creates it and never reads it.
-    #[must_use]
-    pub fn scratch(&self) -> &Path {
-        &self.scratch
     }
 
     /// The vsock output socket.
@@ -352,31 +338,20 @@ impl JobFiles {
     pub fn vmm_stderr(&self) -> &Path {
         &self.vmm_stderr
     }
-
-    /// The initramfs, used only by the negative-evidence run.
-    #[must_use]
-    pub fn initramfs(&self) -> &Path {
-        &self.initramfs
-    }
 }
 
-/// Creates the root and input images with the given bytes and a sparse scratch image of `scratch_cap_bytes`.
+/// Creates the root and input images with the given bytes.
 ///
 /// # Errors
 ///
-/// [`SuperviseError::Io`] if any file already exists or cannot be written.
+/// [`SuperviseError::Io`] if either file already exists or cannot be written.
 pub fn write_disks(
     files: &JobFiles,
     root_image: &[u8],
     input_image: &[u8],
-    scratch_cap_bytes: u64,
 ) -> Result<(), SuperviseError> {
     write_new(files.root(), root_image)?;
-    write_new(files.input(), input_image)?;
-    let scratch = File::create_new(files.scratch()).map_err(io_at("create", files.scratch()))?;
-    scratch
-        .set_len(scratch_cap_bytes)
-        .map_err(io_at("size", files.scratch()))
+    write_new(files.input(), input_image)
 }
 
 /// Binds the vsock output listener on the job's socket path and makes it non-blocking.
@@ -1133,7 +1108,7 @@ mod tests {
         SuperviseError, VmRun, bind_output, entitled, has_hypervisor_entitlement, run, sha256_file,
         short_job_dir, write_config, write_disks,
     };
-    use crate::launch_config::{Boot, Console, Disks, Kernel, LaunchConfig, Machine, Vsock};
+    use crate::launch_config::{Disks, Kernel, LaunchConfig, Machine, Vsock};
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -1190,10 +1165,8 @@ mod tests {
                 "/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib",
                 "00".repeat(32),
             ),
-            Boot::RootDisk,
-            Disks::new(files.root(), files.input(), files.scratch(), 67_108_864),
+            Disks::new(files.root(), files.input()),
             Vsock::new(1024, files.socket()),
-            Console::new(files.console(), 1_048_576),
             max_duration_ms,
             Machine::new(1, 256),
         )
@@ -1283,12 +1256,10 @@ mod tests {
         for (actual, name) in [
             (files.root(), "root.img"),
             (files.input(), "input.img"),
-            (files.scratch(), "scratch.img"),
             (files.console(), "console.log"),
             (files.config(), "vmm.json"),
             (files.vmm_stdout(), "vmm.stdout"),
             (files.vmm_stderr(), "vmm.stderr"),
-            (files.initramfs(), "initramfs.cpio"),
         ] {
             assert_eq!(actual, path.join(name));
         }
@@ -1308,15 +1279,16 @@ mod tests {
     }
 
     #[test]
-    fn supervise_write_disks_creates_new_files_and_a_sparse_scratch() -> TestResult {
+    fn supervise_write_disks_creates_new_files_and_no_scratch() -> TestResult {
         let dir = short_job_dir()?;
         let files = JobFiles::in_dir(dir.path())?;
-        write_disks(&files, b"root", b"input", 1_048_576)?;
+        write_disks(&files, b"root", b"input")?;
         assert_eq!(fs::read(files.root())?, b"root");
         assert_eq!(fs::read(files.input())?, b"input");
-        assert_eq!(fs::metadata(files.scratch())?.len(), 1_048_576);
+        assert!(!dir.path().join("scratch.img").exists());
+        assert!(!dir.path().join("initramfs.cpio").exists());
         assert!(matches!(
-            write_disks(&files, b"other", b"other", 1),
+            write_disks(&files, b"other", b"other"),
             Err(SuperviseError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists
         ));
         assert_eq!(fs::read(files.root())?, b"root");
@@ -1329,10 +1301,8 @@ mod tests {
         let files = JobFiles::in_dir(dir.path())?;
         let config = LaunchConfig::new(
             Kernel::new("/k", "00"),
-            Boot::RootDisk,
-            Disks::new(files.root(), files.input(), files.scratch(), 1),
+            Disks::new(files.root(), files.input()),
             Vsock::new(1024, files.socket()),
-            Console::new(files.console(), 1),
             1,
             Machine::new(1, 256),
         );
