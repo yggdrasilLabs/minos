@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-10-18T20:48:40.458Z"
+stopped_at: Completed 05-22-PLAN.md
+last_updated: "2026-10-18T20:56:02.987Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 49
+  completed_plans: 50
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 12 of 22
+Plan: 13 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -107,6 +107,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P09 | 20 min | 3 tasks | 5 files |
 | Phase 05 P10 | 16min | 3 tasks | 9 files |
 | Phase 05 P21 | 6min | 2 tasks | 15 files |
+| Phase 05 P22 | 6min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-10: the /out walk keeps 3 entries free for PID 1's files (MAX_OUT_FILES 1021) and its content budget is the content cap minus MAX_STATUS_BYTES and the capped logs
 - [Phase 05]: 05-10: build_output refuses a scorecard for a candidate and any out entry not under out/, so only the judge-role channel carries .minos/scorecard.json
 - [Phase 05]: 05-21: backend LaunchConfig v2 has no Console (console: pipe); to_json writes the compact line plus newline, byte-equal to minos-vmm/golden/config-v2.json
+- [Phase 05]: 05-22: StatusFault::Invalid carries core's GuestStatusError (line and column only); an over-cap status is Invalid(TooLarge)
+- [Phase 05]: 05-22: Finished::new discards the stream for Ended::ChunkProtocol, so no byte of a broken stream is kept whatever the backend passes
 
 ### Pending Todos
 
@@ -272,6 +275,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T20:48:36.254Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-10-18T20:56:02.983Z
+Stopped at: Completed 05-22-PLAN.md
 Resume file: None
