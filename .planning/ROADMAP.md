@@ -254,7 +254,58 @@ Plans:
   4. `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` written in by the trusted packer (*superseded wording, 2026-10-09: "a root image and an initramfs"; 02-CONTEXT.md D-18*) and writes its digests to `minos.lock`, from a build context with no judge data and no secrets. `minos host doctor` runs the launch preflight (entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, active confinement layers) and prints every refusal with an explanation and a fix. The active confinement layers are recorded in `BackendInfo`, with no silent fallback (KRUN-06, KRUN-07, KRUN-09, CLI-02, CLI-03)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
+**Plans**: 20 plans
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — Core machine bounds and D-05 memory budget in limits, `[environment] memory_mib`/`scratch_mib` (D-06), shared output caps, streaming `BlobHasher` (D-09)
+- [ ] 05-02-PLAN.md — Core authenticated chunk codec with per-launch token and reassembler; `minos.lock` type with golden file (D-10, D-11)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05-03-PLAN.md — Wave 0 VM proofs (chunks at 16 MiB with the S03-ANSWER measurement, console on `/dev/fd/1` under Seatbelt, store-path root image) recorded in 05-EVIDENCE.md with mechanism selections and fallbacks
+- [ ] 05-04-PLAN.md — Core guest wire: `GuestJob`, `GuestStatus`, input disk v2 codec with the token (D-15)
+- [ ] 05-05-PLAN.md — Store `put_reader` streaming put and `FileStore::verified_path` (D-09, D-14)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-06-PLAN.md — Sandbox: `BlobSource` (D-13), `InputDisk` as part IDs (D-15), Capabilities layers and kernel, Seatbelt-mandatory preflight (D-03), refusals, `Finished` elapsed and console, `take_status`
+- [ ] 05-07-PLAN.md — minos-vmm v2: no scratch disk or initramfs (D-05), selected console, explicit rng, capped logger, own rlimits, new clippy bans, golden config; KRUN-04 amendment recorded
+- [ ] 05-08-PLAN.md — Guest `JobSource`/`OutputSink` (D-07), `ChunkSink`, fixed uid 64000 and stage limits, trampoline argv (D-08)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 05-09-PLAN.md — Backend serializer v2 bound to the golden config, embedded Seatbelt profile, root image mount points and static-ELF check; spike and wave0 tests retired with mapping
+- [ ] 05-10-PLAN.md — Guest unpack and strict apply, link-free output packer, `run_job` orchestration
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 05-11-PLAN.md — Backend host probes into Capabilities (KRUN-06, KRUN-08), job directories with owner lock and sweep (KRUN-05)
+- [ ] 05-12-PLAN.md — Guest PID 1 and trampoline on Linux, `/dev/vdb` removed after read, `minos-probe` fixture, spike protocol removed
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 05-13-PLAN.md — Backend input disk writer with `/dev/urandom` token and plan binding; poll-based chunk receiver
+- [ ] 05-14-PLAN.md — CLI skeleton, D-04 locator, `FileBlobSource`, `minos host doctor` (CLI-03) and `minos host setup` (D-02)
+
+**Wave 7** *(blocked on Wave 6)*
+
+- [ ] 05-15-PLAN.md — Production supervisor with whole-line marker classification and `KrunBackend` implementing `Backend`
+- [ ] 05-16-PLAN.md — `minos env build` with Docker buildx, packer, streaming put, `minos.lock`, `--update` (KRUN-09, CLI-02)
+
+**Wave 8** *(blocked on Wave 7)*
+
+- [ ] 05-17-PLAN.md — VM harness and functional VM tests (apply, uid and limits, rejected diff, two experiments, 16 MiB output, judge role, stage timeout)
+- [ ] 05-18-PLAN.md — Docker env build run with reproducibility evidence (checkpoint: start Docker Desktop)
+
+**Wave 9** *(blocked on 05-17)*
+
+- [ ] 05-19-PLAN.md — Permanent exit tests `exit_egress`, `exit_env`, `exit_kill9`, plus `exit_forge`
+
+**Wave 10** *(blocked on all prior plans)*
+
+- [ ] 05-20-PLAN.md — CLAUDE.md reconciliation, final gate with VM and exit tests recorded, requirements, validation, `cargo clean`
+
 **Exit criteria**: Success criterion 1 (fail-closed egress, no host environment, no VM after `kill -9`) must pass before this phase is marked complete. It is never traded for schedule.
 **Research**: Needs research-phase (Seatbelt and `hv_vm_create`, first boot, root-image tooling on macOS, concurrent VM and memory limits)
 
