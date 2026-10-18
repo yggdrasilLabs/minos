@@ -122,7 +122,11 @@ impl HostPaths {
     /// The `minos-vmm` helper, the static aarch64 `minos-guest`, and the libkrunfw dylib. Production passes
     /// [`KRUNFW_PATH`]; only the ignored VM tests take these from `MINOS_*` variables.
     #[must_use]
-    pub fn new(vmm: impl Into<PathBuf>, guest: impl Into<PathBuf>, krunfw: impl Into<PathBuf>) -> Self {
+    pub fn new(
+        vmm: impl Into<PathBuf>,
+        guest: impl Into<PathBuf>,
+        krunfw: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             vmm: vmm.into(),
             guest: guest.into(),
@@ -241,7 +245,12 @@ impl Probe {
     }
 
     /// A check that passed with `Ok(detail)` or failed with `refusal` and `Err(detail)`.
-    fn from_result(check: Check, paths: Vec<PathBuf>, refusal: Refusal, result: Result<String, String>) -> Self {
+    fn from_result(
+        check: Check,
+        paths: Vec<PathBuf>,
+        refusal: Refusal,
+        result: Result<String, String>,
+    ) -> Self {
         match result {
             Ok(detail) => Self::passed(check, paths, &detail),
             Err(detail) => Self::refused(check, paths, refusal, &detail),
@@ -332,7 +341,10 @@ pub fn probe_host(paths: &HostPaths, job_root: &Path) -> HostReport {
     probes.push(kernel);
     let (hypervisor, max) = probe_hypervisor();
     probes.push(hypervisor);
-    probes.push(probe_socket_path(&job_root, rustix::process::getuid().as_raw()));
+    probes.push(probe_socket_path(
+        &job_root,
+        rustix::process::getuid().as_raw(),
+    ));
     let sandbox_exec = probe_sandbox_exec(Path::new(SANDBOX_EXEC));
     let sandbox_exec_present = sandbox_exec.is_passed();
     probes.push(sandbox_exec);
@@ -379,8 +391,21 @@ fn report(probes: Vec<Probe>, max: Machine, kernel: Option<ImageDigest>) -> Host
 ///
 /// A check counts as passed only when it ran and every probe of it passed.
 fn layers_for(probes: &[Probe]) -> BTreeSet<ConfinementLayer> {
-    let _ = probes;
-    BTreeSet::new()
+    let passed = |check: Check| {
+        let mut runs = probes
+            .iter()
+            .filter(|probe| probe.check == check)
+            .peekable();
+        runs.peek().is_some() && runs.all(Probe::is_passed)
+    };
+    let mut layers = BTreeSet::new();
+    if passed(Check::SandboxExec) && passed(Check::SeatbeltNetwork) && passed(Check::SeatbeltFile) {
+        layers.insert(ConfinementLayer::Seatbelt);
+    }
+    if passed(Check::Vmm) && passed(Check::Entitlements) && passed(Check::Guest) {
+        layers.insert(ConfinementLayer::Rlimits);
+    }
+    layers
 }
 
 /// Whether codesign's XML entitlements set every one of [`REQUIRED_ENTITLEMENTS`] to true.
@@ -391,8 +416,9 @@ fn layers_for(probes: &[Probe]) -> BTreeSet<ConfinementLayer> {
 /// hostile plists.
 #[must_use]
 pub fn entitlements_present(xml: &[u8]) -> bool {
-    let _ = xml;
-    false
+    REQUIRED_ENTITLEMENTS
+        .iter()
+        .all(|key| key_is_true(xml, key))
 }
 
 /// Whether `key` appears in `xml` and every appearance is followed by `<true/>`.
@@ -406,7 +432,9 @@ fn key_is_true(xml: &[u8], key: &str) -> bool {
             continue;
         }
         seen = true;
-        let rest = xml.get(at.saturating_add(element.len())..).unwrap_or_default();
+        let rest = xml
+            .get(at.saturating_add(element.len())..)
+            .unwrap_or_default();
         if !rest.trim_ascii_start().starts_with(TRUE) {
             return false;
         }
@@ -438,9 +466,11 @@ pub fn signed_with_entitlements(vmm: &Path) -> io::Result<bool> {
 fn probe_vmm(vmm: &Path) -> Probe {
     let paths = vec![vmm.to_path_buf()];
     match fs::metadata(vmm) {
-        Ok(meta) if meta.is_file() => {
-            Probe::passed(Check::Vmm, paths, &format!("a regular file of {} bytes", meta.len()))
-        }
+        Ok(meta) if meta.is_file() => Probe::passed(
+            Check::Vmm,
+            paths,
+            &format!("a regular file of {} bytes", meta.len()),
+        ),
         Ok(_) => Probe::refused(Check::Vmm, paths, Refusal::VmmMissing, "not a regular file"),
         Err(error) => Probe::refused(Check::Vmm, paths, Refusal::VmmMissing, &error.to_string()),
     }
@@ -450,12 +480,23 @@ fn probe_vmm(vmm: &Path) -> Probe {
 /// check fails closed.
 fn probe_entitlements(vmm: &Path, vmm_present: bool) -> Probe {
     let paths = vec![vmm.to_path_buf(), PathBuf::from(CODESIGN)];
-    let refused = |detail: &str| Probe::refused(Check::Entitlements, paths.clone(), Refusal::EntitlementMissing, detail);
+    let refused = |detail: &str| {
+        Probe::refused(
+            Check::Entitlements,
+            paths.clone(),
+            Refusal::EntitlementMissing,
+            detail,
+        )
+    };
     if !vmm_present {
         return refused("not checked: the helper was not found");
     }
     match signed_with_entitlements(vmm) {
-        Ok(true) => Probe::passed(Check::Entitlements, paths.clone(), "both entitlements are set to true"),
+        Ok(true) => Probe::passed(
+            Check::Entitlements,
+            paths.clone(),
+            "both entitlements are set to true",
+        ),
         Ok(false) => refused("codesign does not show both entitlements set to true"),
         Err(error) => refused(&format!("codesign failed: {error}")),
     }
@@ -464,7 +505,8 @@ fn probe_entitlements(vmm: &Path, vmm_present: bool) -> Probe {
 /// libkrunfw exists and its SHA-256 is `pinned`; the digest is returned only when it matches.
 fn probe_kernel(krunfw: &Path, pinned: &str) -> (Probe, Option<ImageDigest>) {
     let paths = vec![krunfw.to_path_buf()];
-    let missing = |detail: &str| Probe::refused(Check::Kernel, paths.clone(), Refusal::KernelMissing, detail);
+    let missing =
+        |detail: &str| Probe::refused(Check::Kernel, paths.clone(), Refusal::KernelMissing, detail);
     match fs::metadata(krunfw) {
         Ok(meta) if meta.is_file() => {}
         Ok(_) => return (missing("not a regular file"), None),
@@ -474,13 +516,26 @@ fn probe_kernel(krunfw: &Path, pinned: &str) -> (Probe, Option<ImageDigest>) {
         Ok(actual) => actual,
         Err(error) => return (missing(&error.to_string()), None),
     };
-    let mismatch = |detail: &str| Probe::refused(Check::Kernel, paths.clone(), Refusal::KernelHashMismatch, detail);
+    let mismatch = |detail: &str| {
+        Probe::refused(
+            Check::Kernel,
+            paths.clone(),
+            Refusal::KernelHashMismatch,
+            detail,
+        )
+    };
     if actual != pinned {
         return (mismatch(&format!("sha256 {actual}, pinned {pinned}")), None);
     }
     match actual.parse::<ImageDigest>() {
-        Ok(digest) => (Probe::passed(Check::Kernel, paths.clone(), &format!("sha256 {actual}")), Some(digest)),
-        Err(_) => (mismatch("the digest is not 64 lowercase hex characters"), None),
+        Ok(digest) => (
+            Probe::passed(Check::Kernel, paths.clone(), &format!("sha256 {actual}")),
+            Some(digest),
+        ),
+        Err(_) => (
+            mismatch("the digest is not 64 lowercase hex characters"),
+            None,
+        ),
     }
 }
 
@@ -488,18 +543,32 @@ fn probe_kernel(krunfw: &Path, pinned: &str) -> (Probe, Option<ImageDigest>) {
 /// read the check fails and the largest VM is the smallest one.
 fn probe_hypervisor() -> (Probe, Machine) {
     let paths = vec![PathBuf::from(SYSCTL)];
-    let refused = |detail: &str| Probe::refused(Check::Hypervisor, paths.clone(), Refusal::HypervisorUnsupported, detail);
+    let refused = |detail: &str| {
+        Probe::refused(
+            Check::Hypervisor,
+            paths.clone(),
+            Refusal::HypervisorUnsupported,
+            detail,
+        )
+    };
     let args = ["-n", "kern.hv_support", "hw.ncpu", "hw.memsize"];
     let output = match run_tool(Path::new(SYSCTL), &args, TOOL_OUTPUT_CAP) {
         Ok(output) => output,
         Err(error) => return (refused(&format!("sysctl failed: {error}")), MIN_MACHINE),
     };
     if !output.status.success() {
-        let detail = format!("sysctl exited {}: {}", status_text(output.status), excerpt(&output.stderr));
+        let detail = format!(
+            "sysctl exited {}: {}",
+            status_text(output.status),
+            excerpt(&output.stderr)
+        );
         return (refused(&detail), MIN_MACHINE);
     }
     let Some((hv_support, ncpu, memsize)) = parse_sysctl(&output.stdout) else {
-        return (refused("sysctl printed something other than three values"), MIN_MACHINE);
+        return (
+            refused("sysctl printed something other than three values"),
+            MIN_MACHINE,
+        );
     };
     let max = max_machine(ncpu, memsize);
     if !hv_support {
@@ -529,21 +598,27 @@ fn parse_sysctl(stdout: &[u8]) -> Option<(bool, u64, u64)> {
 
 /// Whether one `kern.hv_support` value is exactly `1`, with an optional trailing newline.
 fn parse_hv_support(value: &[u8]) -> bool {
-    let _ = value;
-    false
+    value.strip_suffix(b"\n").unwrap_or(value) == b"1"
 }
 
 /// A plain decimal `u64` with an optional trailing newline: digits only, no sign, no space.
 fn parse_u64(value: &[u8]) -> Option<u64> {
-    let _ = value;
-    None
+    let digits = value.strip_suffix(b"\n").unwrap_or(value);
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    std::str::from_utf8(digits).ok()?.parse().ok()
 }
 
 /// The largest VM on a host with `ncpu` CPUs and `memsize` bytes: at most [`MAX_VCPUS`] vCPUs, and half the
 /// host's memory (leave half to the host) capped at [`MAX_MEMORY_MIB`], never below the smallest machine.
 fn max_machine(ncpu: u64, memsize: u64) -> Machine {
-    let _ = (ncpu, memsize);
-    MIN_MACHINE
+    let vcpus = u8::try_from(ncpu.clamp(1, u64::from(MAX_VCPUS))).unwrap_or(MAX_VCPUS);
+    let half_mib = memsize / (1024 * 1024) / 2;
+    let memory =
+        u16::try_from(half_mib.clamp(u64::from(MIN_MEMORY_MIB), u64::from(MAX_MEMORY_MIB)))
+            .unwrap_or(MAX_MEMORY_MIB);
+    Machine::new(vcpus, memory).unwrap_or(MIN_MACHINE)
 }
 
 /// The longest socket path a job under `job_root` gets: `<job_root>/minos-<uid>/mnsXXXXXXXX/o.sock`.
@@ -559,7 +634,12 @@ fn probe_socket_path(job_root: &Path, uid: u32) -> Probe {
     if len <= MAX_SOCKET_PATH_BYTES {
         Probe::passed(Check::SocketPath, vec![socket], &detail)
     } else {
-        Probe::refused(Check::SocketPath, vec![socket], Refusal::SocketPathTooLong, &detail)
+        Probe::refused(
+            Check::SocketPath,
+            vec![socket],
+            Refusal::SocketPathTooLong,
+            &detail,
+        )
     }
 }
 
@@ -568,8 +648,18 @@ fn probe_sandbox_exec(path: &Path) -> Probe {
     let paths = vec![path.to_path_buf()];
     match fs::metadata(path) {
         Ok(meta) if meta.is_file() => Probe::passed(Check::SandboxExec, paths, "a regular file"),
-        Ok(_) => Probe::refused(Check::SandboxExec, paths, Refusal::SeatbeltMissing, "not a regular file"),
-        Err(error) => Probe::refused(Check::SandboxExec, paths, Refusal::SeatbeltMissing, &error.to_string()),
+        Ok(_) => Probe::refused(
+            Check::SandboxExec,
+            paths,
+            Refusal::SeatbeltMissing,
+            "not a regular file",
+        ),
+        Err(error) => Probe::refused(
+            Check::SandboxExec,
+            paths,
+            Refusal::SeatbeltMissing,
+            &error.to_string(),
+        ),
     }
 }
 
@@ -584,11 +674,25 @@ fn probe_sandbox_exec(path: &Path) -> Probe {
 /// nothing. A failed control or a failed listed read is inconclusive and fails closed as
 /// [`Refusal::SeatbeltNotEnforcing`], as does a probe that could not run at all.
 fn probe_seatbelt(job_root: &Path, sandbox_exec_present: bool) -> [Probe; 2] {
-    let paths = vec![PathBuf::from(SANDBOX_EXEC), PathBuf::from(NC), PathBuf::from(CAT)];
+    let paths = vec![
+        PathBuf::from(SANDBOX_EXEC),
+        PathBuf::from(NC),
+        PathBuf::from(CAT),
+    ];
     let both = |detail: &str| {
         [
-            Probe::refused(Check::SeatbeltNetwork, paths.clone(), Refusal::SeatbeltNotEnforcing, detail),
-            Probe::refused(Check::SeatbeltFile, paths.clone(), Refusal::SeatbeltNotEnforcing, detail),
+            Probe::refused(
+                Check::SeatbeltNetwork,
+                paths.clone(),
+                Refusal::SeatbeltNotEnforcing,
+                detail,
+            ),
+            Probe::refused(
+                Check::SeatbeltFile,
+                paths.clone(),
+                Refusal::SeatbeltNotEnforcing,
+                detail,
+            ),
         ]
     };
     if !sandbox_exec_present {
@@ -606,11 +710,23 @@ fn probe_seatbelt(job_root: &Path, sandbox_exec_present: bool) -> [Probe; 2] {
     let file = file_probe(&dir.1);
     let network = match file {
         Ok(_) => network_probe(&dir.1),
-        Err(_) => Err("inconclusive: the profile did not run a listed read (see the file probe)".to_owned()),
+        Err(_) => Err(
+            "inconclusive: the profile did not run a listed read (see the file probe)".to_owned(),
+        ),
     };
     [
-        Probe::from_result(Check::SeatbeltNetwork, paths.clone(), Refusal::SeatbeltNotEnforcing, network),
-        Probe::from_result(Check::SeatbeltFile, paths, Refusal::SeatbeltNotEnforcing, file),
+        Probe::from_result(
+            Check::SeatbeltNetwork,
+            paths.clone(),
+            Refusal::SeatbeltNotEnforcing,
+            network,
+        ),
+        Probe::from_result(
+            Check::SeatbeltFile,
+            paths,
+            Refusal::SeatbeltNotEnforcing,
+            file,
+        ),
     ]
 }
 
@@ -654,7 +770,8 @@ fn run_confined(params: &ProfileParams, program: &Path, args: &[&OsStr]) -> io::
 fn file_probe(dir: &Path) -> Result<String, String> {
     let listed = dir.join("listed");
     let unlisted = dir.join("unlisted");
-    write_new(&listed, LISTED_BYTES).map_err(|error| format!("inconclusive: could not write the listed file: {error}"))?;
+    write_new(&listed, LISTED_BYTES)
+        .map_err(|error| format!("inconclusive: could not write the listed file: {error}"))?;
     write_new(&unlisted, UNLISTED_BYTES)
         .map_err(|error| format!("inconclusive: could not write the unlisted file: {error}"))?;
     let cat = Path::new(CAT);
@@ -701,8 +818,8 @@ fn network_probe(dir: &Path) -> Result<String, String> {
         OsStr::new("127.0.0.1"),
         OsStr::new(&port),
     ];
-    let control =
-        run_tool(nc, &args, TOOL_OUTPUT_CAP).map_err(|error| inconclusive("the control connect could not run", error))?;
+    let control = run_tool(nc, &args, TOOL_OUTPUT_CAP)
+        .map_err(|error| inconclusive("the control connect could not run", error))?;
     if !control.status.success() {
         return Err(format!(
             "inconclusive: the unsandboxed control connect exited {}: {}",
@@ -790,7 +907,10 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Whether `haystack` contains `needle`.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty() && haystack.windows(needle.len()).any(|window| window == needle)
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 /// How a tool ended, for a detail: `0`, `1`, or `signal 9`.
@@ -802,11 +922,16 @@ fn status_text(status: ExitStatus) -> String {
     }
 }
 
-/// The first [`DETAIL_STDERR_BYTES`] bytes of a tool's stderr, decoded lossily and trimmed. The caller's
-/// [`SafeText`] removes control characters.
+/// The first [`DETAIL_STDERR_BYTES`] bytes of a tool's stderr, decoded lossily and trimmed, or `no stderr`. The
+/// caller's [`SafeText`] removes control characters.
 fn excerpt(stderr: &[u8]) -> String {
     let head = stderr.get(..DETAIL_STDERR_BYTES).unwrap_or(stderr);
-    String::from_utf8_lossy(head).trim().to_owned()
+    let text = String::from_utf8_lossy(head).trim().to_owned();
+    if text.is_empty() {
+        "no stderr".to_owned()
+    } else {
+        text
+    }
 }
 
 /// What a host tool wrote, and how it ended.
@@ -919,9 +1044,9 @@ mod tests {
 
     use super::{
         Check, HostPaths, KRUNFW_PATH, KRUNFW_SHA256, Probe, ProbeOutcome, REQUIRED_ENTITLEMENTS,
-        entitlements_present, longest_socket_path, max_machine, parse_hv_support, parse_sysctl, parse_u64,
-        probe_entitlements, probe_guest, probe_host, probe_kernel, probe_sandbox_exec, probe_seatbelt,
-        probe_socket_path, probe_vmm, report,
+        entitlements_present, longest_socket_path, max_machine, parse_hv_support, parse_sysctl,
+        parse_u64, probe_entitlements, probe_guest, probe_host, probe_kernel, probe_sandbox_exec,
+        probe_seatbelt, probe_socket_path, probe_vmm, report,
     };
 
     type TestResult = Result<(), Box<dyn Error>>;
@@ -970,15 +1095,31 @@ mod tests {
     #[test]
     fn entitlements_both_keys() -> TestResult {
         assert_eq!(REQUIRED_ENTITLEMENTS, [HYPERVISOR, LIBRARY]);
-        assert!(entitlements_present(&plist(&[(HYPERVISOR, "<true/>"), (LIBRARY, "<true/>")])?));
-        assert!(entitlements_present(&plist(&[(LIBRARY, "\n\t<true/>"), (HYPERVISOR, " <true/>")])?));
+        assert!(entitlements_present(&plist(&[
+            (HYPERVISOR, "<true/>"),
+            (LIBRARY, "<true/>")
+        ])?));
+        assert!(entitlements_present(&plist(&[
+            (LIBRARY, "\n\t<true/>"),
+            (HYPERVISOR, " <true/>")
+        ])?));
         assert!(!entitlements_present(&plist(&[(HYPERVISOR, "<true/>")])?));
         assert!(!entitlements_present(&plist(&[(LIBRARY, "<true/>")])?));
-        assert!(!entitlements_present(&plist(&[(HYPERVISOR, "<true/>"), (LIBRARY, "<false/>")])?));
-        assert!(!entitlements_present(&plist(&[(HYPERVISOR, "<false/>"), (LIBRARY, "<true/>")])?));
+        assert!(!entitlements_present(&plist(&[
+            (HYPERVISOR, "<true/>"),
+            (LIBRARY, "<false/>")
+        ])?));
+        assert!(!entitlements_present(&plist(&[
+            (HYPERVISOR, "<false/>"),
+            (LIBRARY, "<true/>")
+        ])?));
         assert!(!entitlements_present(&plist(&[])?));
         assert!(!entitlements_present(b""));
-        let repeated = plist(&[(HYPERVISOR, "<true/>"), (LIBRARY, "<true/>"), (HYPERVISOR, "<false/>")])?;
+        let repeated = plist(&[
+            (HYPERVISOR, "<true/>"),
+            (LIBRARY, "<true/>"),
+            (HYPERVISOR, "<false/>"),
+        ])?;
         assert!(!entitlements_present(&repeated));
         Ok(())
     }
@@ -998,8 +1139,14 @@ mod tests {
         assert_eq!(parse_u64(b"-1"), None);
         assert_eq!(parse_u64(b""), None);
         assert_eq!(parse_u64(b"99999999999999999999999"), None);
-        assert_eq!(parse_sysctl(b"1\n16\n51539607552\n"), Some((true, 16, 51_539_607_552)));
-        assert_eq!(parse_sysctl(b"0\n16\n51539607552\n"), Some((false, 16, 51_539_607_552)));
+        assert_eq!(
+            parse_sysctl(b"1\n16\n51539607552\n"),
+            Some((true, 16, 51_539_607_552))
+        );
+        assert_eq!(
+            parse_sysctl(b"0\n16\n51539607552\n"),
+            Some((false, 16, 51_539_607_552))
+        );
         assert_eq!(parse_sysctl(b"1\n16\n"), None);
         assert_eq!(parse_sysctl(b"1\n16\n5\n7\n"), None);
         assert_eq!(parse_sysctl(b"1\nsixteen\n5\n"), None);
@@ -1024,7 +1171,10 @@ mod tests {
         assert_eq!(fits.check(), Check::SocketPath);
         let over = PathBuf::from(format!("/{}", "a".repeat(74)));
         assert_eq!(longest_socket_path(&over, 501).as_os_str().len(), 104);
-        assert_eq!(probe_socket_path(&over, 501).refusal(), Some(Refusal::SocketPathTooLong));
+        assert_eq!(
+            probe_socket_path(&over, 501).refusal(),
+            Some(Refusal::SocketPathTooLong)
+        );
         assert!(probe_socket_path(Path::new("/private/tmp"), u32::MAX).is_passed());
         assert_eq!(
             longest_socket_path(Path::new("/private/tmp"), 501),
@@ -1042,7 +1192,10 @@ mod tests {
         let vmm = dir.path().join("minos-vmm");
         fs::write(&vmm, b"helper")?;
         assert!(probe_vmm(&vmm).is_passed());
-        assert_eq!(probe_entitlements(&absent, false).refusal(), Some(Refusal::EntitlementMissing));
+        assert_eq!(
+            probe_entitlements(&absent, false).refusal(),
+            Some(Refusal::EntitlementMissing)
+        );
 
         let (kernel, digest) = probe_kernel(&absent, KRUNFW_SHA256);
         assert_eq!(kernel.refusal(), Some(Refusal::KernelMissing));
@@ -1063,15 +1216,24 @@ mod tests {
         assert_eq!(digest, Some(ImageDigest::of(bytes)));
 
         let guest = dir.path().join("minos-guest");
-        fs::write(&guest, [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0, 0, 0, 0])?;
+        fs::write(
+            &guest,
+            [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0, 0, 0, 0],
+        )?;
         assert_eq!(probe_guest(&guest).refusal(), Some(Refusal::GuestMissing));
         assert_eq!(probe_guest(&absent).refusal(), Some(Refusal::GuestMissing));
-        assert_eq!(probe_guest(dir.path()).refusal(), Some(Refusal::GuestMissing));
+        assert_eq!(
+            probe_guest(dir.path()).refusal(),
+            Some(Refusal::GuestMissing)
+        );
         let elf = dir.path().join("minos-guest-elf");
         fs::write(&elf, static_elf())?;
         assert!(probe_guest(&elf).is_passed());
 
-        assert_eq!(probe_sandbox_exec(&absent).refusal(), Some(Refusal::SeatbeltMissing));
+        assert_eq!(
+            probe_sandbox_exec(&absent).refusal(),
+            Some(Refusal::SeatbeltMissing)
+        );
         let [network, file] = probe_seatbelt(dir.path(), false);
         assert_eq!(network.refusal(), Some(Refusal::SeatbeltNotEnforcing));
         assert_eq!(file.refusal(), Some(Refusal::SeatbeltNotEnforcing));
@@ -1105,16 +1267,40 @@ mod tests {
             let host = report(probes, max, None);
             let caps = host.capabilities();
             let layers = caps.layers();
-            assert!(!layers.contains(&ConfinementLayer::DedicatedUser), "mask {mask:06b}");
-            assert_eq!(layers.contains(&ConfinementLayer::Rlimits), on(0) && on(1) && on(2), "mask {mask:06b}");
-            assert_eq!(layers.contains(&ConfinementLayer::Seatbelt), on(3) && on(4) && on(5), "mask {mask:06b}");
+            assert!(
+                !layers.contains(&ConfinementLayer::DedicatedUser),
+                "mask {mask:06b}"
+            );
+            assert_eq!(
+                layers.contains(&ConfinementLayer::Rlimits),
+                on(0) && on(1) && on(2),
+                "mask {mask:06b}"
+            );
+            assert_eq!(
+                layers.contains(&ConfinementLayer::Seatbelt),
+                on(3) && on(4) && on(5),
+                "mask {mask:06b}"
+            );
             assert_eq!(caps.host_refusals(), &expected, "mask {mask:06b}");
         }
 
         // A check that never ran is not passed, and one refused run of a check outweighs a passed one.
-        assert!(report(Vec::new(), max, None).capabilities().layers().is_empty());
-        let mut doubled: Vec<Probe> = checks.iter().map(|check| Probe::passed(*check, Vec::new(), "ok")).collect();
-        doubled.push(Probe::refused(Check::SeatbeltFile, Vec::new(), Refusal::SeatbeltNotEnforcing, "no"));
+        assert!(
+            report(Vec::new(), max, None)
+                .capabilities()
+                .layers()
+                .is_empty()
+        );
+        let mut doubled: Vec<Probe> = checks
+            .iter()
+            .map(|check| Probe::passed(*check, Vec::new(), "ok"))
+            .collect();
+        doubled.push(Probe::refused(
+            Check::SeatbeltFile,
+            Vec::new(),
+            Refusal::SeatbeltNotEnforcing,
+            "no",
+        ));
         let host = report(doubled, max, None);
         assert_eq!(
             host.capabilities().layers(),
@@ -1126,7 +1312,11 @@ mod tests {
     fn report_shape() {
         let max = max_machine(16, 51_539_607_552);
         let kernel = ImageDigest::of(b"kernel");
-        let host = report(vec![Probe::passed(Check::Kernel, Vec::new(), "ok")], max, Some(kernel));
+        let host = report(
+            vec![Probe::passed(Check::Kernel, Vec::new(), "ok")],
+            max,
+            Some(kernel),
+        );
         let caps = host.capabilities();
         assert_eq!(caps.backend(), BackendKind::Krun);
         assert_eq!(caps.arch(), Arch::Arm64);
@@ -1136,7 +1326,12 @@ mod tests {
         assert_eq!(caps.kernel(), Some(&kernel));
         assert!(caps.host_refusals().is_empty());
         assert_eq!(host.probes().len(), 1);
-        assert!(report(Vec::new(), max, None).capabilities().kernel().is_none());
+        assert!(
+            report(Vec::new(), max, None)
+                .capabilities()
+                .kernel()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1156,14 +1351,28 @@ mod tests {
     #[ignore = "needs MINOS_VMM (a signed minos-vmm) and MINOS_GUEST (the static musl minos-guest); MINOS_KRUNFW is optional"]
     fn probe_host_on_this_mac() -> TestResult {
         let vmm = std::env::var_os("MINOS_VMM").ok_or("set MINOS_VMM to the signed minos-vmm")?;
-        let guest = std::env::var_os("MINOS_GUEST").ok_or("set MINOS_GUEST to the musl minos-guest")?;
-        let krunfw = std::env::var_os("MINOS_KRUNFW").map_or_else(|| PathBuf::from(KRUNFW_PATH), PathBuf::from);
-        let host = probe_host(&HostPaths::new(vmm, guest, krunfw), Path::new("/private/tmp"));
+        let guest =
+            std::env::var_os("MINOS_GUEST").ok_or("set MINOS_GUEST to the musl minos-guest")?;
+        let krunfw = std::env::var_os("MINOS_KRUNFW")
+            .map_or_else(|| PathBuf::from(KRUNFW_PATH), PathBuf::from);
+        let host = probe_host(
+            &HostPaths::new(vmm, guest, krunfw),
+            Path::new("/private/tmp"),
+        );
         for probe in host.probes() {
-            println!("{:<32} {:?} {:?}", probe.check().name(), probe.paths(), probe.outcome());
+            println!(
+                "{:<32} {:?} {:?}",
+                probe.check().name(),
+                probe.paths(),
+                probe.outcome()
+            );
         }
         let caps = host.capabilities();
-        assert!(caps.host_refusals().is_empty(), "refusals: {:?}", caps.host_refusals());
+        assert!(
+            caps.host_refusals().is_empty(),
+            "refusals: {:?}",
+            caps.host_refusals()
+        );
         assert_eq!(
             caps.layers(),
             &BTreeSet::from([ConfinementLayer::Seatbelt, ConfinementLayer::Rlimits])
@@ -1182,7 +1391,11 @@ mod tests {
         println!("{:?}\n{:?}", network.outcome(), file.outcome());
         assert!(file.is_passed(), "{:?}", file.outcome());
         assert!(network.is_passed(), "{:?}", network.outcome());
-        assert_eq!(fs::read_dir(root.path())?.count(), 0, "the probe directory is removed");
+        assert_eq!(
+            fs::read_dir(root.path())?.count(),
+            0,
+            "the probe directory is removed"
+        );
         Ok(())
     }
 }
