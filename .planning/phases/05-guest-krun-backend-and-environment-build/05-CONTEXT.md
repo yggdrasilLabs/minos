@@ -134,6 +134,7 @@ Out of scope: the runner pipeline and the loop (Phase 7), the proposers (Phase 6
 - **Concurrent candidates (`width`) and K8 measurements** (launches per second, memory per VM): Phase 7 and NEXT-04.
 - **Narrowing the Seatbelt profile's starting allowances** (rows 1 to 6 of the SPIKE-05 answer): still an open question; not required to pass Phase 5.
 - **Reporting the three `msb_krun_devices` vsock defects upstream**: the user's call, unchanged since S03-ANSWER.
+- **D-10 lineage: the lock's digest in `ManifestId`**: deferred to Phase 7, which wires `minos run`. Phase 5 delivers D-10's refusal gate (`minos env build` refuses a changed image digest unless `--update`, printing both digests, and rewrites the lock atomically) and `Lock::check`. D-10's sentence that "the next run records a new `ManifestId` lineage because the lock's digest feeds the manifest's image reference" is implemented when Phase 7 wires `minos run`, which decides how the lock digest enters the run's identity (`ManifestId` today hashes the manifest bytes only; a lock digest in `RunStarted` is the alternative 05-RESEARCH Open Question 4 names) and raises that choice with the user. Meanwhile each `Judged` event records `root_image` in `BackendInfo`, so image lineage is visible in the ledger. Recorded by plan 05-16, because the Phase 5 plans deliver only the gate.
 
 </deferred>
 
