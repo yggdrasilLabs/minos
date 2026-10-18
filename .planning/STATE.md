@@ -6,14 +6,14 @@ current_phase: 05
 current_phase_name: Guest, krun Backend, and Environment Build
 status: executing
 stopped_at: Completed 05-22-PLAN.md
-last_updated: "2026-10-18T20:56:02.987Z"
+last_updated: "2026-10-18T21:17:24.755Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 50
+  completed_plans: 51
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 13 of 22
+Plan: 14 of 22
 Status: Ready to execute
 Last activity: 2026-10-18 — Phase 05 execution started
 
@@ -108,6 +108,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P10 | 16min | 3 tasks | 9 files |
 | Phase 05 P21 | 6min | 2 tasks | 15 files |
 | Phase 05 P22 | 6min | 2 tasks | 10 files |
+| Phase 05 P11 | 15min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -245,6 +246,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-21: backend LaunchConfig v2 has no Console (console: pipe); to_json writes the compact line plus newline, byte-equal to minos-vmm/golden/config-v2.json
 - [Phase 05]: 05-22: StatusFault::Invalid carries core's GuestStatusError (line and column only); an over-cap status is Invalid(TooLarge)
 - [Phase 05]: 05-22: Finished::new discards the stream for Ended::ChunkProtocol, so no byte of a broken stream is kept whatever the backend passes
+- [Phase 05]: 05-11: the Seatbelt network denial probe counts only after a listed read under the same profile succeeds; an inconclusive probe fails closed as SeatbeltNotEnforcing
+- [Phase 05]: 05-11: the sweep signals a helper group only after ps -ww shows ppid 1 and the exact <vmm> <dir>/vmm.json argv; EPERM and anything unproved is Unverified
+- [Phase 05]: 05-11: libkrunfw is loaded from the Cellar path after its hash check and is not copied privately (05-RESEARCH Open Question 6; flagged for the user)
 
 ### Pending Todos
 
@@ -275,6 +279,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T20:56:02.983Z
+Last session: 2026-10-18T21:16:56.314Z
 Stopped at: Completed 05-22-PLAN.md
 Resume file: None
