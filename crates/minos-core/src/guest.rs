@@ -25,9 +25,10 @@ use crate::chunk::{ChunkToken, TOKEN_BYTES};
 use crate::id::{BlobId, ExperimentId, TreeId};
 use crate::job::JobRequest;
 use crate::limits::{
-    MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_DIFF_BYTES, MAX_MEMORY_MIB, MAX_OUTPUT_CONTENT_BYTES,
-    MAX_OUTPUT_ENTRIES, MAX_OUTPUT_STREAM_BYTES, MAX_SCRATCH_MIB, MAX_STAGE_MS, MAX_TRIALS,
-    MAX_WRITABLE, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, MIN_STAGE_MS, candidate_allowance_mib,
+    GUEST_RESERVE_MIB, MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_DIFF_BYTES, MAX_MEMORY_MIB,
+    MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES, MAX_OUTPUT_STREAM_BYTES, MAX_SCRATCH_MIB,
+    MAX_STAGE_MS, MAX_TRIALS, MAX_WRITABLE, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, MIN_STAGE_MS,
+    candidate_allowance_mib,
 };
 use crate::manifest::{CommandArgv, JudgeVersion, Manifest};
 use crate::outcome::Stage;
@@ -877,6 +878,13 @@ pub const MAX_BASE_TAR_BYTES: u64 = 83_886_080;
 
 /// Most bytes in the `JUDGE_DATA` section: 96 MiB. Judge data is pushed by `minos judge push` in Phase 7, which
 /// must refuse larger data.
+///
+/// 96 MiB keeps the judge role within [`MAX_GUEST_INPUT_BYTES`] with margin. Phase 7's `minos judge push` refuses
+/// larger judge data rather than truncating it. A larger cap needs a streaming unpack from the input disk instead
+/// of a whole-section read, which plan 05-13 records in CLAUDE.md Open questions with Phase 7 as its owner. This is
+/// the smaller fix, and it weakens no invariant: [`read_input_disk`] checks the cap from the table before it reads
+/// any section byte, and PID 1 drops each input buffer once it is unpacked (plan 05-10), so the stages run with
+/// the whole reserve.
 pub const MAX_JUDGE_DATA_BYTES: u64 = 100_663_296;
 
 /// Most bytes in the `CANDIDATE_OUT` section: the candidate's whole output stream, as the judge receives it.
@@ -884,6 +892,15 @@ pub const MAX_CANDIDATE_OUT_BYTES: u64 = MAX_OUTPUT_STREAM_BYTES;
 
 /// Most sections on one disk: one of each kind.
 const MAX_SECTIONS: u32 = 5;
+
+/// Most bytes PID 1 holds in memory for one role's input sections: 128 MiB, half the guest reserve.
+///
+/// PID 1 reads every section its role needs whole before unpacking (05-CONTEXT D-07 keeps the decoders
+/// byte-oriented), and that memory comes out of the guest reserve (05-CONTEXT D-05: the VM's memory is the
+/// reserve, plus the tmpfs scratch cap, plus the candidate allowance), which also holds the kernel, PID 1, and the
+/// page cache. Half of [`GUEST_RESERVE_MIB`] is the bound, and the const assertions below hold every role's
+/// section caps to it, so a change to a cap or to the reserve that breaks the bound fails to compile.
+pub const MAX_GUEST_INPUT_BYTES: u64 = 134_217_728;
 
 const _: () = assert!(
     DISK_HEADER_BYTES == DISK_MAGIC.len() + 4 + 4 + TOKEN_BYTES,
@@ -902,6 +919,24 @@ const _: () = assert!(
 const fn widen(n: usize) -> u64 {
     n as u64
 }
+
+// Ties the bound to the reserve: a smaller reserve must lower the bound, never leave it stale.
+const _: () = assert!(
+    MAX_GUEST_INPUT_BYTES == GUEST_RESERVE_MIB as u64 * 1024 * 1024 / 2,
+    "PID 1's input bound is half the guest reserve"
+);
+// A candidate holds the job, the base tarball, and the diff before it unpacks them.
+const _: () = assert!(
+    widen(MAX_GUEST_JOB_BYTES) + MAX_BASE_TAR_BYTES + widen(MAX_DIFF_BYTES)
+        <= MAX_GUEST_INPUT_BYTES,
+    "the candidate role's input sections fit half the guest reserve"
+);
+// A judge holds the job, its private data, and the candidate's output stream before it unpacks them.
+const _: () = assert!(
+    widen(MAX_GUEST_JOB_BYTES) + MAX_JUDGE_DATA_BYTES + MAX_CANDIDATE_OUT_BYTES
+        <= MAX_GUEST_INPUT_BYTES,
+    "the judge role's input sections fit half the guest reserve"
+);
 
 /// A sector of zeros, for padding.
 const ZEROS: [u8; 512] = [0; 512];
