@@ -292,3 +292,107 @@ fn put_reader_refuses_a_symlinked_staging_directory() -> TestResult {
     assert!(names(&elsewhere)?.is_empty());
     Ok(())
 }
+
+#[test]
+fn verified_path_is_canonical() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let id = store.put(b"abc")?;
+
+    let path = store.verified_path(&id)?;
+
+    assert!(path.is_absolute());
+    assert_eq!(path, fs::canonicalize(&path)?);
+    assert_eq!(path, fs::canonicalize(abc_path(dir.path()))?);
+    assert_eq!(BlobId::of(&fs::read(&path)?), id);
+    Ok(())
+}
+
+#[test]
+fn verified_path_under_symlinked_ancestor() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let real = dir.path().join("real");
+    fs::create_dir(&real)?;
+    let link = dir.path().join("link");
+    symlink(&real, &link)?;
+    let store = FileStore::open(&link.join("store"))?;
+    let id = store.put(b"abc")?;
+
+    let path = store.verified_path(&id)?;
+
+    let resolved = fs::canonicalize(&real)?;
+    assert!(
+        path.starts_with(&resolved),
+        "the path must resolve through the symlinked ancestor"
+    );
+    assert!(!path.starts_with(&link));
+    assert_eq!(path, resolved.join("store").join(abc_path(Path::new(""))));
+    Ok(())
+}
+
+#[test]
+fn verified_path_missing() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let absent = BlobId::of(b"never stored");
+
+    let before_any_put = store.verified_path(&absent);
+    store.put(b"abc")?;
+    let after_a_put = store.verified_path(&absent);
+
+    for result in [before_any_put, after_a_put] {
+        assert!(
+            matches!(result, Err(StoreError::BlobMissing { id }) if id == absent),
+            "an absent blob must be BlobMissing"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn verified_path_symlinked_file() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let id = store.put(b"abc")?;
+    let elsewhere = dir.path().join("elsewhere");
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&elsewhere)?
+        .write_all(b"abc")?;
+    let path = abc_path(dir.path());
+    fs::remove_file(&path)?;
+    symlink(&elsewhere, &path)?;
+
+    let result = store.verified_path(&id);
+
+    assert!(
+        matches!(result, Err(StoreError::Unsafe { what: "blob file" })),
+        "a symlinked blob file must be Unsafe even when its target has the right bytes"
+    );
+    Ok(())
+}
+
+#[test]
+fn verified_path_symlinked_shard() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let id = store.put(b"abc")?;
+    let shard = abc_shard(dir.path());
+    let moved = dir.path().join("moved-shard");
+    fs::rename(&shard, &moved)?;
+    symlink(&moved, &shard)?;
+
+    let result = store.verified_path(&id);
+
+    assert!(
+        matches!(
+            result,
+            Err(StoreError::Unsafe {
+                what: "blob shard directory"
+            })
+        ),
+        "a symlinked shard directory must be Unsafe even when it holds the right blob"
+    );
+    Ok(())
+}
