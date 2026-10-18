@@ -3,7 +3,8 @@
 //! Two kinds of ID live here (ARCHITECTURE.md A10):
 //!
 //! - **Plain digests** ([`BlobId`], [`TreeId`], [`ManifestId`], [`PricesId`], [`ImageDigest`]) are the bare
-//!   SHA-256 of content, with no domain, so they equal the checksum S3 verifies natively.
+//!   SHA-256 of content, with no domain, so they equal the checksum S3 verifies natively. [`BlobHasher`] computes
+//!   the same [`BlobId`] incrementally, for content streamed in pieces.
 //! - **Composite IDs** ([`ExperimentId`], [`RunId`], [`PromptHash`], [`ReportHash`], and the IDs later modules
 //!   define) are hashed only through [`IdHasher`]: a NUL-terminated domain string, then each field as a fixed
 //!   32-byte digest, a `u64` big-endian integer, or a `u64` big-endian length prefix followed by bytes. One builder
@@ -208,6 +209,27 @@ impl BlobId {
     }
 }
 
+/// Hashes blob content incrementally: the plain SHA-256 with no domain, so [`BlobHasher::finish`] equals
+/// [`BlobId::of`] over the concatenated bytes, however they were split.
+///
+/// The store's streaming put uses it (05-CONTEXT D-09), so a root image streamed into `.minos/blobs` is named
+/// exactly as a whole-slice put of the same bytes would name it.
+#[derive(Default)]
+pub struct BlobHasher(Sha256);
+
+impl BlobHasher {
+    /// Feeds the next `bytes` of the blob.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    /// The ID of every byte fed so far.
+    #[must_use]
+    pub fn finish(self) -> BlobId {
+        BlobId::from_digest(self.0.finalize().into())
+    }
+}
+
 self::digest_id! {
     /// A source tree: the plain SHA-256 of its deterministic tarball.
     TreeId
@@ -263,6 +285,19 @@ impl ImageDigest {
     #[must_use]
     pub fn of(bytes: &[u8]) -> Self {
         Self::from_digest(plain(bytes))
+    }
+
+    /// The digest of the root image stored as blob `id`: the same digest. The `ImageDigest` recorded in
+    /// `BackendInfo` and `minos.lock` is the blob ID (05-CONTEXT D-09).
+    #[must_use]
+    pub const fn from_blob_id(id: &BlobId) -> Self {
+        Self::from_digest(id.0)
+    }
+
+    /// The blob that stores this root image: the same digest (05-CONTEXT D-09).
+    #[must_use]
+    pub const fn to_blob_id(&self) -> BlobId {
+        BlobId::from_digest(self.0)
     }
 }
 
