@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 552c986089dff7bddf19ce2c3f0fa439ded809d9359aa9c86baaf471f72605c4 # shrinks to limits = StageLimits { address_space_bytes: 1, file_size_bytes: 1, processes: 1, cpu_seconds: 1, open_files: 1 }, argv = ["¡"]
