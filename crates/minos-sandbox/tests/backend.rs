@@ -42,11 +42,14 @@ struct Launched {
     max_duration: Duration,
 }
 
-/// A backend that runs nothing: every launch "ends" with `ended` and the output `stream`.
+/// A backend that runs nothing: every launch "ends" with `ended`, the output `stream`, the host-measured
+/// `elapsed`, and the captured `console`.
 struct FakeBackend {
     capabilities: Capabilities,
     stream: Vec<u8>,
     ended: Ended,
+    elapsed: Duration,
+    console: Vec<u8>,
     launched: Mutex<Vec<Launched>>,
 }
 
@@ -56,7 +59,18 @@ impl FakeBackend {
             capabilities,
             stream,
             ended,
+            elapsed: Duration::ZERO,
+            console: Vec::new(),
             launched: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The same backend, reporting `elapsed` and `console` for every launch.
+    fn with_console(self, elapsed: Duration, console: Vec<u8>) -> Self {
+        Self {
+            elapsed,
+            console,
+            ..self
         }
     }
 
@@ -75,11 +89,19 @@ struct FakeRunning<R: Role> {
     cleared: Cleared<R>,
     stream: Vec<u8>,
     ended: Ended,
+    elapsed: Duration,
+    console: Vec<u8>,
 }
 
 impl<R: Role> RunningVm<R> for FakeRunning<R> {
     fn wait(self) -> Result<Finished<R>, InfraError> {
-        Ok(Finished::new(self.cleared, self.ended, self.stream))
+        Ok(Finished::new(
+            self.cleared,
+            self.ended,
+            self.stream,
+            self.elapsed,
+            self.console,
+        ))
     }
 }
 
@@ -102,6 +124,8 @@ impl Backend for FakeBackend {
             cleared: ok,
             stream: self.stream.clone(),
             ended: self.ended,
+            elapsed: self.elapsed,
+            console: self.console.clone(),
         })
     }
 }
@@ -343,5 +367,66 @@ fn every_launch_carries_a_hard_limit() -> TestResult {
         launched.iter().map(|l| l.max_duration).collect::<Vec<_>>(),
         vec![Duration::from_secs(210), Duration::from_mins(2)]
     );
+    Ok(())
+}
+
+#[test]
+fn finished_reports_elapsed_and_sanitized_console() -> TestResult {
+    // Arrange
+    let console = b"booting\n\x1b[31mred\x1b[0m done\n".to_vec();
+    let cleared = preflight(&host(BTreeSet::new())?, spec::<Candidate>()?.seal())
+        .map_err(|refusals| format!("{refusals:?}"))?;
+
+    // Act
+    let finished = Finished::new(
+        cleared,
+        Ended::Exited,
+        tar(&[])?,
+        Duration::from_millis(1500),
+        console,
+    );
+
+    // Assert
+    assert_eq!(finished.elapsed(), Duration::from_millis(1500));
+    let excerpt = finished.console_excerpt(4096);
+    let text = excerpt.text().as_str();
+    assert!(!text.contains('\u{1b}'), "an ESC byte reached the excerpt");
+    assert!(text.contains("booting\n"), "the console text was lost");
+    assert!(text.contains("red"), "the console text was lost");
+    Ok(())
+}
+
+#[test]
+fn console_reaches_callers_only_through_the_excerpt() -> TestResult {
+    // Arrange
+    let backend = FakeBackend::new(host(BTreeSet::new())?, Ended::Exited, tar(&[])?)
+        .with_console(Duration::from_millis(250), b"line\x07\x1b]0;title\x07\n".to_vec());
+
+    // Act
+    let finished = run(&backend, spec::<Candidate>()?.seal())?;
+
+    // Assert
+    assert_eq!(finished.elapsed(), Duration::from_millis(250));
+    let excerpt = finished.console_excerpt(4096);
+    let text = excerpt.text().as_str();
+    assert!(
+        !text.chars().any(|c| c.is_control() && c != '\n' && c != '\t'),
+        "a control character reached the excerpt"
+    );
+    assert!(text.starts_with("line"));
+    Ok(())
+}
+
+#[test]
+fn ended_chunk_protocol_exists() -> TestResult {
+    // Arrange: a stream that broke the chunk protocol reaches the runner empty.
+    let backend = FakeBackend::new(host(BTreeSet::new())?, Ended::ChunkProtocol, Vec::new());
+
+    // Act
+    let finished = run(&backend, spec::<Candidate>()?.seal())?;
+
+    // Assert
+    assert_eq!(finished.ended(), Ended::ChunkProtocol);
+    assert_ne!(Ended::ChunkProtocol, Ended::Exited);
     Ok(())
 }

@@ -31,6 +31,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::str::FromStr;
+use std::time::Duration;
 
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
@@ -119,7 +120,13 @@ type ReadResult = Result<Untrusted<GuestOutput<Judge>>, OutputFault>;
 
 /// Reads `stream` as the output of an exited Judge launch.
 fn read(stream: Vec<u8>) -> Result<ReadResult, Box<dyn Error>> {
-    Ok(Finished::new(judge_cleared()?, Ended::Exited, stream).into_output())
+    Ok(Finished::new(
+        judge_cleared()?,
+        Ended::Exited,
+        stream,
+        Duration::ZERO,
+        Vec::new(),
+    ).into_output())
 }
 
 /// The fault `stream` is refused with, or an error when it was accepted.
@@ -302,13 +309,25 @@ fn faults_map_to_candidate_reasons() {
 fn finished_reports_its_end_and_key() -> TestResult {
     let cleared = judge_cleared()?;
     let judge_key = *cleared.plan().key();
-    let finished = Finished::new(cleared, Ended::TimedOut, end_blocks());
+    let finished = Finished::new(
+        cleared,
+        Ended::TimedOut,
+        end_blocks(),
+        Duration::ZERO,
+        Vec::new(),
+    );
     assert_eq!(finished.ended(), Ended::TimedOut);
     assert_eq!(finished.key(), &judge_key);
 
     let candidate = candidate_cleared()?;
     let candidate_key = *candidate.plan().key();
-    let finished = Finished::new(candidate, Ended::Exited, valid_judge_output()?);
+    let finished = Finished::new(
+        candidate,
+        Ended::Exited,
+        valid_judge_output()?,
+        Duration::ZERO,
+        Vec::new(),
+    );
     assert_eq!(finished.key(), &candidate_key);
     assert_eq!(finished.into_output()?.entry_count(), 3);
     Ok(())

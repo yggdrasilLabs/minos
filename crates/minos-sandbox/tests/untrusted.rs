@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::str::FromStr;
+use std::time::Duration;
 
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
@@ -101,7 +102,13 @@ fn judge_output(files: &[(&str, &[u8])]) -> Result<Untrusted<GuestOutput<Judge>>
         .secrets(JudgeData::new(BlobId::of(b"judge data")))
         .seal();
     let cleared = preflight(&host()?, plan).map_err(|refusals| format!("{refusals:?}"))?;
-    Ok(Finished::new(cleared, Ended::Exited, tar(files)?).into_output()?)
+    Ok(Finished::new(
+        cleared,
+        Ended::Exited,
+        tar(files)?,
+        Duration::ZERO,
+        Vec::new(),
+    ).into_output()?)
 }
 
 /// `files` read as the output of an exited Candidate launch.
@@ -110,7 +117,13 @@ fn candidate_output(
 ) -> Result<Untrusted<GuestOutput<Candidate>>, Box<dyn Error>> {
     let cleared = preflight(&host()?, spec::<Candidate>()?.seal())
         .map_err(|refusals| format!("{refusals:?}"))?;
-    Ok(Finished::new(cleared, Ended::Exited, tar(files)?).into_output()?)
+    Ok(Finished::new(
+        cleared,
+        Ended::Exited,
+        tar(files)?,
+        Duration::ZERO,
+        Vec::new(),
+    ).into_output()?)
 }
 
 /// A valid scorecard in the wire form.

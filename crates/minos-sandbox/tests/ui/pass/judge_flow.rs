@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::str::FromStr;
+use std::time::Duration;
 
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
@@ -39,7 +40,13 @@ struct FakeRunning<R: Role> {
 
 impl<R: Role> RunningVm<R> for FakeRunning<R> {
     fn wait(self) -> Result<Finished<R>, InfraError> {
-        Ok(Finished::new(self.cleared, Ended::Exited, self.stream))
+        Ok(Finished::new(
+            self.cleared,
+            Ended::Exited,
+            self.stream,
+            Duration::ZERO,
+            Vec::new(),
+        ))
     }
 }
 
