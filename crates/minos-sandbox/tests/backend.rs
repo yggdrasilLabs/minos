@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
-use minos_core::ledger::Isolation;
+use minos_core::ledger::{BackendKind, ConfinementLayer, Isolation};
 use minos_core::limits::Limits;
 use minos_core::manifest::{Arch, JudgeVersion};
 use minos_core::metric::Scorecard;
@@ -25,6 +25,11 @@ use minos_sandbox::{
 use tar::Header;
 
 type TestResult = Result<(), Box<dyn Error>>;
+
+/// The confinement layers a v1 krun host reports: Seatbelt and rlimits, never the deferred dedicated user (D-01).
+fn seatbelt() -> BTreeSet<ConfinementLayer> {
+    BTreeSet::from([ConfinementLayer::Seatbelt, ConfinementLayer::Rlimits])
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // The fake backend
@@ -132,12 +137,14 @@ fn job() -> Result<JobRequest, Box<dyn Error>> {
 /// An arm64 Hardware host with room for every test plan and the given host refusals.
 fn host(refusals: BTreeSet<Refusal>) -> Result<Capabilities, Box<dyn Error>> {
     Ok(Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(8, 16_384)?,
         3_600_000,
         Isolation::Hardware,
         refusals,
-    ))
+    )
+    .with_layers(seatbelt()))
 }
 
 /// The input disk of the right shape for role `R`: the baseline's candidate parts, or a judge's parts.

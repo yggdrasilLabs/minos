@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
-use minos_core::ledger::Isolation;
+use minos_core::ledger::{BackendInfo, BackendKind, ConfinementLayer, Isolation};
 use minos_core::manifest::{Arch, JudgeVersion};
 use minos_sandbox::{
     Candidate, Capabilities, InputDisk, Judge, JudgeData, LaunchPlan, Machine, Refusal, Role,
@@ -14,6 +14,11 @@ use minos_sandbox::{
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
+
+/// The confinement layers a v1 krun host reports: Seatbelt and rlimits, never the deferred dedicated user (D-01).
+fn seatbelt() -> BTreeSet<ConfinementLayer> {
+    BTreeSet::from([ConfinementLayer::Seatbelt, ConfinementLayer::Rlimits])
+}
 
 /// A baseline job: build 60 s, run 120 s, judge 90 s.
 fn job() -> Result<JobRequest, Box<dyn Error>> {
@@ -68,12 +73,14 @@ fn judge_plan(data: JudgeData) -> Result<LaunchPlan<Judge>, Box<dyn Error>> {
 /// An arm64 Hardware host with room for every test plan and no host refusals.
 fn host() -> Result<Capabilities, Box<dyn Error>> {
     Ok(Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(8, 16_384)?,
         3_600_000,
         Isolation::Hardware,
         BTreeSet::new(),
-    ))
+    )
+    .with_layers(seatbelt()))
 }
 
 /// The refusals of `plan` on `host`, or an error when it was cleared.
@@ -103,12 +110,14 @@ fn each_mismatch_is_refused() -> TestResult {
     let none = BTreeSet::new;
 
     let x86 = Capabilities::new(
+        BackendKind::Krun,
         Arch::X86_64,
         Machine::new(8, 16_384)?,
         3_600_000,
         Isolation::Hardware,
         none(),
-    );
+    )
+    .with_layers(seatbelt());
     assert_eq!(
         refusals(&x86, plan::<Candidate>()?)?,
         vec![Refusal::ArchMismatch {
@@ -118,24 +127,28 @@ fn each_mismatch_is_refused() -> TestResult {
     );
 
     let one_cpu = Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(1, 16_384)?,
         3_600_000,
         Isolation::Hardware,
         none(),
-    );
+    )
+    .with_layers(seatbelt());
     assert_eq!(
         refusals(&one_cpu, plan::<Candidate>()?)?,
         vec![Refusal::TooManyVcpus { plan: 2, host: 1 }]
     );
 
     let small = Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(8, 256)?,
         3_600_000,
         Isolation::Hardware,
         none(),
-    );
+    )
+    .with_layers(seatbelt());
     assert_eq!(
         refusals(&small, plan::<Candidate>()?)?,
         vec![Refusal::TooMuchMemory {
@@ -145,12 +158,14 @@ fn each_mismatch_is_refused() -> TestResult {
     );
 
     let short = Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(8, 16_384)?,
         200_000,
         Isolation::Hardware,
         none(),
-    );
+    )
+    .with_layers(seatbelt());
     assert_eq!(
         refusals(&short, plan::<Candidate>()?)?,
         vec![Refusal::DurationOverHost {
@@ -160,12 +175,14 @@ fn each_mismatch_is_refused() -> TestResult {
     );
 
     let weak = Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(8, 16_384)?,
         3_600_000,
         Isolation::WeakProcess,
         none(),
-    );
+    )
+    .with_layers(seatbelt());
     assert_eq!(
         refusals(&weak, plan::<Candidate>()?)?,
         vec![Refusal::WeakIsolation]
@@ -194,12 +211,14 @@ fn preflight_judge_data_is_any_input_part() -> TestResult {
 fn host_refusals_refuse_every_plan() -> TestResult {
     let host_refusals = BTreeSet::from([Refusal::SocketPathTooLong, Refusal::EntitlementMissing]);
     let broken = Capabilities::new(
+        BackendKind::Krun,
         Arch::Arm64,
         Machine::new(8, 16_384)?,
         3_600_000,
         Isolation::Hardware,
         host_refusals,
-    );
+    )
+    .with_layers(seatbelt());
     let expected = vec![Refusal::EntitlementMissing, Refusal::SocketPathTooLong];
     assert_eq!(refusals(&broken, plan::<Candidate>()?)?, expected);
     let data = JudgeData::new(BlobId::of(b"judge data"));
@@ -215,6 +234,7 @@ fn refusals_are_sorted_and_unique() -> TestResult {
         Refusal::KernelMissing,
     ]);
     let everything_wrong = Capabilities::new(
+        BackendKind::Krun,
         Arch::X86_64,
         Machine::new(1, 128)?,
         1_000,
@@ -247,7 +267,125 @@ fn refusals_are_sorted_and_unique() -> TestResult {
             Refusal::KernelMissing,
             Refusal::KernelHashMismatch,
             Refusal::HypervisorUnsupported,
+            Refusal::SeatbeltMissing,
         ]
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Confinement layers, the kernel digest, and Seatbelt (KRUN-06, KRUN-07, D-01, D-03)
+// ---------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn capabilities_carry_layers_and_kernel() -> TestResult {
+    let kernel = ImageDigest::of(b"libkrunfw");
+    let root = ImageDigest::of(b"root image");
+    let host = Capabilities::new(
+        BackendKind::Krun,
+        Arch::Arm64,
+        Machine::new(8, 16_384)?,
+        3_600_000,
+        Isolation::Hardware,
+        BTreeSet::new(),
+    )
+    .with_layers(seatbelt())
+    .with_kernel(kernel);
+    assert_eq!(host.backend(), BackendKind::Krun);
+    assert_eq!(host.layers(), &seatbelt());
+    assert_eq!(host.kernel(), Some(&kernel));
+    assert_eq!(
+        host.backend_info(root),
+        BackendInfo::new(
+            BackendKind::Krun,
+            Arch::Arm64,
+            Isolation::Hardware,
+            seatbelt(),
+            root,
+            Some(kernel),
+        )
+    );
+
+    let bare = Capabilities::new(
+        BackendKind::Krun,
+        Arch::Arm64,
+        Machine::new(8, 16_384)?,
+        3_600_000,
+        Isolation::Hardware,
+        BTreeSet::new(),
+    );
+    assert!(bare.layers().is_empty());
+    assert_eq!(bare.kernel(), None);
+    assert_eq!(bare.backend_info(root).kernel(), None);
+    Ok(())
+}
+
+#[test]
+fn preflight_requires_seatbelt_for_krun() -> TestResult {
+    let no_seatbelt = Capabilities::new(
+        BackendKind::Krun,
+        Arch::Arm64,
+        Machine::new(8, 16_384)?,
+        3_600_000,
+        Isolation::Hardware,
+        BTreeSet::new(),
+    )
+    .with_layers(BTreeSet::from([ConfinementLayer::Rlimits]));
+    assert_eq!(
+        refusals(&no_seatbelt, plan::<Candidate>()?)?,
+        vec![Refusal::SeatbeltMissing]
+    );
+    let data = JudgeData::new(BlobId::of(b"judge data"));
+    assert_eq!(
+        refusals(&no_seatbelt, judge_plan(data)?)?,
+        vec![Refusal::SeatbeltMissing]
+    );
+
+    // The dedicated user is deferred (D-01): its absence is recorded, never refused.
+    let seatbelt_only = Capabilities::new(
+        BackendKind::Krun,
+        Arch::Arm64,
+        Machine::new(8, 16_384)?,
+        3_600_000,
+        Isolation::Hardware,
+        BTreeSet::new(),
+    )
+    .with_layers(BTreeSet::from([ConfinementLayer::Seatbelt]));
+    assert!(
+        !seatbelt_only
+            .layers()
+            .contains(&ConfinementLayer::DedicatedUser)
+    );
+    let cleared = preflight(&seatbelt_only, plan::<Candidate>()?)
+        .map_err(|refusals| format!("{refusals:?}"))?;
+    assert_eq!(cleared.plan().role(), minos_sandbox::RoleKind::Candidate);
+    Ok(())
+}
+
+#[test]
+fn refusal_messages_name_a_fix() {
+    let cases = [
+        (Refusal::SeatbeltMissing, "restore the system tool"),
+        (
+            Refusal::SeatbeltNotEnforcing,
+            "do not launch until minos host doctor passes",
+        ),
+        (
+            Refusal::VmmMissing,
+            "build it with cargo build -p minos-vmm",
+        ),
+        (
+            Refusal::GuestMissing,
+            "build it with cargo build -p minos-guest --release --target aarch64-unknown-linux-musl",
+        ),
+        (Refusal::EntitlementMissing, "run minos host setup"),
+    ];
+    for (refusal, fix) in cases {
+        let message = refusal.to_string();
+        let tail = message.split_once("; ").map(|(_, tail)| tail);
+        assert_eq!(tail, Some(fix), "{message}");
+    }
+    let entitlement = Refusal::EntitlementMissing.to_string();
+    assert!(entitlement.contains("com.apple.security.hypervisor"));
+    assert!(entitlement.contains("com.apple.security.cs.disable-library-validation"));
 }

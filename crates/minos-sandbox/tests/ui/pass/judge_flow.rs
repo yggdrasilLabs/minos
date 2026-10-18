@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
-use minos_core::ledger::Isolation;
+use minos_core::ledger::{BackendKind, ConfinementLayer, Isolation};
 use minos_core::limits::Limits;
 use minos_core::manifest::{Arch, JudgeVersion};
 use minos_core::metric::Scorecard;
@@ -81,12 +81,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let limits = Limits::standard();
     let backend = FakeBackend {
         capabilities: Capabilities::new(
+            BackendKind::Krun,
             Arch::Arm64,
             Machine::new(8, 16_384)?,
             3_600_000,
             Isolation::Hardware,
             BTreeSet::new(),
-        ),
+        )
+        .with_layers(BTreeSet::from([
+            ConfinementLayer::Seatbelt,
+            ConfinementLayer::Rlimits,
+        ])),
         stream: tar(&[(SCORECARD_PATH, SCORECARD), (JUDGE_LOG_PATH, b"ok\n")])?,
     };
     let job = JobRequest::baseline(
