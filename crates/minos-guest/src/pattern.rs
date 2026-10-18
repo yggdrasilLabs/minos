@@ -1,4 +1,4 @@
-//! The deterministic byte pattern used for the vsock stream and the scratch-disk round trip.
+//! The deterministic byte pattern the `minos-probe` fixture writes, so a VM test can check the bytes it gets back.
 //!
 //! Byte `i` of the pattern is `i % 251`. The modulus is prime, so the pattern does not line up with any
 //! power-of-two block or chunk size, and a dropped, duplicated, or reordered chunk changes the bytes the
