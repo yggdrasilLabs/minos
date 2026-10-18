@@ -1,141 +1,448 @@
-//! Job input disk: a fixed header and the job JSON, zero-padded to whole 512-byte sectors.
-//!
-//! The header is 20 bytes: magic [`JOB_MAGIC`], a `u32` [`PROTOCOL_VERSION`], and a `u64` payload length, both
-//! big-endian. Exactly `length` bytes of job JSON follow, then zeros to the next sector boundary. The guest's
-//! decoder (`minos-guest` `job::read_job`, 02-01 E-9) reads the same layout; the golden bytes in this module's
-//! tests and in the guest's tests bind the two, since this crate never links the guest.
-
-/// Magic bytes at the start of the job header.
-pub const JOB_MAGIC: [u8; 8] = *b"MINOSJB1";
-
-/// Version carried in the job header.
-pub const PROTOCOL_VERSION: u32 = 1;
-
-/// Most job JSON bytes the guest accepts.
-pub const MAX_JOB_BYTES: u64 = 1_048_576;
-
-/// The image is zero-padded to a whole number of sectors of this size.
-pub const SECTOR_BYTES: usize = 512;
-
-/// Length of the job header: magic, version, and payload length.
-const HEADER_LEN: usize = 20;
-
-/// Why a job input disk could not be written.
-#[derive(Debug, thiserror::Error)]
-pub enum InputDiskError {
-    /// The job JSON is longer than [`MAX_JOB_BYTES`].
-    #[error("job JSON is {size} bytes; the job disk holds at most {MAX_JOB_BYTES}")]
-    TooLarge {
-        /// Length of the rejected JSON.
-        size: usize,
-    },
-}
-
-/// Builds the job input disk image for `job_json`: the header, the JSON, and zero padding to whole sectors.
-///
-/// # Errors
-///
-/// [`InputDiskError::TooLarge`] when `job_json` is longer than [`MAX_JOB_BYTES`].
-pub fn input_disk_image(job_json: &[u8]) -> Result<Vec<u8>, InputDiskError> {
-    let too_large = || InputDiskError::TooLarge {
-        size: job_json.len(),
-    };
-    let length = u64::try_from(job_json.len()).map_err(|_| too_large())?;
-    if length > MAX_JOB_BYTES {
-        return Err(too_large());
-    }
-    // length <= MAX_JOB_BYTES (1 MiB), so neither the sum nor the rounding can overflow; checked anyway.
-    let total = HEADER_LEN
-        .checked_add(job_json.len())
-        .and_then(|used| used.checked_next_multiple_of(SECTOR_BYTES))
-        .ok_or_else(too_large)?;
-    let mut image = Vec::with_capacity(total);
-    image.extend_from_slice(&JOB_MAGIC);
-    image.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
-    image.extend_from_slice(&length.to_be_bytes());
-    image.extend_from_slice(job_json);
-    image.resize(total, 0);
-    Ok(image)
-}
+//! The per-job input disk, written by the backend from blob bytes (05-CONTEXT D-13, D-15).
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::error::Error;
+    use std::fs::{self, File};
+    use std::os::unix::fs::PermissionsExt;
 
-    use super::{InputDiskError, MAX_JOB_BYTES, SECTOR_BYTES, input_disk_image};
+    use minos_core::chunk::{CHUNK_HEADER_BYTES, ChunkStream, ChunkToken, TOKEN_BYTES};
+    use minos_core::diff::Diff;
+    use minos_core::experiment::Experiment;
+    use minos_core::guest::{GuestJob, MAX_GUEST_JOB_BYTES, SectionKind, read_input_disk};
+    use minos_core::id::{BlobId, ImageDigest, TreeId};
+    use minos_core::job::{JobBudget, JobRequest};
+    use minos_core::limits::Limits;
+    use minos_core::manifest::{Arch, JudgeVersion, Manifest};
+    use minos_sandbox::{
+        BlobSource, BlobSourceError, Candidate, InputDisk, Judge, JudgeData, LaunchError,
+        LaunchPlan, Machine, SandboxSpec, VerifiedPath,
+    };
+    use serde_json::Value;
+
+    use super::{FetchedParts, fetch_parts, new_token, write_input_disk};
+    use crate::jobdir::{INPUT_FILE, JobRoot, OWNER_LOCK_FILE};
 
     type TestResult = Result<(), Box<dyn Error>>;
 
-    /// 02-05-PLAN.md Exact texts E-2: the first 22 bytes of `input_disk_image(b"{}")`, the same golden header
-    /// the guest's `golden_header_for_two_byte_payload` test decodes.
-    const E2_HEX: &str = "4d494e4f534a42310000000100000000000000027b7d";
+    /// The `minos.toml` example in CLAUDE.md, section "Projects".
+    const MANIFEST: &str = r#"[project]
+name = "logparse"
+kind = "optimize"
+program = "program.md"
 
-    /// 02-05-PLAN.md Exact texts E-6, identical to 02-01 E-9 and the guest's `CANONICAL` job.
-    const E6: &str = r#"{"v":1,"vsock_port":1024,"steps":[{"report_boot":{}},{"scratch_roundtrip":{"bytes":65536}}],"finish":"poweroff"}"#;
+[surface]
+writable = ["src/parse.rs"]
+readable = ["src/lib.rs"]
 
-    fn hex(text: &str) -> Result<Vec<u8>, Box<dyn Error>> {
-        text.as_bytes()
-            .chunks(2)
-            .map(|pair| Ok(u8::from_str_radix(std::str::from_utf8(pair)?, 16)?))
-            .collect()
+[source]
+exclude = ["judge/", "docs/", "target/"]
+
+[environment]
+dockerfile = "minos.Dockerfile"
+requires = { arch = "arm64" }
+
+[commands]
+build = ["cargo", "build", "--release"]
+run = ["./target/release/bench", "--out", "/out/result.json"]
+check = ["cargo", "check"]
+
+[budget]
+build = "2m"
+run = "5m"
+spend_usd = 40
+
+[judge]
+version = 1
+command = ["./judge"]
+
+[[judge.gate]]
+metric = "identical_output"
+
+[[judge.objective]]
+metric = "throughput_mb_s"
+goal = "maximize"
+min_improvement = "5%"
+
+[policy]
+kind = "greedy"
+width = 4
+
+[[proposer]]
+kind = "single_shot"
+model = "mid"
+batch = 4
+"#;
+
+    /// A single-hunk modify of the manifest's one writable file.
+    const DIFF: &str = "\
+diff --git a/src/parse.rs b/src/parse.rs
+--- a/src/parse.rs
++++ b/src/parse.rs
+@@ -1,3 +1,3 @@
+ fn parse() {
+-    old();
++    new();
+ }
+";
+
+    /// The base tarball's bytes. The backend never parses them, so any bytes serve.
+    const BASE: &[u8] = b"base tarball bytes";
+    const JUDGE_DATA: &[u8] = b"judge private data";
+    const CANDIDATE_OUT: &[u8] = b"candidate output stream";
+    const TOKEN: [u8; TOKEN_BYTES] = [0x5a; TOKEN_BYTES];
+
+    /// A [`BlobSource`] over an in-memory map that keeps the trait's contract: a cap refused before copying, and
+    /// only bytes stored under their own ID.
+    #[derive(Default)]
+    struct MapBlobSource(BTreeMap<BlobId, Vec<u8>>);
+
+    impl MapBlobSource {
+        fn put(&mut self, bytes: &[u8]) -> BlobId {
+            let id = BlobId::of(bytes);
+            self.0.insert(id, bytes.to_vec());
+            id
+        }
     }
 
-    fn declared_length(image: &[u8]) -> Result<u64, Box<dyn Error>> {
-        let field: [u8; 8] = image
-            .get(12..20)
-            .ok_or("image shorter than the header")?
-            .try_into()?;
-        Ok(u64::from_be_bytes(field))
+    impl BlobSource for MapBlobSource {
+        fn get(&self, id: &BlobId, max: u64) -> Result<Vec<u8>, BlobSourceError> {
+            let bytes = self.0.get(id).ok_or(BlobSourceError::Missing { id: *id })?;
+            let size = u64::try_from(bytes.len()).map_err(|_| BlobSourceError::Unsafe { what: "size" })?;
+            if size > max {
+                return Err(BlobSourceError::TooLarge { id: *id, size, max });
+            }
+            Ok(bytes.clone())
+        }
+
+        fn root_image(&self, digest: &ImageDigest) -> Result<VerifiedPath, BlobSourceError> {
+            Err(BlobSourceError::RootImageMissing { digest: *digest })
+        }
+    }
+
+    /// A [`BlobSource`] that breaks the contract: it returns `bytes` for every ID, whatever the cap.
+    struct LyingSource(Vec<u8>);
+
+    impl BlobSource for LyingSource {
+        fn get(&self, _id: &BlobId, _max: u64) -> Result<Vec<u8>, BlobSourceError> {
+            Ok(self.0.clone())
+        }
+
+        fn root_image(&self, digest: &ImageDigest) -> Result<VerifiedPath, BlobSourceError> {
+            Err(BlobSourceError::RootImageMissing { digest: *digest })
+        }
+    }
+
+    fn manifest() -> Result<Manifest, Box<dyn Error>> {
+        Ok(Manifest::parse_toml(MANIFEST)?)
+    }
+
+    fn judge_version() -> Result<JudgeVersion, Box<dyn Error>> {
+        Ok(JudgeVersion::of(&TreeId::of(b"judge"), manifest()?.judge()))
+    }
+
+    fn diff() -> Result<Diff, Box<dyn Error>> {
+        Ok(Diff::parse(DIFF, manifest()?.writable(), &Limits::standard())?)
+    }
+
+    /// The request for trial `trial` of the one-diff candidate of [`BASE`].
+    fn request(trial: u32) -> Result<JobRequest, Box<dyn Error>> {
+        let experiment = Experiment::candidate(TreeId::of(BASE), diff()?);
+        Ok(JobRequest::candidate(
+            &experiment,
+            BlobId::of(diff()?.as_bytes()),
+            judge_version()?,
+            trial,
+            JobBudget::from_budget(manifest()?.budget()),
+        )?)
+    }
+
+    fn baseline_request() -> Result<JobRequest, Box<dyn Error>> {
+        Ok(JobRequest::baseline(
+            TreeId::of(BASE),
+            judge_version()?,
+            0,
+            JobBudget::from_budget(manifest()?.budget()),
+        )?)
+    }
+
+    fn machine(memory_mib: u16) -> Result<Machine, Box<dyn Error>> {
+        Ok(Machine::new(2, memory_mib)?)
+    }
+
+    fn default_memory() -> Result<u16, Box<dyn Error>> {
+        Ok(manifest()?.environment().memory_mib())
+    }
+
+    /// A Candidate plan for `request` whose job blob is `job_bytes`, on a machine of `memory_mib`.
+    fn candidate_plan(
+        request: &JobRequest,
+        job_bytes: &[u8],
+        memory_mib: u16,
+    ) -> Result<LaunchPlan<Candidate>, Box<dyn Error>> {
+        let input = InputDisk::candidate(BlobId::of(job_bytes), request.base(), request.diff());
+        Ok(SandboxSpec::<Candidate>::new(
+            request,
+            ImageDigest::of(b"root image"),
+            input,
+            machine(memory_mib)?,
+            Arch::Arm64,
+        )?
+        .seal())
+    }
+
+    /// A Judge plan for `request` whose job blob is `job_bytes`, with judge data when `with_data`.
+    fn judge_plan(
+        request: &JobRequest,
+        job_bytes: &[u8],
+        with_data: bool,
+    ) -> Result<LaunchPlan<Judge>, Box<dyn Error>> {
+        let input = InputDisk::judge(BlobId::of(job_bytes), BlobId::of(CANDIDATE_OUT));
+        let spec = SandboxSpec::<Judge>::new(
+            request,
+            ImageDigest::of(b"root image"),
+            input,
+            machine(default_memory()?)?,
+            Arch::Arm64,
+        )?;
+        let spec = if with_data {
+            spec.secrets(JudgeData::new(BlobId::of(JUDGE_DATA)))
+        } else {
+            spec
+        };
+        Ok(spec.seal())
+    }
+
+    /// A source holding the base, the diff, the judge data, the candidate output, and `job_bytes`.
+    fn source(job_bytes: &[u8]) -> Result<MapBlobSource, Box<dyn Error>> {
+        let mut blobs = MapBlobSource::default();
+        blobs.put(job_bytes);
+        blobs.put(BASE);
+        blobs.put(diff()?.as_bytes());
+        blobs.put(JUDGE_DATA);
+        blobs.put(CANDIDATE_OUT);
+        Ok(blobs)
+    }
+
+    fn candidate_job_bytes(trial: u32) -> Result<Vec<u8>, Box<dyn Error>> {
+        Ok(GuestJob::candidate(&manifest()?, &request(trial)?).to_json()?)
+    }
+
+    /// The candidate job JSON of trial 1 with `edit` applied to it as a JSON value.
+    fn edited_job(edit: impl FnOnce(&mut Value) -> Option<()>) -> Result<Vec<u8>, Box<dyn Error>> {
+        let mut value: Value = serde_json::from_slice(&candidate_job_bytes(1)?)?;
+        edit(&mut value).ok_or("the edit found no field")?;
+        let bytes = serde_json::to_vec(&value)?;
+        // The edited job is itself valid, so only the plan comparison can refuse it.
+        GuestJob::parse_json(&bytes)?;
+        Ok(bytes)
+    }
+
+    fn is_mismatch(result: Result<FetchedParts, LaunchError>) -> bool {
+        matches!(
+            result,
+            Err(LaunchError::Backend {
+                what: "the guest job does not match the plan"
+            })
+        )
     }
 
     #[test]
-    fn input_disk_empty_object_matches_e2_then_zeros() -> TestResult {
-        let image = input_disk_image(b"{}")?;
-        assert_eq!(image.len(), SECTOR_BYTES);
-        assert_eq!(image.get(..22), Some(hex(E2_HEX)?.as_slice()));
-        assert!(
-            image
-                .get(22..)
-                .ok_or("short image")?
-                .iter()
-                .all(|byte| *byte == 0)
-        );
+    fn fetch_parts_candidate() -> TestResult {
+        let job_bytes = candidate_job_bytes(1)?;
+        let blobs = source(&job_bytes)?;
+        let plan = candidate_plan(&request(1)?, &job_bytes, default_memory()?)?;
+        let parts = fetch_parts(&blobs, &plan)?;
+        assert_eq!(parts.job(), &GuestJob::parse_json(&job_bytes)?);
+        assert_eq!(parts.job_bytes(), job_bytes.as_slice());
+        assert_eq!(parts.base(), Some(BASE));
+        assert_eq!(parts.diff(), Some(diff()?.as_bytes()));
+        assert_eq!(parts.judge_data(), None);
+        assert_eq!(parts.candidate_out(), None);
         Ok(())
     }
 
     #[test]
-    fn input_disk_canonical_job_declares_its_length_and_fills_whole_sectors() -> TestResult {
-        let image = input_disk_image(E6.as_bytes())?;
-        assert_eq!(declared_length(&image)?, u64::try_from(E6.len())?);
-        assert_eq!(image.get(20..20 + E6.len()), Some(E6.as_bytes()));
-        assert_eq!(image.len(), (20 + E6.len()).next_multiple_of(SECTOR_BYTES));
-        assert_eq!(image.len() % SECTOR_BYTES, 0);
+    fn fetch_parts_baseline_has_no_diff() -> TestResult {
+        let job_bytes = GuestJob::candidate(&manifest()?, &baseline_request()?).to_json()?;
+        let blobs = source(&job_bytes)?;
+        let plan = candidate_plan(&baseline_request()?, &job_bytes, default_memory()?)?;
+        let parts = fetch_parts(&blobs, &plan)?;
+        assert_eq!(parts.base(), Some(BASE));
+        assert_eq!(parts.diff(), None);
         Ok(())
     }
 
     #[test]
-    fn input_disk_pads_exactly_at_the_sector_boundary() -> TestResult {
-        assert_eq!(input_disk_image(&[b' '; 492])?.len(), 512);
-        assert_eq!(input_disk_image(&[b' '; 493])?.len(), 1024);
+    fn fetch_parts_judge() -> TestResult {
+        let job_bytes = GuestJob::judge(&manifest()?, &request(1)?).to_json()?;
+        let blobs = source(&job_bytes)?;
+        let plan = judge_plan(&request(1)?, &job_bytes, true)?;
+        let parts = fetch_parts(&blobs, &plan)?;
+        assert_eq!(parts.job_bytes(), job_bytes.as_slice());
+        assert_eq!(parts.base(), None);
+        assert_eq!(parts.diff(), None);
+        assert_eq!(parts.judge_data(), Some(JUDGE_DATA));
+        assert_eq!(parts.candidate_out(), Some(CANDIDATE_OUT));
         Ok(())
     }
 
     #[test]
-    fn input_disk_accepts_the_largest_job() -> TestResult {
-        let payload = vec![b' '; usize::try_from(MAX_JOB_BYTES)?];
-        let image = input_disk_image(&payload)?;
-        assert_eq!(declared_length(&image)?, MAX_JOB_BYTES);
-        assert_eq!(image.len() % SECTOR_BYTES, 0);
-        Ok(())
-    }
-
-    #[test]
-    fn input_disk_rejects_a_job_one_byte_over_the_limit() -> TestResult {
-        let payload = vec![b' '; usize::try_from(MAX_JOB_BYTES)? + 1];
+    fn fetch_parts_refuses_mismatch() -> TestResult {
+        let memory = default_memory()?;
+        // Role: a judge job named by a Candidate plan.
+        let judge_job = GuestJob::judge(&manifest()?, &request(1)?).to_json()?;
+        let plan = candidate_plan(&request(1)?, &judge_job, memory)?;
+        assert!(is_mismatch(fetch_parts(&source(&judge_job)?, &plan)));
+        // Launch key: the job of trial 1 named by the plan of trial 2.
+        let job = candidate_job_bytes(1)?;
+        let plan = candidate_plan(&request(2)?, &job, memory)?;
+        assert!(is_mismatch(fetch_parts(&source(&job)?, &plan)));
+        // Base and diff: a job edited to name another base or another diff, under the right key.
+        let other_base = edited_job(|v| {
+            *v.get_mut("base")? = Value::String(TreeId::of(b"other").to_hex());
+            Some(())
+        })?;
+        let plan = candidate_plan(&request(1)?, &other_base, memory)?;
+        assert!(is_mismatch(fetch_parts(&source(&other_base)?, &plan)));
+        let other_diff = edited_job(|v| {
+            *v.get_mut("diff")? = Value::String(BlobId::of(b"other").to_hex());
+            Some(())
+        })?;
+        let plan = candidate_plan(&request(1)?, &other_diff, memory)?;
+        assert!(is_mismatch(fetch_parts(&source(&other_diff)?, &plan)));
+        // A stage budget: the run stage one second longer than the plan's.
+        let other_budget = edited_job(|v| {
+            let run = v.get_mut("stages")?.as_array_mut()?.get_mut(1)?;
+            let budget = run.get("budget_ms")?.as_u64()?.checked_add(1000)?;
+            *run.get_mut("budget_ms")? = Value::from(budget);
+            Some(())
+        })?;
+        let plan = candidate_plan(&request(1)?, &other_budget, memory)?;
+        assert!(is_mismatch(fetch_parts(&source(&other_budget)?, &plan)));
+        // Memory: the plan's machine is larger than the job's memory.
+        let plan = candidate_plan(&request(1)?, &job, memory.checked_mul(2).ok_or("memory")?)?;
+        assert!(is_mismatch(fetch_parts(&source(&job)?, &plan)));
+        // A Judge plan with no judge data attached.
+        let plan = judge_plan(&request(1)?, &judge_job, false)?;
         assert!(matches!(
-            input_disk_image(&payload),
-            Err(InputDiskError::TooLarge { size: 1_048_577 })
+            fetch_parts(&source(&judge_job)?, &plan),
+            Err(LaunchError::Backend { .. })
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_parts_refuses_over_cap_and_unparsable_jobs() -> TestResult {
+        let over = vec![b' '; MAX_GUEST_JOB_BYTES.checked_add(1).ok_or("cap")?];
+        let plan = candidate_plan(&request(1)?, &over, default_memory()?)?;
+        assert!(matches!(
+            fetch_parts(&source(&over)?, &plan),
+            Err(LaunchError::Blob(BlobSourceError::TooLarge { .. }))
+        ));
+        let junk = b"{\"v\":1}".to_vec();
+        let plan = candidate_plan(&request(1)?, &junk, default_memory()?)?;
+        assert!(matches!(
+            fetch_parts(&source(&junk)?, &plan),
+            Err(LaunchError::Backend { .. })
+        ));
+        let job = candidate_job_bytes(1)?;
+        let plan = candidate_plan(&request(1)?, &job, default_memory()?)?;
+        assert!(matches!(
+            fetch_parts(&MapBlobSource::default(), &plan),
+            Err(LaunchError::Blob(BlobSourceError::Missing { .. }))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_parts_refuses_a_source_that_breaks_its_contract() -> TestResult {
+        // Bytes that do not hash to the ID asked for are refused as tampered.
+        let job = candidate_job_bytes(1)?;
+        let plan = candidate_plan(&request(1)?, &job, default_memory()?)?;
+        assert!(matches!(
+            fetch_parts(&LyingSource(b"not the job".to_vec()), &plan),
+            Err(LaunchError::Blob(BlobSourceError::Tampered { .. }))
+        ));
+        // Bytes over the cap are refused even when the source ignored it.
+        let over = vec![b' '; MAX_GUEST_JOB_BYTES.checked_add(1).ok_or("cap")?];
+        let plan = candidate_plan(&request(1)?, &over, default_memory()?)?;
+        assert!(matches!(
+            fetch_parts(&LyingSource(over), &plan),
+            Err(LaunchError::Blob(BlobSourceError::TooLarge { .. }))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn write_disk_round_trips() -> TestResult {
+        let parent = tempfile::tempdir()?;
+        let root = JobRoot::open_at(parent.path())?;
+        for (job_bytes, judge) in [
+            (candidate_job_bytes(1)?, false),
+            (GuestJob::judge(&manifest()?, &request(1)?).to_json()?, true),
+        ] {
+            let blobs = source(&job_bytes)?;
+            let parts = if judge {
+                fetch_parts(&blobs, &judge_plan(&request(1)?, &job_bytes, true)?)?
+            } else {
+                fetch_parts(&blobs, &candidate_plan(&request(1)?, &job_bytes, default_memory()?)?)?
+            };
+            let dir = root.create_job()?;
+            let path = write_input_disk(&dir, &ChunkToken::from_bytes(TOKEN), &parts)?;
+            assert_eq!(path, dir.input());
+            let mode = fs::symlink_metadata(&path)?.permissions().mode() & 0o7777;
+            assert_eq!(mode, 0o600);
+            let mut sections = read_input_disk(&mut File::open(&path)?)?;
+            assert!(sections.token().ct_eq(&TOKEN));
+            sections.check_role(parts.job())?;
+            assert_eq!(sections.take(SectionKind::Job).as_deref(), Some(job_bytes.as_slice()));
+            assert_eq!(sections.take(SectionKind::Base).as_deref(), parts.base());
+            assert_eq!(sections.take(SectionKind::Diff).as_deref(), parts.diff());
+            assert_eq!(sections.take(SectionKind::JudgeData).as_deref(), parts.judge_data());
+            assert_eq!(
+                sections.take(SectionKind::CandidateOut).as_deref(),
+                parts.candidate_out()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn write_disk_never_overwrites() -> TestResult {
+        let parent = tempfile::tempdir()?;
+        let dir = JobRoot::open_at(parent.path())?.create_job()?;
+        let job_bytes = candidate_job_bytes(1)?;
+        let parts = fetch_parts(
+            &source(&job_bytes)?,
+            &candidate_plan(&request(1)?, &job_bytes, default_memory()?)?,
+        )?;
+        let path = write_input_disk(&dir, &ChunkToken::from_bytes(TOKEN), &parts)?;
+        let first = fs::read(&path)?;
+        let again = write_input_disk(&dir, &ChunkToken::from_bytes([0x11; TOKEN_BYTES]), &parts);
+        assert!(matches!(again, Err(LaunchError::Io { .. })));
+        assert_eq!(fs::read(&path)?, first);
+        // The refused write left no temporary file behind.
+        let mut names = fs::read_dir(dir.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<Vec<_>, _>>()?;
+        names.sort();
+        assert_eq!(names, [INPUT_FILE, OWNER_LOCK_FILE]);
+        Ok(())
+    }
+
+    #[test]
+    fn new_token_is_random() -> TestResult {
+        let first = new_token()?;
+        let second = new_token()?;
+        // The token bytes are private to core; a chunk built under `first` carries them in its header.
+        let chunk = ChunkStream::new(&first, b"x").next().ok_or("no chunk")?;
+        let sent = chunk.get(8..CHUNK_HEADER_BYTES - 8).ok_or("short chunk")?;
+        assert_eq!(sent.len(), TOKEN_BYTES);
+        assert!(first.ct_eq(sent));
+        assert!(!second.ct_eq(sent));
+        assert!(!sent.iter().all(|byte| *byte == 0));
         Ok(())
     }
 }
