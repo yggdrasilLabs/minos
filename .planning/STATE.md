@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: guest-krun-backend-and-environment-build
 status: executing
-stopped_at: Completed 05-19-PLAN.md
-last_updated: "2026-10-19T21:23:24.573Z"
+stopped_at: Completed 05-20-PLAN.md
+last_updated: "2026-10-19T21:34:06.421Z"
 last_activity: 2026-10-19
-last_activity_desc: Completed 05-19 (the permanent exit tests)
+last_activity_desc: "Completed 05-20 (Phase 5 final gate passed; cargo clean)"
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 60
-  completed_plans: 59
-  percent: 50
+  completed_plans: 60
+  percent: 63
 ---
 
 # Project State
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 05 (guest-krun-backend-and-environment-build) — EXECUTING
-Plan: 20 of 22 (05-20 remains; 05-19, 05-21, and 05-22 are complete)
-Status: Ready to execute
-Last activity: 2026-10-19 — Completed 05-19 (the permanent exit tests: 4 passed)
+Phase: 05 (guest-krun-backend-and-environment-build) — COMPLETE (all 22 plans; ready for phase verification)
+Plan: 22 of 22 (05-20 complete; every Phase 5 plan has a SUMMARY)
+Status: Phase complete; next is /gsd-verify-work or Phase 6
+Last activity: 2026-10-19 — Completed 05-20 (final gate: vm 10 passed, exit 4 passed, host doctor exit 0; cargo clean ran last)
 
-Progress: [██████████] 100% (29 of 29 plans)
+Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
 ## Performance Metrics
 
@@ -117,6 +117,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P17 | 25min | 2 tasks | 5 files |
 | Phase 05 P18 | 15 min | 3 tasks | 3 files |
 | Phase 05 P19 | 25 min | 3 tasks | 3 files |
+| Phase 05 P20 | 8min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -272,6 +273,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-18: A2 fallback not needed; docker buildx build takes the snapshot tarball on stdin with -f relative to its root
 - [Phase 05]: 05-18: D-12 stated as: the packed image reproduces whenever the builder's rootfs contents reproduce; clock-computed RUN output reproduces only through BuildKit's layer cache
 - [Phase 05]: 05-19: KRUN_BOOT_START_NS=<digits> is the one host-derived /proc/cmdline token exit_env allows, as a recorded exception (user chose no-allowance first, then after root cause 'Allow it as a recorded exception', both 2026-10-19); removal path: vendor only the top-level msb_krun crate under [patch.crates-io], no whole-project fork
+- [Phase 05]: 05-20: the final gate passed on one build (vm 10, exit 4, host doctor exit 0, Docker test); GUEST-05 checked with the KRUN_BOOT_START_NS recorded exception (user decision 2026-10-19)
+- [Phase 05]: 05-20: the chunked protocol's one-VM cost is answered and folds into the K8 open question (deferred with NEXT-04)
 
 ### Pending Todos
 
@@ -302,6 +305,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-19T21:23:24.568Z
-Stopped at: Completed 05-19-PLAN.md
+Last session: 2026-10-19T21:33:50.405Z
+Stopped at: Completed 05-20-PLAN.md
 Resume file: None

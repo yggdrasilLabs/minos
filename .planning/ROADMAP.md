@@ -47,7 +47,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Platform Spikes** - libkrun boot, egress, vsock, signing, confinement, root images, and `claude -p` answered with evidence in CLAUDE.md (completed 2026-10-10)
 - [x] **Phase 3: Core Types and Pure Logic** - Validated types, a frozen ledger format, and pure policy, routing, report, and money in `minos-core` (completed 2026-10-14)
 - [x] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts (completed 2026-10-15)
-- [ ] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor`
+- [x] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor` (completed 2026-10-19)
 - [ ] **Phase 6: Proposers** - Seeded sweep and a locked-down `claude -p` single_shot behind the `ModelProvider` abstraction
 - [ ] **Phase 7: Runner and Loop** - Candidate-then-judge VMs and a resumable generation driver with caps and a circuit breaker
 - [ ] **Phase 8: CLI, Sample Project, and Docs** - The full loop on the sample project, hash-gated adopt, measured cost, and honest docs
@@ -254,7 +254,7 @@ Plans:
   4. `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` written in by the trusted packer (*superseded wording, 2026-10-09: "a root image and an initramfs"; 02-CONTEXT.md D-18*) and writes its digests to `minos.lock`, from a build context with no judge data and no secrets. `minos host doctor` runs the launch preflight (entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, active confinement layers) and prints every refusal with an explanation and a fix. The active confinement layers are recorded in `BackendInfo`, with no silent fallback (KRUN-06, KRUN-07, KRUN-09, CLI-02, CLI-03)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 21/22 plans executed
+**Plans**: 22/22 plans complete
 Plans:
 **Wave 1**
 
@@ -306,7 +306,7 @@ Plans:
 
 **Wave 10** *(blocked on all prior plans)*
 
-- [ ] 05-20-PLAN.md — CLAUDE.md reconciliation, final gate with VM and exit tests recorded, requirements, validation, `cargo clean`
+- [x] 05-20-PLAN.md — CLAUDE.md reconciliation, final gate with VM and exit tests recorded, requirements, validation, `cargo clean`
 
 **Exit criteria**: Success criterion 1 (fail-closed egress, no host environment, no VM after `kill -9`) must pass before this phase is marked complete. It is never traded for schedule.
 **Research**: Needs research-phase (Seatbelt and `hv_vm_create`, first boot, root-image tooling on macOS, concurrent VM and memory limits)
@@ -376,7 +376,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
-| 5. Guest, krun Backend, and Environment Build | 21/22 | In Progress|  |
+| 5. Guest, krun Backend, and Environment Build | 22/22 | Complete   | 2026-10-19 |
 | 6. Proposers | 0/TBD | Not started | - |
 | 7. Runner and Loop | 0/TBD | Not started | - |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
