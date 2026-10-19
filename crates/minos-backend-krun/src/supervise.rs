@@ -176,9 +176,11 @@ pub enum HostKill {
 
 /// The helper's process, shared by the supervisor and the console reader so either can kill it.
 ///
-/// Kills the group and reaps the helper on drop, so no early return leaves a helper or its VM running. The group
-/// is signalled only while the helper is unreaped (its pid then still names the helper, and the group cannot be
-/// reused); every reap goes through [`Reaper::poll_exit`] under the same lock, which records the status.
+/// Kills the group and reaps the helper on drop, polling for at most [`KILL_WAIT`], so no early return leaves a
+/// helper or its VM running and no drop hangs the runner on a helper that survived SIGKILL (review WR-03). The
+/// group is signalled only while the helper is unreaped (its pid then still names the helper, and the group
+/// cannot be reused); every reap goes through [`Reaper::poll_exit`] under the same lock, which records the
+/// status.
 struct Reaper {
     child: Child,
     exit: Option<ExitStatus>,
@@ -233,6 +235,32 @@ impl Reaper {
         Ok(self.exit)
     }
 
+    /// Kills the group and reaps the helper, re-sending the kill and polling [`Reaper::poll_exit`] every
+    /// [`POLL_INTERVAL`] for at most `wait`, then gives up.
+    ///
+    /// Bounded on purpose: a helper that outlives SIGKILL is stuck in the kernel (a Hypervisor.framework
+    /// teardown or an uninterruptible I/O), and a blocking `wait()` here would hang whichever thread dropped
+    /// the handle for as long as that takes, while holding the lock the console reader needs. The caller has
+    /// already reported such a helper as [`SuperviseError::Survived`]; the zombie, if it ever becomes one, is
+    /// reaped by the parent's own exit (review WR-03).
+    fn kill_and_reap(&mut self, wait: Duration) {
+        let until = Instant::now().checked_add(wait);
+        loop {
+            if self.exit.is_some() {
+                return;
+            }
+            self.kill().ok();
+            match self.poll_exit() {
+                Ok(Some(_)) | Err(_) => return,
+                Ok(None) => {}
+            }
+            if until.is_none_or(|until| Instant::now() >= until) {
+                return;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+    }
+
     /// The recorded exit as a [`HelperExit`].
     fn helper_exit(&self, status: ExitStatus) -> HelperExit {
         match (status.code(), status.signal()) {
@@ -250,11 +278,9 @@ impl Reaper {
 }
 
 impl Drop for Reaper {
+    /// Kills the group and reaps the helper, for at most [`KILL_WAIT`]; never a blocking `wait()`.
     fn drop(&mut self) {
-        if self.exit.is_none() {
-            self.kill().ok();
-            self.child.wait().ok();
-        }
+        self.kill_and_reap(KILL_WAIT);
     }
 }
 
@@ -423,15 +449,11 @@ impl Helper {
 
 impl Drop for Helper {
     /// Kills the helper's group and reaps the helper at once, so it does not linger as a zombie until the
-    /// console reader lets go of the shared process.
+    /// console reader lets go of the shared process. Bounded by [`KILL_WAIT`]: a helper that survives SIGKILL
+    /// has already been reported as [`SuperviseError::Survived`], and the drop must not hang the runner on it
+    /// (review WR-03).
     fn drop(&mut self) {
-        let mut reaper = lock(&self.reaper);
-        if reaper.exit.is_none() {
-            reaper.kill().ok();
-            if let Ok(status) = reaper.child.wait() {
-                reaper.exit = Some(status);
-            }
-        }
+        lock(&self.reaper).kill_and_reap(KILL_WAIT);
     }
 }
 
@@ -1167,6 +1189,22 @@ mod tests {
         let helper = Helper::spawn(&argv(&["/bin/sleep", "30"]), 1024)?;
         let pid = helper.pid();
         drop(helper);
+        assert_group_gone(pid)
+    }
+
+    #[test]
+    fn drop_is_bounded_and_reaps_a_killed_helper() -> TestResult {
+        // A helper that dies on SIGKILL is reaped within the bound; the drop returns long before KILL_WAIT. (A
+        // helper that survives SIGKILL cannot be made in a test; the bound is what this proves exists.)
+        let helper = Helper::spawn(
+            &argv(&["/bin/sh", "-c", "/bin/sleep 30 & exec /bin/sleep 30"]),
+            1024,
+        )?;
+        let pid = helper.pid();
+        let started = Instant::now();
+        drop(helper);
+        let took = started.elapsed();
+        assert!(took < super::KILL_WAIT, "the drop took {took:?}");
         assert_group_gone(pid)
     }
 
