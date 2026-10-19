@@ -19,12 +19,20 @@
 //! apart from a fault, as [`ReceiveOutcome::Incomplete`], so the supervisor can classify a PID 1 that died
 //! before finishing as `Crashed` from what it observed of the VM.
 //!
+//! **Which errors are the host's.** The receiver's peer on the Unix socket is the `minos-vmm` process, not the
+//! guest: the guest's bytes arrive through the VMM's vsock proxy. So a connection that ends with end-of-file
+//! carries whatever the guest sent (short or empty is the guest's fault), but a read that fails with an error
+//! (`ECONNRESET` when the VMM drops a proxy, as the pinned `msb_krun_devices` can under load, DIAG-01) is the
+//! VMM's doing and ends the stream as a host failure, `io::Error` from [`ChunkReceiver::stop_and_join`], which
+//! the backend maps to an infrastructure failure, never to a fault of the candidate (review WR-04). The
+//! receiver's listener closes with its thread, so PID 1's next connect fails and the guest ends on its own.
+//!
 //! [`Reason::ChunkProtocol`]: minos_core::outcome::Reason::ChunkProtocol
 
 use std::fmt;
 use std::io::{self, ErrorKind, Read};
 use std::os::fd::AsFd;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
@@ -171,8 +179,9 @@ impl ChunkReceiver {
     ///
     /// # Errors
     ///
-    /// An [`io::Error`] for a host failure: the listener could not be polled or accepted on, or the receiver's
-    /// thread panicked. Each is an infrastructure failure, never a candidate fault.
+    /// An [`io::Error`] for a host failure: the listener could not be polled or accepted on, a connection's read
+    /// failed on the host side (the peer is the VMM; see the module docs), or the receiver's thread panicked.
+    /// Each is an infrastructure failure, never a candidate fault.
     pub fn stop_and_join(mut self) -> io::Result<ReceiveResult> {
         self.stop.store(true, Ordering::Release);
         let handle = self
@@ -303,6 +312,7 @@ impl Receiver {
                 }
                 Err(error) => return Err(error),
             };
+            connection.set_nonblocking(true)?;
             let read = read_connection(&connection, self.deadline)?;
             self.stream.record(read);
             if self.stream.fault.is_some() {
@@ -326,19 +336,22 @@ fn readable(fd: &impl AsFd, timeout: Duration) -> io::Result<bool> {
     }
 }
 
-/// Reads one connection to its end, through at most [`READ_CAP`] bytes, within `deadline`.
+/// Reads one non-blocking connection to its end, through at most [`READ_CAP`] bytes, within `deadline`.
 ///
-/// The connection is read non-blocking and polled against one total deadline rather than with `SO_RCVTIMEO`,
-/// which is a per-read timeout a trickling peer can renew (Phase 2 decision 02-05). The inner result is the
-/// candidate's: the bytes, [`ChunkFault::Oversize`] for a connection over [`MAX_CHUNK_BYTES`], or
-/// [`ChunkFault::Length`] for one still open at its deadline, whose chunk did not arrive whole. A peer error ends
-/// the connection with the bytes already read. The outer error is the host's: the stream could not be made
-/// non-blocking or polled.
-fn read_connection(
-    connection: &UnixStream,
-    deadline: Duration,
-) -> io::Result<Result<Vec<u8>, ChunkFault>> {
-    connection.set_nonblocking(true)?;
+/// The connection is polled against one total deadline rather than read with `SO_RCVTIMEO`, which is a per-read
+/// timeout a trickling peer can renew (Phase 2 decision 02-05). The inner result is the candidate's: the bytes,
+/// [`ChunkFault::Oversize`] for a connection over [`MAX_CHUNK_BYTES`], or [`ChunkFault::Length`] for one still
+/// open at its deadline, whose chunk did not arrive whole. The outer error is the host's: the stream could not
+/// be polled, or a read failed with an error other than `WouldBlock` or `Interrupted`. That read error is the
+/// VMM's (the peer is `minos-vmm`, not the guest), so the bytes read before it are discarded rather than fed to
+/// the reassembler as a truncated chunk of the guest's (review WR-04).
+///
+/// Generic over the stream so a test can inject a reset; production passes the accepted `UnixStream`.
+fn read_connection<S>(connection: &S, deadline: Duration) -> io::Result<Result<Vec<u8>, ChunkFault>>
+where
+    S: AsFd,
+    for<'a> &'a S: Read,
+{
     let until = Instant::now()
         .checked_add(deadline)
         .ok_or_else(|| io::Error::other("the connection deadline overflows the clock"))?;
@@ -368,16 +381,25 @@ fn read_connection(
                 readable(connection, left)?;
             }
             Err(error) if error.kind() == ErrorKind::Interrupted => {}
-            Err(_) => return Ok(Ok(bytes)),
+            // The VMM, not the guest, broke the connection: a host failure, and the partial bytes are not the
+            // guest's chunk.
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("the VMM broke an output connection: {error}"),
+                ));
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::error::Error;
-    use std::io::{self, ErrorKind, Write};
+    use std::io::{self, ErrorKind, Read, Write};
     use std::net::Shutdown;
+    use std::os::fd::{AsFd, BorrowedFd};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
     use std::thread::{self, JoinHandle};
@@ -388,7 +410,7 @@ mod tests {
     };
     use tempfile::TempDir;
 
-    use super::{CONNECTION_DEADLINE, ChunkReceiver, ReceiveOutcome};
+    use super::{CONNECTION_DEADLINE, ChunkReceiver, ReceiveOutcome, read_connection};
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -586,6 +608,72 @@ mod tests {
             ReceiveOutcome::Fault(ChunkFault::Length | ChunkFault::Short)
         ));
         held.join().map_err(|_| "the holding thread panicked")?;
+        Ok(())
+    }
+
+    /// A stream whose first read delivers `served` bytes and whose next read fails with `kind`, as the VMM's
+    /// socket does when it drops a proxy mid-chunk. The fd is a real socket so `AsFd` is honest, but it is never
+    /// polled: no read returns `WouldBlock`.
+    struct Breaking {
+        socket: UnixStream,
+        served: Vec<u8>,
+        delivered: Cell<bool>,
+        kind: ErrorKind,
+    }
+
+    impl Read for &Breaking {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.delivered.replace(true) {
+                return Err(io::Error::from(self.kind));
+            }
+            let len = self.served.len().min(buf.len());
+            buf.get_mut(..len)
+                .zip(self.served.get(..len))
+                .map_or(Ok(0), |(dest, src)| {
+                    dest.copy_from_slice(src);
+                    Ok(len)
+                })
+        }
+    }
+
+    impl AsFd for Breaking {
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.socket.as_fd()
+        }
+    }
+
+    #[test]
+    fn a_vmm_side_read_error_is_a_host_error_not_a_fault() -> TestResult {
+        // Ten bytes of a chunk arrive, then the VMM resets the connection. Before review WR-04 the ten bytes
+        // went to the reassembler as a truncated chunk (ChunkFault::Short), blaming the candidate for the VMM.
+        let (socket, _peer) = UnixStream::pair()?;
+        for kind in [
+            ErrorKind::ConnectionReset,
+            ErrorKind::BrokenPipe,
+            ErrorKind::Other,
+        ] {
+            let breaking = Breaking {
+                socket: socket.try_clone()?,
+                served: vec![0x4d; 10],
+                delivered: Cell::new(false),
+                kind,
+            };
+            match read_connection(&breaking, CONNECTION_DEADLINE) {
+                Err(error) => assert_eq!(error.kind(), kind, "{kind:?}"),
+                Ok(inner) => {
+                    return Err(format!("{kind:?} was read as the guest's: {inner:?}").into());
+                }
+            }
+        }
+        // And the same partial bytes ended by a clean end-of-file are still the guest's short chunk.
+        let (mut writer, reader) = UnixStream::pair()?;
+        reader.set_nonblocking(true)?;
+        writer.write_all(&[0x4d; 10])?;
+        drop(writer);
+        assert_eq!(
+            read_connection(&reader, CONNECTION_DEADLINE)?,
+            Ok(vec![0x4d; 10])
+        );
         Ok(())
     }
 
