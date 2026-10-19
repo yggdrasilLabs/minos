@@ -539,9 +539,11 @@ fn cli_wiring() -> TestResult {
     Ok(())
 }
 
-/// D-12 with Docker: the same Dockerfile built twice gives the same image digest, even though its `RUN` step
-/// stamps a file with the wall-clock time; the lock holds every D-11 field; the context holds no judge data and
-/// no secret-pattern file.
+/// D-12 with Docker: the same Dockerfile built twice gives the same image digest; the lock holds every D-11
+/// field; the context holds no judge data and no secret-pattern file. The second build reuses `BuildKit`'s layer
+/// cache, so its `RUN` step's wall-clock stamp is the first build's; a `--no-cache` rebuild writes a new stamp and so
+/// a new image (05-EVIDENCE.md 05-18 env build). The packer's mtime zeroing is proven by `minos-backend-krun`'s
+/// `rootfs_tar_mtimes_do_not_change_the_image`.
 #[test]
 #[ignore = "needs Docker Desktop running and MINOS_GUEST; run in 05-18"]
 fn docker_env_build_reproduces() -> TestResult {
@@ -558,6 +560,12 @@ fn docker_env_build_reproduces() -> TestResult {
     let first = build(&fixture, &builder, false)?;
     let entry = lock_entry(&fixture)?;
     let second = build(&fixture, &builder, false)?;
+    println!("first image:  {}", first.image());
+    println!("second image: {}", second.image());
+    println!(
+        "minos.lock:\n{}",
+        fs::read_to_string(fixture.project.join("minos.lock"))?
+    );
 
     assert_eq!(first.image(), second.image(), "the image did not reproduce");
     assert!(first.lock_written());

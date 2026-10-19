@@ -1184,3 +1184,243 @@ ok
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.19s
 
 ```
+
+## 05-18 env build
+
+`minos env build` against the real Docker builder (KRUN-09, CLI-02, D-09 to D-12), at HEAD 47293e4 plus the
+uncommitted 05-18 Task 2 edit to `crates/minos-cli/tests/env_build.rs` (the ignored test prints both digests and the
+lock), macOS 27.0.1, rustc 1.97.1, on 2026-10-19. Docker Desktop was started by the user (Task 1). `$S` is the
+session scratchpad `/private/tmp/claude-501/-Users-seanmcauliffe-Repos-minos/5ea70c04-77ce-4b1d-a148-31fff4f6674e/scratchpad`,
+outside the repository; the CLI runs use a copy of the test's fixture project at `$S/fixture` (T-05-18-04).
+
+A2 fallback: **not needed.** `docker buildx build ... -f minos.Dockerfile -` took the snapshot tarball on stdin as
+its context, with `-f` relative to the tarball's root, on the first run; `DockerBuildx::build_argv` is unchanged.
+
+### Docker daemon
+
+Command: `docker info --format '{{.ServerVersion}}'`
+
+Exit code: 0
+
+```text
+29.6.1
+```
+
+Command: `docker buildx version`
+
+Exit code: 0
+
+```text
+github.com/docker/buildx v0.35.0-desktop.2 b554ce1decd8b509893b1e7c6227eabfb923d094
+```
+
+### Guest build
+
+Command: `cargo build -p minos-guest --release --target aarch64-unknown-linux-musl`
+
+Exit code: 0
+
+Command: `file target/aarch64-unknown-linux-musl/release/minos-guest`
+
+Exit code: 0
+
+```text
+target/aarch64-unknown-linux-musl/release/minos-guest: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, not stripped
+```
+
+### Reproducibility test (D-12)
+
+Command: `MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest cargo test -p minos-cli --test env_build docker_env_build_reproduces -- --ignored --nocapture --test-threads=1`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running tests/env_build.rs (target/debug/deps/env_build-e701da1cb81a0218)
+
+running 1 test
+test docker_env_build_reproduces ... first image:  41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+second image: 41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+minos.lock:
+v = 1
+
+[[image]]
+backend = "krun"
+arch = "arm64"
+root_image = "41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b"
+dockerfile_sha256 = "0181ab39fcf9a471656dc2fa53d78b19e45e045e98d57022ab41168159050d34"
+base_images = ["docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"]
+guest_sha256 = "b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65"
+
+[image.builder]
+name = "docker-buildx"
+version = "v0.35.0-desktop.2"
+
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 4.98s
+```
+
+The two image digests are equal (`41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b`). The test also
+asserted that the lock entry carries every D-11 field (`root_image`, `dockerfile_sha256`, `base_images`,
+`guest_sha256`, `builder`), that the first build wrote the lock and the second did not, and that neither build context
+held a `judge/` path or the `.env` file (T-05-18-01). The builder's tars are not compared by this test (D-12).
+
+### CLI wiring on the scratch fixture
+
+Command: `cargo build -p minos-cli`
+
+Exit code: 0
+
+Commands run in `$S/fixture` with `M=~/Repos/minos/target/debug/minos` (the transcript prints each command after `$`
+and its exit code after it):
+
+```text
+$ minos env build --allow-dirty   (run 1)
+root image: sha256 41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+minos.lock: written
+packed: 86 files, 99 directories, 335 symlinks; /init sha256 b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65
+base image: docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+exit code: 0
+5faadeef914e994c97d50b58073c67e05c3aa4b4ead11f2245e7542c7f905bcd  minos.lock
+v = 1
+
+[[image]]
+backend = "krun"
+arch = "arm64"
+root_image = "41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b"
+dockerfile_sha256 = "0181ab39fcf9a471656dc2fa53d78b19e45e045e98d57022ab41168159050d34"
+base_images = ["docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"]
+guest_sha256 = "b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65"
+
+[image.builder]
+name = "docker-buildx"
+version = "v0.35.0-desktop.2"
+$ minos env build --allow-dirty   (run 2)
+root image: sha256 41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+minos.lock: unchanged
+packed: 86 files, 99 directories, 335 symlinks; /init sha256 b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65
+base image: docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+exit code: 0
+5faadeef914e994c97d50b58073c67e05c3aa4b4ead11f2245e7542c7f905bcd  minos.lock
+```
+
+The second run printed `minos.lock: unchanged`, and the lock's SHA-256 is the same before and after it. The image is
+stored under its digest with mode 0600 in the 0700 store, and the stored bytes hash to the digest:
+
+```text
+$ ls -l .minos/blobs/sha256/41/ ; shasum -a 256 of the blob
+total 9048
+-rw-------@ 1 seanmcauliffe  wheel  4632576 Oct 19 17:08 cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b  .minos/blobs/sha256/41/cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+$ stat -f '%Sp' .minos
+drwx------
+$ printf 'RUN echo minos-05-18 > /usr/local/share/minos-fixture/edit
+' >> minos.Dockerfile
+FROM docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+COPY program.md /usr/local/share/minos-fixture/program.md
+RUN date > /usr/local/share/minos-fixture/stamp
+RUN echo minos-05-18 > /usr/local/share/minos-fixture/edit
+$ minos env build --allow-dirty   (run 3, Dockerfile edited, no --update)
+minos: error: the built root image differs from minos.lock
+  locked: sha256 41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+  built:  sha256 6848b2e1f167aa555d573f75d8a44bb76df143827cf45b61c6bb0a050ed776f3
+rerun with --update to accept the new image
+exit code: 1
+5faadeef914e994c97d50b58073c67e05c3aa4b4ead11f2245e7542c7f905bcd  minos.lock
+$ minos env build --allow-dirty --update   (run 4)
+root image: sha256 6848b2e1f167aa555d573f75d8a44bb76df143827cf45b61c6bb0a050ed776f3
+minos.lock: written
+packed: 87 files, 99 directories, 335 symlinks; /init sha256 b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65
+base image: docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+exit code: 0
+5149dc03fde163dd32de0ece0058847dfb53d29f039271d2352dc5e014d33e86  minos.lock
+v = 1
+
+[[image]]
+backend = "krun"
+arch = "arm64"
+root_image = "6848b2e1f167aa555d573f75d8a44bb76df143827cf45b61c6bb0a050ed776f3"
+dockerfile_sha256 = "cbe6c7e19c06ed1d80d47d07a8c1241129b7b0f2a7521d33980b0690b34864c7"
+base_images = ["docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"]
+guest_sha256 = "b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65"
+
+[image.builder]
+name = "docker-buildx"
+version = "v0.35.0-desktop.2"
+```
+
+Without `--update` the changed image is refused with exit code 1, both digests printed, and the lock's SHA-256
+unchanged (D-10). With `--update` it exits 0 and rewrites the lock with the new `root_image` and `dockerfile_sha256`.
+
+### What the equal digests do and do not prove
+
+The fixture's `RUN date > .../stamp` writes the wall-clock time into a file's contents, not only its mtime. The
+control below runs the builder argv directly on the same two-file context (`program.md` and the original three-line
+`minos.Dockerfile`), twice through the layer cache and twice with `--no-cache`, in `$S/cachectl`:
+
+```text
+$ docker buildx build --platform linux/arm64 --provenance=false --sbom=false  --output type=tar,dest=- -f minos.Dockerfile - < context.tar > out/cached-1.tar
+exit code: 0
+CACHED lines in stderr: 1
+$ docker buildx build --platform linux/arm64 --provenance=false --sbom=false  --output type=tar,dest=- -f minos.Dockerfile - < context.tar > out/cached-2.tar
+exit code: 0
+CACHED lines in stderr: 4
+$ docker buildx build --platform linux/arm64 --provenance=false --sbom=false --no-cache --output type=tar,dest=- -f minos.Dockerfile - < context.tar > out/nocache-1.tar
+exit code: 0
+CACHED lines in stderr: 3
+$ docker buildx build --platform linux/arm64 --provenance=false --sbom=false --no-cache --output type=tar,dest=- -f minos.Dockerfile - < context.tar > out/nocache-2.tar
+exit code: 0
+CACHED lines in stderr: 3
+$ shasum -a 256 out/*.tar
+9f1a0e33d3f0f707b68259f42629c0e29ee66cb9b93ae170c117336ba0283552  out/cached-1.tar
+9f1a0e33d3f0f707b68259f42629c0e29ee66cb9b93ae170c117336ba0283552  out/cached-2.tar
+c8999ba3fdcb66f88e6fe0f147ee0c048626193c2cdac3707e4cc9003d04a157  out/nocache-1.tar
+be39ea1560997a62c43e24478cbf482de6c8946bdd290bbba1196b4a286781d8  out/nocache-2.tar
+$ tar -xOf out/cached-1.tar usr/local/share/minos-fixture/stamp
+Mon Oct 19 21:08:27 UTC 2026
+$ tar -xOf out/cached-2.tar usr/local/share/minos-fixture/stamp
+Mon Oct 19 21:08:27 UTC 2026
+$ tar -xOf out/nocache-1.tar usr/local/share/minos-fixture/stamp
+Mon Oct 19 21:08:27 UTC 2026
+$ tar -xOf out/nocache-2.tar usr/local/share/minos-fixture/stamp
+Mon Oct 19 21:08:28 UTC 2026
+```
+
+The cached builds give byte-identical tars with the same stamp, so the equal image digests above come from
+BuildKit's layer cache, not from the packer. The `--no-cache` builds give different tars, and the stamp's contents
+changed between them (21:08:27, 21:08:28), so a `--no-cache` rebuild of this Dockerfile yields a different image.
+`cached-1` and `nocache-1` hold the same stamp, by landing in the same second, yet their tars differ. A Python
+`tarfile` comparison of the two (run with `python3 -I` in `$S/cachectl`, comparing each entry's type, mode, uid, gid,
+link target, content SHA-256, and mtime) shows that only mtimes differ:
+
+Exit code: 0
+
+```text
+entries: 517 517 same names: True
+entries differing in type, mode, owner, link target, or content: []
+entries differing in mtime only: ['etc', 'usr/local/share', 'usr/local/share/minos-fixture', 'usr/local/share/minos-fixture/stamp']
+```
+
+That is the metadata the packer zeroes. In general no packer can make content that a `RUN` step computes from the
+clock reproduce. What the packer guarantees is that
+builder tars differing only in metadata pack to the same image. Phase 2 showed this against the real builder with
+`--no-cache` and a fixed-content `RUN` (02-SPIKE-EVIDENCE.md RI-04: tars differ, images match), and the production
+packer's unit test proves it for tars that differ only in mtimes:
+
+Command: `cargo test -p minos-backend-krun --lib rootfs_tar_mtimes_do_not_change_the_image`
+
+Exit code: 0
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.73s
+     Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-31cf7fc38794285f)
+
+running 1 test
+test rootfs::tests::rootfs_tar_mtimes_do_not_change_the_image ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 104 filtered out; finished in 0.01s
+```
+
+So the claim recorded in CLAUDE.md (D-12) is: the packed SquashFS image reproduces when the builder's rootfs
+contents reproduce, whatever the tar metadata; the builder's tar is not claimed to reproduce.
