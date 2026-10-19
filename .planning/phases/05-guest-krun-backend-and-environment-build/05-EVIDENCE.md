@@ -1424,3 +1424,503 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 104 filtered out; fi
 
 So the claim recorded in CLAUDE.md (D-12) is: the packed SquashFS image reproduces when the builder's rootfs
 contents reproduce, whatever the tar metadata; the builder's tar is not claimed to reproduce.
+
+## Final gate
+
+Run on 2026-10-19 from the repository root against one final build at HEAD `4cc176a` (docs(05-20): reconcile CLAUDE.md with the shipped Phase 5 code; no code changed in this plan), in this order, with `TRYBUILD` unset. `rustc --version`: rustc 1.97.1 (8bab26f4f 2026-07-14); `sw_vers -productVersion`: 27.0.1; Docker daemon 29.6.1 (`docker info --format '{{.ServerVersion}}'`, exit 0). Every step exited 0. Output is verbatim; the only edit is the home directory written as `~`.
+
+### The six gate commands
+
+1. `cargo fmt --all --check`: exit 0, no output.
+
+2. `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+```
+
+3. `cargo test --workspace`: exit 0. 63 result lines; summed over them, 1139 passed, 0 failed, 19 ignored. Each binary or doc-test run and its result line, verbatim:
+
+```text
+Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-de667b6d468a05d5)
+  test result: ok. 103 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 1.01s
+Running tests/exit.rs (target/debug/deps/exit-89797bbe80950b05)
+  test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/vm.rs (target/debug/deps/vm-e5c499f08fd31caf)
+  test result: ok. 0 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_cli-91159a87e1164b69)
+  test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+Running unittests src/main.rs (target/debug/deps/minos-b5389aa8bbbd812d)
+  test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/env_build.rs (target/debug/deps/env_build-8fb091108c333e81)
+  test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.29s
+Running tests/host_cmd.rs (target/debug/deps/host_cmd-f992bd4a302a1362)
+  test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.60s
+Running unittests src/lib.rs (target/debug/deps/minos_core-15efc0247bb89ee9)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+Running tests/blob_hasher.rs (target/debug/deps/blob_hasher-404aa5f8c53c3c0e)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.20s
+Running tests/breaker.rs (target/debug/deps/breaker-a65177c074fe7c4f)
+  test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+Running tests/chunk.rs (target/debug/deps/chunk-171fba7cfe1d6412)
+  test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.43s
+Running tests/golden_ids.rs (target/debug/deps/golden_ids-f39770f0b885d95d)
+  test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Running tests/golden_wire.rs (target/debug/deps/golden_wire-8653368d6a99caa8)
+  test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Running tests/guest_wire.rs (target/debug/deps/guest_wire-51c78d87bb923b94)
+  test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+Running tests/lock.rs (target/debug/deps/lock-19d347079632309b)
+  test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/manifest.rs (target/debug/deps/manifest-a5565b731af1e4aa)
+  test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/money.rs (target/debug/deps/money-f530f79b61383759)
+  test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+Running tests/prop_apply.rs (target/debug/deps/prop_apply-5b70179c09232b5e)
+  test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+Running tests/prop_diff.rs (target/debug/deps/prop_diff-bdf434a540fc4a97)
+  test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+Running tests/prop_fold.rs (target/debug/deps/prop_fold-ff32a195a2b6776d)
+  test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+Running tests/prop_keys.rs (target/debug/deps/prop_keys-dbee27f417c8b69b)
+  test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+Running tests/prop_metric.rs (target/debug/deps/prop_metric-7848825970330f01)
+  test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+Running tests/prop_path.rs (target/debug/deps/prop_path-2b3958736776e24d)
+  test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Running tests/prop_policy.rs (target/debug/deps/prop_policy-87ff2a4a298fa784)
+  test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+Running tests/render.rs (target/debug/deps/render-c8dc92c5bb3c0c21)
+  test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+Running tests/report.rs (target/debug/deps/report-da118aa3a96756e6)
+  test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+Running tests/route.rs (target/debug/deps/route-e11fa91934e0004f)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/sweep.rs (target/debug/deps/sweep-1509ad9dfccf5702)
+  test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+Running unittests src/lib.rs (target/debug/deps/minos_guest-ff9cca34304ea5ea)
+  test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+Running unittests src/main.rs (target/debug/deps/minos_guest-2d97dc2b4d1632e5)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/bin/minos-probe.rs (target/debug/deps/minos_probe-5627d13d51fedf66)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_loop-2ba942a298f65ca1)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_propose-b8c8b45c57cfff05)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_runner-dfbc0be15af3b718)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_sandbox-4b7e5db11ee5745b)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/backend.rs (target/debug/deps/backend-abb00b226a85bc2a)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/blob_source.rs (target/debug/deps/blob_source-d424f0dbb56fc55a)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/compile_fail.rs (target/debug/deps/compile_fail-0c7906e0638ae0d5)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+Running tests/output_tar.rs (target/debug/deps/output_tar-adbd864b297ee011)
+  test result: ok. 35 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.54s
+Running tests/preflight.rs (target/debug/deps/preflight-8a0a614f85e9d937)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/spec.rs (target/debug/deps/spec-939ba99885943f40)
+  test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Running tests/untrusted.rs (target/debug/deps/untrusted-5b1c00c016a9cea1)
+  test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+Running unittests src/lib.rs (target/debug/deps/minos_source-5429adc68d00303c)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Running tests/clean.rs (target/debug/deps/clean-4d8227224d71bbcc)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+Running tests/denylist.rs (target/debug/deps/denylist-9d6bd90c60079a07)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/pack.rs (target/debug/deps/pack-c81bffdb36d1cb5a)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/refusals.rs (target/debug/deps/refusals-ecc47c6e3342518b)
+  test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s
+Running tests/scan.rs (target/debug/deps/scan-72ef2660ffb8f8c1)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running unittests src/lib.rs (target/debug/deps/minos_store-f91087a99a88b128)
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/contract.rs (target/debug/deps/contract-0ccd6f1ff8a87df3)
+  test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.71s
+Running tests/file_blobs.rs (target/debug/deps/file_blobs-7940e65c52fed831)
+  test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+Running tests/file_ledger.rs (target/debug/deps/file_ledger-498662032decf0ee)
+  test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.29s
+Running unittests src/main.rs (target/debug/deps/minos_vmm-04be6e1974430353)
+  test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Doc-tests minos_backend_krun
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_cli
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_core
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_guest
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_loop
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_propose
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_runner
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_sandbox
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_source
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_store
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+The ignored tests are the VM suites (`exit` 4, `vm` 10), the Docker test, and hand-run fixtures; the VM suites and the Docker test run below.
+
+4. `cargo deny check`: exit 0. Last line and every warning header:
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+The seven `duplicate` warnings predate Phase 5 (multiple-versions stays `warn`, Phase 1).
+
+5. `cargo doc --workspace --no-deps`: exit 0, no warning or error line.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+   Generated ~/Repos/minos/target/doc/minos_backend_krun/index.html and 12 other files
+```
+
+6. `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings`: exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+```
+
+### C-01 and C-02
+
+C-01, `for f in crates/*/Cargo.toml; do grep -A1 -xF '[lints]' "$f" | grep -qxF 'workspace = true' && echo "ok $f" || echo "MISSING $f"; done`: eleven `ok` lines, no `MISSING` line.
+
+```text
+ok crates/minos-backend-krun/Cargo.toml
+ok crates/minos-cli/Cargo.toml
+ok crates/minos-core/Cargo.toml
+ok crates/minos-guest/Cargo.toml
+ok crates/minos-loop/Cargo.toml
+ok crates/minos-propose/Cargo.toml
+ok crates/minos-runner/Cargo.toml
+ok crates/minos-sandbox/Cargo.toml
+ok crates/minos-source/Cargo.toml
+ok crates/minos-store/Cargo.toml
+ok crates/minos-vmm/Cargo.toml
+```
+
+C-02, `grep -rnE '#!?\[allow\(' crates --include='*.rs'`: printed nothing, grep exit 1 (0 bytes of output).
+
+### Build, sign, guest
+
+`cargo build -p minos-vmm -p minos-cli`: exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+```
+
+`cargo build -p minos-guest --release --target aarch64-unknown-linux-musl`: exit 0.
+
+```text
+    Finished `release` profile [optimized] target(s) in 0.05s
+```
+
+`cargo test -p minos-backend-krun --test vm --test exit --no-run` (built before signing, so no VM run below relinks the helper): exit 0.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+  Executable tests/exit.rs (target/debug/deps/exit-c99de225879ade1b)
+  Executable tests/vm.rs (target/debug/deps/vm-69052a93a1f98219)
+```
+
+`codesign --force --sign - --options runtime --entitlements crates/minos-vmm/minos-vmm.entitlements target/debug/minos-vmm`: exit 0.
+
+```text
+target/debug/minos-vmm: replacing existing signature
+```
+
+`codesign --display --entitlements - target/debug/minos-vmm`: exit 0. Re-checked before each VM run below (two `[Key]` lines each time).
+
+```text
+Executable=~/Repos/minos/target/debug/minos-vmm
+[Dict]
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.hypervisor
+	[Value]
+		[Bool] true
+```
+
+### `minos host doctor` (CLI-03)
+
+`target/debug/minos host doctor`: exit 0, no refusal.
+
+```text
+binaries (fixed locations; no configuration file or environment variable):
+  found     ~/Repos/minos/target/debug/minos-vmm  a regular file
+  rejected  ~/Repos/minos/target/debug/minos-guest  not an ELF file (the macOS build of minos-guest is Mach-O)
+  found     ~/Repos/minos/target/aarch64-unknown-linux-musl/release/minos-guest  a static AArch64 ELF
+  kernel    /opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib  checked below
+
+checks:
+ok       helper present  a regular file of 18009536 bytes
+  checked: ~/Repos/minos/target/debug/minos-vmm
+ok       helper entitlements  both entitlements are set to true
+  checked: ~/Repos/minos/target/debug/minos-vmm
+  checked: /usr/bin/codesign
+ok       guest kernel  sha256 59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217
+  checked: /opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib
+ok       hypervisor  kern.hv_support 1, hw.ncpu 16, hw.memsize 51539607552; largest VM 8 vCPUs and 16384 MiB, leaving half the host's memory to the host
+  checked: /usr/sbin/sysctl
+ok       job socket path  41 of at most 103 bytes
+  checked: /private/tmp/minos-501/mnsXXXXXXXX/o.sock
+ok       sandbox-exec present  a regular file
+  checked: /usr/bin/sandbox-exec
+ok       Seatbelt denies network  the control connected; under the profile nc exited 1 and the listener accepted nothing: no stderr
+  checked: /usr/bin/sandbox-exec
+  checked: /usr/bin/nc
+  checked: /bin/cat
+ok       Seatbelt denies unlisted files  the listed file read back; the unlisted read exited 1: cat: /private/tmp/mnpIc8Wm3r9/unlisted: Operation not permitted
+  checked: /usr/bin/sandbox-exec
+  checked: /usr/bin/nc
+  checked: /bin/cat
+ok       guest binary  a static aarch64 ELF of 1488864 bytes
+  checked: ~/Repos/minos/target/aarch64-unknown-linux-musl/release/minos-guest
+
+confinement: hardware, seatbelt, rlimits
+dedicated user: missing (deferred, reduced hardening)
+
+job sweep: /private/tmp/minos-501
+  no job directories left over
+builder: docker buildx v0.35.0-desktop.2, daemon 29.6.1 (/Applications/Docker.app/Contents/Resources/bin/docker)
+
+result: every check passed
+```
+
+The `rejected` line is the locator skipping the Mach-O `target/debug/minos-guest` before it finds the musl build; it is not a refusal.
+
+### VM runs
+
+Environment for every VM run: `MINOS_VMM=$(pwd)/target/debug/minos-vmm MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest MINOS_KRUNFW=/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib`, plus `MINOS_EXIT_CANARY=$(uuidgen)` for `--test exit`. `MINOS_EXIT_HOST_IP` was unset, so the LAN target of `exit_egress` did not run (the test says so).
+
+Fast smoke first, `cargo test -p minos-backend-krun --test exit -- --ignored --exact exit_env --nocapture --test-threads=1`: exit 0.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/exit.rs (target/debug/deps/exit-c99de225879ade1b)
+
+running 1 test
+test exit_env ... == candidate: ended Exited after 527.558792ms
+== out/env.json: {"cmdline":"reboot=k panic=-1 panic_print=0 nomodule console=hvc0 rootfstype=virtiofs rw quiet no-kvmapf rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0 root=/dev/root init=/init root=/dev/vda      KRUN_BOOT_START_NS=1792445288058807000  --","cwd":"/scratch/src","egid":64000,"euid":64000,"gid":64000,"groups":[],"limits":["Max cpu time              61                   61                   seconds   ","Max file size             1073741824           1073741824           bytes     ","Max core file size        0                    0                    bytes     ","Max processes             512                  512                  processes ","Max open files            4096                 4096                 files     ","Max address space         805306368            805306368            bytes     "],"uid":64000,"vars":{"HOME":"/scratch/home","LANG":"C","PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","TMPDIR":"/tmp"}}
+== the canary appears nowhere in env.json
+== the host HOME appears nowhere in env.json
+== the host USER appears nowhere in env.json
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 1.40s
+```
+
+Functional suite, `cargo test -p minos-backend-krun --test vm -- --ignored --nocapture --test-threads=1`: exit 0, 10 passed.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/vm.rs (target/debug/deps/vm-69052a93a1f98219)
+
+running 10 tests
+test apply_mismatch_is_rejected_and_runs_nothing ... == candidate: ended Exited after 366.683083ms
+ok
+test candidate_output_never_carries_a_scorecard ... == candidate: ended Exited after 372.074625ms
+== out/w.json: {"inside":[{"ok":true,"os_error":null,"target":"/tmp/minos-probe-write"},{"ok":true,"os_error":null,"target":"/out/minos-probe-write"}],"outside":[{"ok":false,"os_error":30,"target":"/minos-probe-write"},{"ok":false,"os_error":30,"target":"/etc/minos-probe-write"},{"ok":false,"os_error":13,"target":"/root/minos-probe-write"},{"ok":false,"os_error":30,"target":"/usr/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/judge/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/candidate/minos-probe-write"}],"reads":[{"ok":false,"os_error":2,"target":"/proc/1/environ"},{"ok":false,"os_error":2,"target":"/dev/vdb"}]}
+ok
+test experiment_applies_diff_and_runs_as_candidate_uid ... == candidate: ended Exited after 381.222459ms
+== out/build.json: {"cmdline":"reboot=k panic=-1 panic_print=0 nomodule console=hvc0 rootfstype=virtiofs rw quiet no-kvmapf rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0 root=/dev/root init=/init root=/dev/vda      KRUN_BOOT_START_NS=1792445308619726000  --","cwd":"/scratch/src","egid":64000,"euid":64000,"gid":64000,"groups":[],"limits":["Max cpu time              61                   61                   seconds   ","Max file size             1073741824           1073741824           bytes     ","Max core file size        0                    0                    bytes     ","Max processes             512                  512                  processes ","Max open files            4096                 4096                 files     ","Max address space         805306368            805306368            bytes     "],"uid":64000,"vars":{"HOME":"/scratch/home","LANG":"C","PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","TMPDIR":"/tmp"}}
+== out/run.json: {"exists":true,"path":"/scratch/src/src/value.txt"}
+ok
+test judge_role_returns_a_scorecard ... == judge: ended Exited after 365.492834ms
+ok
+test output_16_mib_is_reassembled ... == candidate: ended Exited after 692.4715ms
+== output status Packed { files: 2, content_bytes: 16000000 }
+== 16 MiB output: 2 files, 16000000 content bytes, launch elapsed 692.4715ms
+ok
+test output_over_cap_is_refused_by_the_guest ... == candidate: ended Exited after 376.074166ms
+ok
+test over_budget_candidates_are_stopped_in_the_vm ... == candidate: ended Exited after 486.658459ms
+== out/a.json: {"allocated_mib":764,"error":"allocation refused","requested_mib":832}
+== RLIMIT_AS allowance 768 MiB: the probe allocated 764 of 832 MiB
+== candidate: ended Exited after 360.986958ms
+== out/s.json: {"os_error":11,"requested":2000,"started":511}
+== RLIMIT_NPROC 512: the probe started 511 of 2000 children
+== candidate: ended Exited after 442.729ms
+== out/f.json: {"bytes_written":134213632,"os_error":28,"path":"/scratch/tmp/minos-probe-fill"}
+== scratch 128 MiB: the probe wrote 134213632 bytes before a write failed
+ok
+test stage_timeout_is_reported_by_the_guest ... == candidate: ended Exited after 2.365203667s
+== a 2 s run budget: the launch took 2.365203667s
+ok
+test two_sequential_experiments_share_no_build_output ... == candidate: ended Exited after 346.9165ms
+== out/m.json: {"exists":true,"path":"/scratch/src/target/marker"}
+== candidate: ended Exited after 346.323792ms
+== out/m.json: {"exists":false,"path":"/scratch/src/target/marker"}
+ok
+test writes_outside_scratch_fail ... == candidate: ended Exited after 365.10775ms
+== out/w.json: {"inside":[{"ok":true,"os_error":null,"target":"/tmp/minos-probe-write"},{"ok":true,"os_error":null,"target":"/out/minos-probe-write"}],"outside":[{"ok":false,"os_error":30,"target":"/minos-probe-write"},{"ok":false,"os_error":30,"target":"/etc/minos-probe-write"},{"ok":false,"os_error":13,"target":"/root/minos-probe-write"},{"ok":false,"os_error":30,"target":"/usr/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/judge/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/candidate/minos-probe-write"}],"reads":[{"ok":false,"os_error":2,"target":"/proc/1/environ"},{"ok":false,"os_error":2,"target":"/dev/vdb"}]}
+ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.18s
+```
+
+Exit suite, `cargo test -p minos-backend-krun --test exit -- --ignored --nocapture --test-threads=1`: exit 0, 4 passed.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/exit.rs (target/debug/deps/exit-c99de225879ade1b)
+
+running 4 tests
+test exit_egress ... == LAN target: not run (MINOS_EXIT_HOST_IP is unset)
+== candidate: ended Exited after 346.92575ms
+== out/egress.json: {"attempts":[{"ok":false,"os_error":101,"target":"127.0.0.1:59734"},{"ok":false,"os_error":99,"target":"[::1]:59735"},{"ok":false,"os_error":101,"target":"1.1.1.1:443"},{"ok":false,"os_error":101,"target":"8.8.8.8:53"},{"ok":false,"os_error":99,"target":"[2606:4700:4700::1111]:443"}],"net_ifaces":["lo"],"virtio_devices":[{"device":"0x0004","name":"virtio0"},{"device":"0x0003","name":"virtio1"},{"device":"0x0002","name":"virtio2"},{"device":"0x0002","name":"virtio3"},{"device":"0x0013","name":"virtio4"},{"device":"0x4d47","name":"virtio5"}]}
+== connect 127.0.0.1:59734: connected false, errno Some(101)
+== connect [::1]:59735: connected false, errno Some(99)
+== connect 1.1.1.1:443: connected false, errno Some(101)
+== connect 8.8.8.8:53: connected false, errno Some(101)
+== connect [2606:4700:4700::1111]:443: connected false, errno Some(99)
+== 127.0.0.1 canary: no connection arrived
+== [::1] canary: no connection arrived
+== interfaces: ["lo"]
+== virtio virtio0: 0x0004
+== virtio virtio1: 0x0003
+== virtio virtio2: 0x0002
+== virtio virtio3: 0x0002
+== virtio virtio4: 0x0013
+== virtio virtio5: 0x4d47
+ok
+test exit_env ... == candidate: ended Exited after 361.907542ms
+== out/env.json: {"cmdline":"reboot=k panic=-1 panic_print=0 nomodule console=hvc0 rootfstype=virtiofs rw quiet no-kvmapf rootfstype=squashfs ro ignore_loglevel dummy.numdummies=0 root=/dev/root init=/init root=/dev/vda      KRUN_BOOT_START_NS=1792445331186840000  --","cwd":"/scratch/src","egid":64000,"euid":64000,"gid":64000,"groups":[],"limits":["Max cpu time              61                   61                   seconds   ","Max file size             1073741824           1073741824           bytes     ","Max core file size        0                    0                    bytes     ","Max processes             512                  512                  processes ","Max open files            4096                 4096                 files     ","Max address space         805306368            805306368            bytes     "],"uid":64000,"vars":{"HOME":"/scratch/home","LANG":"C","PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","TMPDIR":"/tmp"}}
+== the canary appears nowhere in env.json
+== the host HOME appears nowhere in env.json
+== the host USER appears nowhere in env.json
+ok
+test exit_forge ... == candidate: ended Exited after 349.163583ms
+== out/w.json: {"inside":[{"ok":true,"os_error":null,"target":"/tmp/minos-probe-write"},{"ok":true,"os_error":null,"target":"/out/minos-probe-write"}],"outside":[{"ok":false,"os_error":30,"target":"/minos-probe-write"},{"ok":false,"os_error":30,"target":"/etc/minos-probe-write"},{"ok":false,"os_error":13,"target":"/root/minos-probe-write"},{"ok":false,"os_error":30,"target":"/usr/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/judge/minos-probe-write"},{"ok":false,"os_error":2,"target":"/scratch/candidate/minos-probe-write"}],"reads":[{"ok":false,"os_error":2,"target":"/proc/1/environ"},{"ok":false,"os_error":2,"target":"/dev/vdb"}]}
+== open /proc/1/environ: opened false, errno Some(2)
+== open /dev/vdb: opened false, errno Some(2)
+== candidate: ended ChunkProtocol after 368.589291ms
+== candidate: console tail
+r interface
+[    0.023278] rtc-pl031 a001000.rtc: registered as rtc0
+[    0.023331] rtc-pl031 a001000.rtc: setting system clock to 2026-10-19T21:28:52 UTC (1792445332)
+[    0.023410] i2c_dev: i2c /dev entries driver
+[    0.023472] pps_ldisc: PPS line discipline registered
+[    0.023712] NET: Registered PF_INET6 protocol family
+[    0.023828] Segment Routing with IPv6
+[    0.023870] In-situ OAM (IOAM) with IPv6
+[    0.023923] NET: Registered PF_PACKET protocol family
+[    0.023977] Bridge firewalling registered
+[    0.024016] can: controller area network core
+[    0.024074] NET: Registered PF_CAN protocol family
+[    0.024128] can: raw protocol
+[    0.024176] can: broadcast manager protocol
+[    0.024241] can: netlink gateway - max_hops=1
+[    0.024346] NET: Registered PF_KCM protocol family
+[    0.024481] NET: Registered PF_VSOCK protocol family
+[    0.024900] NET: Registered PF_TSI protocol family
+[    0.024971] NET: Registered PF_TSI6 protocol family
+[    0.025035] NET: Registered PF_TSIU protocol family
+[    0.025333] registered taskstats version 1
+[    0.025906] Btrfs loaded, zoned=yes, fsverity=no
+[    0.026029] Key type encrypted registered
+[    0.036580] alg: No test for fips(ansi_cprng) (fips_ansi_cprng)
+[    0.036711] alg: No test for 842 (842-scomp)
+[    0.036781] alg: No test for 842 (842-generic)
+[    0.038609] "cryptomgr_test" (159) uses obsolete ecb(arc4) skcipher
+[    0.039826] clk: Disabling unused clocks
+[    0.039871] PM: genpd: Disabling unused power domains
+[    0.039915] ALSA device list:
+[    0.039953]   No soundcards found.
+[    0.052419] VFS: Mounted root (squashfs filesystem) readonly on device 254:0.
+[    0.052607] devtmpfs: mounted
+[    0.052731] Freeing unused kernel memory: 2496K
+[    0.052834] Run /init as init process
+[    0.052875]   with arguments:
+[    0.052914]     /init
+[    0.052947]   with environment:
+[    0.052987]     HOME=/
+[    0.053019]     TERM=linux
+[    0.053051]     KRUN_BOOT_START_NS=1792445332781704000
+MINOS-GUEST-BOOT-OK
+
+== judge: ended Exited after 344.202875ms
+ok
+test exit_kill9 ... launcher: 
+launcher: running 1 test
+launcher: test exit_kill9 ... 
+launcher: HELPER_PID=57900 JOB_DIR=/private/tmp/mvt4TTBNN/minos-501/mnsr8PVTNI4
+== launcher 57891 killed: signal: 9 (SIGKILL)
+== the helper 57900 exited 279.638083ms after the launcher's SIGKILL
+== sweep: [Removed { dir: "/private/tmp/mvt4TTBNN/minos-501/mnsr8PVTNI4" }]
+== removed /private/tmp/mvt4TTBNN
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.84s
+```
+
+The same exit suite with libtest capturing output, `cargo test -p minos-backend-krun --test exit -- --ignored --test-threads=1`, so each result is on its own line: exit 0.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/exit.rs (target/debug/deps/exit-c99de225879ade1b)
+
+running 4 tests
+test exit_egress ... ok
+test exit_env ... ok
+test exit_forge ... ok
+test exit_kill9 ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.90s
+```
+
+No `/private/tmp/mvt*` directory remained after either exit run. The six virtio devices `exit_egress` lists are rng (0x0004), console (0x0003), block twice (0x0002, the root image and the input disk), vsock (0x0013), and 0x4d47, which is msb_krun's own VM-generation-ID device: `msb_krun_devices` 0.1.41 `src/virtio/vmgenid/mod.rs` line 20, `pub const VIRTIO_ID_MSB_VMGENID: u32 = 0x4d47;`. It is neither a network (0x0001) nor a filesystem (0x001a) device, and `net_ifaces` is exactly `["lo"]`. The guest `/proc/cmdline` carries the one `KRUN_BOOT_START_NS=<digits>` token, the recorded exception the user chose at the 05-19 checkpoint on 2026-10-19; every other token matches exactly.
+
+### Docker env build (KRUN-09, CLI-02; the manual-only item)
+
+`MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest cargo test -p minos-cli --test env_build docker_env_build_reproduces -- --ignored --nocapture --test-threads=1`: exit 0, 1 passed. The equal digests come from BuildKit's layer cache as 05-18 recorded; the packed image reproduces whenever the builder's rootfs contents reproduce.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/env_build.rs (target/debug/deps/env_build-e701da1cb81a0218)
+
+running 1 test
+test docker_env_build_reproduces ... first image:  41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+second image: 41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b
+minos.lock:
+v = 1
+
+[[image]]
+backend = "krun"
+arch = "arm64"
+root_image = "41cfea1bed5b65fa796a5632081d24eca361ec3395d56c2a245e5e772be9276b"
+dockerfile_sha256 = "0181ab39fcf9a471656dc2fa53d78b19e45e045e98d57022ab41168159050d34"
+base_images = ["docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"]
+guest_sha256 = "b56895000b3e7b2b358ba241dcac74e8022d501944bea24be1ed7b6edfc93c65"
+
+[image.builder]
+name = "docker-buildx"
+version = "v0.35.0-desktop.2"
+
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 6.92s
+```
+
+Signature after the last cargo command above: `codesign --display --entitlements - target/debug/minos-vmm` still lists both keys.

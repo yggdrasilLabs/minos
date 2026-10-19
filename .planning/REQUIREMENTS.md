@@ -72,17 +72,18 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **GUEST-03**: Manifest commands run as argv arrays under a non-root uid with rlimits on CPU, memory, processes, and file size, writing only to scratch space. *Superseded wording (2026-10-18): "writing only to the scratch disk". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [x] **GUEST-04**: Guest output is a tar stream over vsock capped by bytes; the judge scorecard is only accepted from the judge-role channel
 - [x] **GUEST-05**: The guest environment contains no host variables, verified by a test that reads `env` and `/proc/cmdline` inside the VM
+  *Allowance, a recorded exception (user decision at the 05-19 checkpoint, 2026-10-19): the guest's /proc/cmdline carries one host-derived token, `KRUN_BOOT_START_NS=<digits>`, which msb_krun 0.1.41 always appends; exit_env allows exactly that key with an all-digit value and fails on any other host value. Removing it is a CLAUDE.md open question.*
 
 ### Backend (KRUN)
 
 - [x] **KRUN-01**: Each VM runs in its own `minos-vmm` helper process, spawned with a cleared environment, stdin from `/dev/null`, and a capped console pipe; only this binary links the VMM crate and carries the hypervisor entitlement
-- [ ] **KRUN-02**: Every launch disables implicit vsock and adds a plain vsock with no socket proxying; the hijack and host-directory-sharing APIs are banned by clippy `disallowed-methods`
+- [x] **KRUN-02**: Every launch disables implicit vsock and adds a plain vsock with no socket proxying; the hijack and host-directory-sharing APIs are banned by clippy `disallowed-methods`
 - [x] **KRUN-03**: A permanent integration test proves guest egress to loopback and to a public IP fails closed
 - [x] **KRUN-04**: Inputs are a shared read-only root disk and a per-job read-only input disk, both raw images; the candidate's scratch is size-capped space in guest memory; no host directory is ever shared; scratch is deleted unread. *Superseded wording (2026-10-18): "a size-capped scratch disk, all raw images". Scratch moved into guest memory by 05-CONTEXT.md D-05.*
 - [x] **KRUN-05**: The supervisor enforces the hard maximum duration by killing the helper's process group; a parent-death watchdog and pidfile sweep ensure `kill -9` on `minos run` leaves no VM running
-- [ ] **KRUN-06**: Preflight checks the entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, and active confinement layers, and refuses with a reason for each failure
+- [x] **KRUN-06**: Preflight checks the entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, and active confinement layers, and refuses with a reason for each failure
 - [x] **KRUN-07**: The run records which confinement layers were active (dedicated user, Seatbelt, rlimits) in `BackendInfo`, and never falls back silently
-- [ ] **KRUN-08**: After every build, the helper is signed with the entitlement by the one `codesign` argv documented in CLAUDE.md Commands (no `xtask`, script, `build.rs`, or cargo alias), and the signature is verified with `codesign -d --entitlements -`; `minos host setup` may run the same argv from Rust. *Superseded wording (2026-10-09): "An `xtask` signs the helper with the entitlement after build". Phase 1 D-01 and D-07 rule out an `xtask` (02-CONTEXT.md D-11).*
+- [x] **KRUN-08**: After every build, the helper is signed with the entitlement by the one `codesign` argv documented in CLAUDE.md Commands (no `xtask`, script, `build.rs`, or cargo alias), and the signature is verified with `codesign -d --entitlements -`; `minos host setup` may run the same argv from Rust. *Superseded wording (2026-10-09): "An `xtask` signs the helper with the entitlement after build". Phase 1 D-01 and D-07 rule out an `xtask` (02-CONTEXT.md D-11).*
 - [x] **KRUN-09**: `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` = `minos-guest` written in by the trusted packer, records digests in `minos.lock`, and the build context contains no judge data and no secrets. *Superseded wording (2026-10-09): "a root image and an initramfs". Stock libkrunfw 5.6.2 cannot unpack an initramfs (02-CONTEXT.md D-18).*
 - [x] **KRUN-10**: Two sequential experiments on the same host both record outcomes and share no build output
 
@@ -122,7 +123,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 - [ ] **CLI-01**: `minos init --kind <tune|optimize|explore>` scaffolds `minos.toml`, `program.md`, and `minos.Dockerfile`
 - [x] **CLI-02**: `minos env build` writes `minos.lock`
-- [ ] **CLI-03**: `minos host doctor` runs the launch preflight and prints every refusal with an explanation and a fix
+- [x] **CLI-03**: `minos host doctor` runs the launch preflight and prints every refusal with an explanation and a fix
 - [ ] **CLI-04**: `minos judge push <dir>` registers judge data
 - [ ] **CLI-05**: `minos check` validates the manifest, builds, judges the baseline repeatedly, prints the noise floor and the route table with reasons, and gives actionable errors
 - [ ] **CLI-06**: `minos run --generations N` starts or resumes a run and prints one sanitized progress line per experiment (ID, tier, outcome, delta, elapsed)
@@ -240,13 +241,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GUEST-04 | Phase 5 | Complete |
 | GUEST-05 | Phase 5 | Complete |
 | KRUN-01 | Phase 5 | Complete |
-| KRUN-02 | Phase 5 | Pending |
+| KRUN-02 | Phase 5 | Complete |
 | KRUN-03 | Phase 5 | Complete |
 | KRUN-04 | Phase 5 | Complete |
 | KRUN-05 | Phase 5 | Complete |
-| KRUN-06 | Phase 5 | Pending |
+| KRUN-06 | Phase 5 | Complete |
 | KRUN-07 | Phase 5 | Complete |
-| KRUN-08 | Phase 5 | Pending |
+| KRUN-08 | Phase 5 | Complete |
 | KRUN-09 | Phase 5 | Complete |
 | KRUN-10 | Phase 5 | Complete |
 | PROP-01 | Phase 6 | Pending |
@@ -274,7 +275,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | JUDGE-04 | Phase 7 | Pending |
 | CLI-01 | Phase 8 | Pending |
 | CLI-02 | Phase 5 | Complete |
-| CLI-03 | Phase 5 | Pending |
+| CLI-03 | Phase 5 | Complete |
 | CLI-04 | Phase 7 | Pending |
 | CLI-05 | Phase 8 | Pending |
 | CLI-06 | Phase 8 | Pending |
@@ -299,4 +300,5 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-09 after Phase 1 gap closure (GATE-01, GATE-02, GATE-05 reworded: three clippy lints at forbid, a rustflags backstop, and `cargo doc --workspace --no-deps` as the fifth gate command)*
+*Last updated: 2026-10-19 after the Phase 5 final gate (GUEST-01 to GUEST-05, KRUN-01 to KRUN-10, CLI-02, CLI-03 complete; GUEST-05 with its one recorded exception)*
+*Earlier update: 2026-10-09 after Phase 1 gap closure (GATE-01, GATE-02, GATE-05 reworded: three clippy lints at forbid, a rustflags backstop, and `cargo doc --workspace --no-deps` as the fifth gate command)*
