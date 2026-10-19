@@ -84,13 +84,17 @@ crates/
   minos-store/           Ledger and Blobs traits; file-backed and in-memory impls
   minos-sandbox/         roles, specs, sealed plans, Untrusted<T>, Backend trait
   minos-source/          the deterministic source snapshot: walk, denylist, secret scan, clean check, ustar tarball
-  minos-backend-krun/    LaunchPlan -> libkrun VM, driven through the minos-vmm process
+  minos-backend-krun/    LaunchPlan -> libkrun VM, driven through the minos-vmm process: KrunBackend, the host probes,
+                         job directories and the sweep, the supervisor, the chunk receiver, the embedded Seatbelt
+                         profile, the input disk writer, and the root image packer
   minos-vmm/             per-VM launcher; the only binary that links the VMM crate
-  minos-guest/           static binary inside every VM
+  minos-guest/           static binary inside every VM; reads its job through JobSource, sends output through
+                         OutputSink (D-07); the minos-probe fixture binary is test-only
   minos-propose/         prompt assembly, model client, the four proposer tiers
   minos-runner/          local runner pipeline, generic over Backend
   minos-loop/            local generation driver: propose, run, judge, select
-  minos-cli/             installs the `minos` binary; the only place concrete types meet (lib: locator, FileBlobSource)
+  minos-cli/             installs the `minos` binary; the only place concrete types meet (lib: locator, FileBlobSource);
+                         ships `env build`, `host doctor`, and `host setup`
 ```
 
 Later milestones, not in the workspace yet: `minos-backend-lambda` (LaunchPlan -> Lambda MicroVM), `minos-backend-chv` (Cloud Hypervisor VM with VFIO), `minos-orchestrator` (the durable functions: run, generation), `minos-store-aws` (DynamoDB and S3), and the GPU daemon.
@@ -140,8 +144,11 @@ Core has no async, no AWS, no filesystem, no clock, and no randomness beyond see
 
 ```
 lib.rs  limits.rs  id.rs  path.rs  text.rs  metric.rs  outcome.rs  usage.rs  money.rs  image.rs  manifest.rs
-diff/{mod,apply,compose}.rs  experiment.rs  ledger.rs  state.rs  policy.rs  route.rs  sweep.rs  job.rs  report.rs
+diff/{mod,apply,compose}.rs  experiment.rs  ledger.rs  state.rs  policy.rs  route.rs  sweep.rs  job.rs  chunk.rs
+lock.rs  guest.rs  report.rs
 ```
+
+`chunk.rs` is the authenticated chunk codec that carries guest output to the host over short vsock connections, used by both the guest sender and the host receiver. `guest.rs` holds the guest job, the guest status, and the `MINOSJB2` input disk codec that the backend writes and PID 1 reads. `lock.rs` is `minos.lock`: one locked image per backend and architecture, its versioned TOML codec, and `Lock::check`, which a run calls before it starts.
 
 `tool.rs` (the agentic `ToolCall` enum) arrives with the agentic tier (TIER-01), and the `requires` table lives in manifest.rs. `lib.rs` re-exports the principal types at the crate root, and every module stays public.
 
@@ -520,10 +527,9 @@ Unverified. Each needs a test or a doc check before code depends on it.
 - Whether `--permission-prompts none` and `--permission-mode dontAsk` behave differently when a permission request occurs; no call made one with tools off (SPIKE-07 contract, C-08).
 - Whether `claude` writes a session directory without `--no-session-persistence`; there was no control call (SPIKE-07 contract, C-14).
 - Whether the Seatbelt profile's starting allowances can be narrowed: rows 1 to 6 of the SPIKE-05 answer table were not minimized one by one, and only the socket rule was shown to be needed (SPIKE-05 answer).
-- The cost of the chunked vsock output protocol under concurrent candidates. One VM's largest stream is measured: 16 MiB took about 247 ms over 4097 connections with no guest connect retry, against about 588 ms of helper run time (05-EVIDENCE.md W0-CHUNKS), so one connection per 4 KiB chunk is not a bottleneck for one VM (S03-ANSWER); through the production backend a whole 16 MiB launch takes about 0.6 to 0.9 s, once the helper's `RLIMIT_NOFILE` covers the vsock reaper's 5 s hold (05-EVIDENCE.md 05-17). Several VMs streaming at once on one host are unmeasured; reassess with K8.
 - Streaming the packer's output straight into `Blobs::put_reader`, so a root image is never whole in memory (05-CONTEXT.md D-09). Today `pack_root_image` returns the whole image, bounded by `PackLimits`' 1 GiB tar cap, and `put_reader` streams it into the store. Owner: the phase that next touches the packer; no packer change was made in Phase 5.
 - Judge data larger than 96 MiB (`MAX_JUDGE_DATA_BYTES`) needs a streaming unpack from the input disk in place of PID 1's whole-section read, which keeps every role's input within half the guest reserve. Owner: Phase 7, whose `minos judge push` must refuse judge data over the cap rather than truncate it.
-- Launch rate and memory per VM for concurrent candidates (K8; deferred with NEXT-04).
+- Launch rate, memory per VM, and the chunked output protocol's cost for concurrent candidates (K8; deferred with NEXT-04). For one VM the protocol's cost is answered: 16 MiB took about 247 ms over 4097 connections with no guest connect retry (05-EVIDENCE.md W0-CHUNKS), and through the production backend a whole 16 MiB launch takes about 0.6 to 0.9 s once the helper's `RLIMIT_NOFILE` covers the vsock reaper's 5 s hold (05-EVIDENCE.md 05-17), so one connection per 4 KiB chunk is not a bottleneck (S03-ANSWER). Several VMs streaming at once on one host are unmeasured.
 - Removing `KRUN_BOOT_START_NS` from the guest's `/proc/cmdline`, the one host-derived token `exit_env` allows as a recorded exception (user decision at the 05-19 checkpoint, 2026-10-19; Local backends). The mechanism is proven: msb_krun 0.1.41 `src/api/vm.rs` `build_kernel_cmdline` writes `KRUN_BOOT_START_NS={boot_start_ns}` unconditionally into the `krun_env` segment of `KernelCmdlineConfig`, with `boot_start_ns` read from `SystemTime::now()`; no builder method, cargo feature, or launch option removes it, `MSB_KRUN_KERNEL_CMDLINE` only appends to the prolog, nothing under `crates/` references the token, and 0.1.41 (2026-10-08) is the newest release on crates.io. The removal path the user would accept: vendor only the top-level `msb_krun` crate (13 files, about 7,100 lines, Apache-2.0, no build script) into the repository under `[patch.crates-io]` as a path dependency with a one-line change that drops the token, leaving the `msb_krun_*` sub-crates on crates.io. No git fork of the whole project. Owner: the phase that next bumps the `msb_krun` pin, or earlier at the user's call.
 - Whether the hard denylist's `id_*` rule should narrow to the SSH key names (`id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, and their `_sk` forms), since it also drops ordinary files such as `src/id_map.rs`, and whether `.netrc`, `.npmrc`, `.pypirc`, `*.key`, and `*.p12` belong on it. D-07 is implemented as written and every drop is reported in the pack report (04-RESEARCH Open Question 4; the user decides).
 - Whether `RLIMIT_AS` at the default candidate allowance (768 MiB with the 2048 and 1024 defaults; the guest sets it in 05-08) breaks a real toolchain build, since Go, the JVM, V8, and sanitizers reserve large virtual ranges (05-RESEARCH Pitfall 10, Open Question 3). The Phase 5 VM tests run only small probe programs, so nothing in this phase measures it. Owner: Phase 8's sample project, which measures one real build against the defaults and adjusts them or the sample's own `[environment]` values.
