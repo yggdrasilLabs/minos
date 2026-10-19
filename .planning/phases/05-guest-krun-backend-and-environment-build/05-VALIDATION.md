@@ -6,6 +6,7 @@ nyquist_compliant: true
 wave_0_complete: true
 created: 2026-10-18
 completed: 2026-10-19
+audited: 2026-10-19
 ---
 
 # Phase 5 — Validation Strategy
@@ -30,7 +31,7 @@ completed: 2026-10-19
 
 - **After every task commit:** Run `cargo test -p <touched crate>` and `cargo clippy -p <touched crate> --all-targets -- -D warnings`
 - **After every plan wave:** Run the six gate commands, then the VM suite after build, sign, and guest build
-- **Before `/gsd-verify-work`:** Full suite must be green; the three permanent exit tests (`exit_egress`, `exit_env`, `exit_kill9`) pass and are recorded in `05-EVIDENCE.md`; the C-02 grep prints nothing; then `cargo clean` (GATE-06)
+- **Before `/gsd-verify-work`:** Full suite must be green; the four permanent exit tests (`exit_egress`, `exit_env`, `exit_forge`, `exit_kill9`) pass and are recorded in `05-EVIDENCE.md`; the C-02 grep prints nothing; then `cargo clean` (GATE-06)
 - **Max feedback latency:** 180 seconds
 - **VM-suite tasks (05-17, 05-19, 05-20):** each task's `<verify>` runs one named ignored test after build and sign (`cargo test -p minos-backend-krun --test <vm|exit> -- --ignored --exact <test> --nocapture --test-threads=1`), which stays inside the latency target; the full VM and exit suites take minutes and are phase-end gates, listed in each plan's acceptance criteria and run in full by 05-20's final gate
 
@@ -103,6 +104,21 @@ One row per task of plans 05-01 to 05-22 (58 tasks). Each command is the task's 
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
+### Review-fix verification (2026-10-19)
+
+The code review (05-REVIEW.md) landed six fix commits after the final gate: CR-01, CR-02, and WR-01 to WR-04 (05-REVIEW-FIX.md). Each fix added the test named here; the threat refs are the register entries 05-SECURITY.md lists under "Review fixes that touched mitigations".
+
+| Finding | Commit | Requirement | Threat Ref | Secure Behavior | Tests | Automated Command | Status |
+|---------|--------|-------------|------------|-----------------|-------|-------------------|--------|
+| CR-01 `RLIMIT_CPU` scales with the vCPU count | cca5417 | GUEST-03 | T-05-08-02, T-05-12-04 | A stage that keeps every vCPU busy for its whole budget reaches PID 1's wall-clock deadline before its CPU limit, and the trampoline's cap still bounds every limit `for_stage` can produce. | `stage_cpu_limit_scales_with_vcpus_within_the_cap` (`crates/minos-guest/src/stage.rs`); `run_candidate_happy_path` now runs with 2 vCPUs | `cargo test -p minos-guest stage:: && cargo test -p minos-guest run:: && cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings` | ✅ green |
+| CR-02 An input failure carries the real role | fd11226 | GUEST-02, GUEST-04 | T-05-08-04, T-05-22-01 | A source failure on a judge launch reports `role: judge`, and the host accepts an input-step failure with either role while still refusing a wrong role at every later setup step. | `run_source_failure_with_token_on_a_judge_disk_names_the_judge` (`crates/minos-guest/src/run.rs`); `take_status_input_failure_is_accepted_whatever_role_it_names` (`crates/minos-sandbox/tests/untrusted.rs`) | `cargo test -p minos-guest run:: && env -u TRYBUILD cargo test -p minos-sandbox --test untrusted` | ✅ green |
+| WR-01 Root mounted `nosuid,nodev` | 8afa3fd | GUEST-03, KRUN-04 | T-05-08-01, T-05-12-03, T-05-12-06 | PID 1 remounts the root `nosuid,nodev` before any per-run work, so a setuid-root file in the user's image cannot raise the stage uid; a failed remount prevents every stage. | `setuid_root_binary_in_the_image_does_not_raise_the_stage_uid` (`crates/minos-backend-krun/tests/vm.rs`) | VM integration (ignored, run on this Mac): build, sign, and guest build as in the 05-17-T2 row, then `cargo test -p minos-backend-krun --test vm -- --ignored --exact setuid_root_binary_in_the_image_does_not_raise_the_stage_uid --nocapture --test-threads=1` | ✅ green |
+| WR-02 A full scratch is its own setup step | 062d4ae | GUEST-02, GUEST-03 | T-05-04-06 (adjacent) | `ENOSPC` on unpack or apply is reported as `SetupStep::ScratchFull`, a configuration error that Phase 7 reports against `[environment] scratch_mib` and never retries; the status stays role-checked and the five status goldens are unchanged. | `a_full_scratch_is_scratch_full_and_other_writes_are_io` (`crates/minos-guest/src/workspace.rs`); `a_full_scratch_is_its_own_setup_step` (`crates/minos-guest/src/run.rs`); `guest_status_scratch_full_step_is_on_the_wire` (`crates/minos-core/tests/guest_wire.rs`) | `cargo test -p minos-guest && env -u INSTA_UPDATE cargo test -p minos-core --test guest_wire` | ✅ green |
+| WR-03 Bounded drop of a surviving helper | 3695324 | KRUN-05 | T-05-15-02 | Dropping a `Helper` or `Reaper` re-kills the group and polls for at most `KILL_WAIT`, so a helper stuck in the kernel cannot hang the runner while it holds the lock the console reader needs. | `drop_is_bounded_and_reaps_a_killed_helper` (`crates/minos-backend-krun/src/supervise.rs`) | `cargo test -p minos-backend-krun --lib supervise` | ✅ green |
+| WR-04 A VMM-side socket error is a host error | b539a3e | GUEST-04, KRUN-01 | T-05-13-04 | A read error on the output socket, whose peer is `minos-vmm`, ends the receiver with an `InfraError`, while a clean end-of-file after a short chunk stays the guest's `ChunkProtocol` fault; the caps are unchanged. | `a_vmm_side_read_error_is_a_host_error_not_a_fault` (`crates/minos-backend-krun/src/chunks.rs`) | `cargo test -p minos-backend-krun --lib chunks` | ✅ green |
+
+Green status is from 05-REVIEW-FIX.md's verification record, run on a clean checkout of the six fix commits: the six gate commands (`cargo test --workspace`: 1147 passed, 0 failed, 5 ignored), the musl clippy command, the C-02 grep, the `vm` suite (11 passed) and the `exit` suite (4 passed) after build, sign, and guest build. Only documentation commits followed b539a3e, so the crate contents at the audited HEAD are the ones that run recorded. The `vm` suite now holds eleven tests, the ten from 05-17 plus the WR-01 test; the four exit tests are `exit_egress`, `exit_env`, `exit_forge`, and `exit_kill9`. The seven Info findings (IN-01 to IN-07) were out of the fix scope; IN-07 is resolved by CR-02, and the rest change no requirement's verification.
+
 ---
 
 ## Wave 0 Requirements
@@ -136,3 +152,15 @@ One row per task of plans 05-01 to 05-22 (58 tasks). Each command is the task's 
 - [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** complete, 2026-10-19 (05-20 final gate; GATE-06 `cargo clean` is the 05-20 Task 3 row)
+
+---
+
+## Validation Audit 2026-10-19
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Method: every Phase 5 requirement (GUEST-01 to GUEST-05, KRUN-01 to KRUN-10, CLI-02, CLI-03, GATE-06) was matched to the per-task rows and to the review-fix rows above; each has at least one automated test that targets the behavior and a recorded green run. No cargo command was run: the phase ended with `cargo clean` (GATE-06), `target/` is intentionally absent, and the crate contents at HEAD equal those of the recorded post-fix run. The nine review-fix tests were confirmed present by a live grep of the test names. Two drifts in this contract were corrected: the exit suite has four permanent tests, not three, and the `vm` suite has eleven, not ten. No test file was generated and no implementation file was touched.
