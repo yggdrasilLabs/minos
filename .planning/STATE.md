@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: guest-krun-backend-and-environment-build
 status: executing
-stopped_at: Completed 05-18-PLAN.md
-last_updated: "2026-10-19T21:12:39.691Z"
+stopped_at: Completed 05-19-PLAN.md
+last_updated: "2026-10-19T21:23:24.573Z"
 last_activity: 2026-10-19
-last_activity_desc: Phase 05 execution started
+last_activity_desc: Completed 05-19 (the permanent exit tests)
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 58
+  completed_plans: 59
   percent: 50
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 05 (guest-krun-backend-and-environment-build) — EXECUTING
-Plan: 21 of 22
+Plan: 20 of 22 (05-20 remains; 05-19, 05-21, and 05-22 are complete)
 Status: Ready to execute
-Last activity: 2026-10-19 — Completed 05-18 (env build against the real builder)
+Last activity: 2026-10-19 — Completed 05-19 (the permanent exit tests: 4 passed)
 
 Progress: [██████████] 100% (29 of 29 plans)
 
@@ -116,6 +116,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P16 | 12min | 3 tasks | 8 files |
 | Phase 05 P17 | 25min | 2 tasks | 5 files |
 | Phase 05 P18 | 15 min | 3 tasks | 3 files |
+| Phase 05 P19 | 25 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -270,6 +271,7 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-17: minos-vmm RLIMIT_NOFILE is 8192 (was 1024): the pinned msb_krun_devices vsock reaper holds each closed connection's host socket for 5 s, and a full output stream is about 4353 connections; at 1024 a 16 MiB output took 20.5 s, at 8192 about 0.6 s
 - [Phase 05]: 05-18: A2 fallback not needed; docker buildx build takes the snapshot tarball on stdin with -f relative to its root
 - [Phase 05]: 05-18: D-12 stated as: the packed image reproduces whenever the builder's rootfs contents reproduce; clock-computed RUN output reproduces only through BuildKit's layer cache
+- [Phase 05]: 05-19: KRUN_BOOT_START_NS=<digits> is the one host-derived /proc/cmdline token exit_env allows, as a recorded exception (user chose no-allowance first, then after root cause 'Allow it as a recorded exception', both 2026-10-19); removal path: vendor only the top-level msb_krun crate under [patch.crates-io], no whole-project fork
 
 ### Pending Todos
 
@@ -300,6 +302,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-19T21:12:34.113Z
-Stopped at: Completed 05-18-PLAN.md
+Last session: 2026-10-19T21:23:24.568Z
+Stopped at: Completed 05-19-PLAN.md
 Resume file: None

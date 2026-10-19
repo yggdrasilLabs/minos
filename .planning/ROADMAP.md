@@ -254,7 +254,7 @@ Plans:
   4. `minos env build` turns the project Dockerfile into a raw read-only SquashFS root image with `/init` written in by the trusted packer (*superseded wording, 2026-10-09: "a root image and an initramfs"; 02-CONTEXT.md D-18*) and writes its digests to `minos.lock`, from a build context with no judge data and no secrets. `minos host doctor` runs the launch preflight (entitlement, kernel presence and hash, Hypervisor.framework support, socket path length, active confinement layers) and prints every refusal with an explanation and a fix. The active confinement layers are recorded in `BackendInfo`, with no silent fallback (KRUN-06, KRUN-07, KRUN-09, CLI-02, CLI-03)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 20/22 plans executed
+**Plans**: 21/22 plans executed
 Plans:
 **Wave 1**
 
@@ -302,7 +302,7 @@ Plans:
 
 **Wave 9** *(blocked on 05-17)*
 
-- [ ] 05-19-PLAN.md — Permanent exit tests `exit_egress`, `exit_env`, `exit_kill9`, plus `exit_forge` (checkpoint: the user confirms the one `KRUN_BOOT_START_NS` cmdline allowance first)
+- [x] 05-19-PLAN.md — Permanent exit tests `exit_egress`, `exit_env`, `exit_kill9`, plus `exit_forge` (checkpoint: the user confirms the one `KRUN_BOOT_START_NS` cmdline allowance first)
 
 **Wave 10** *(blocked on all prior plans)*
 
@@ -376,7 +376,7 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 2. Platform Spikes | 11/11 | Complete    | 2026-10-10 |
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
-| 5. Guest, krun Backend, and Environment Build | 20/22 | In Progress|  |
+| 5. Guest, krun Backend, and Environment Build | 21/22 | In Progress|  |
 | 6. Proposers | 0/TBD | Not started | - |
 | 7. Runner and Loop | 0/TBD | Not started | - |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
