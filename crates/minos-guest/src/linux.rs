@@ -4,13 +4,17 @@
 //! This is the only Linux-only file in the guest; `main.rs` gates the module (02-CONTEXT.md D-03).
 //!
 //! **PID 1** ([`pid1`]) does boot-time work only until it reads the job: the boot marker, `/proc` with
-//! `hidepid=invisible` (a stage cannot see PID 1's or any other uid's processes), and `/sys` read-only. Nothing
-//! per-run exists before the job arrives (CLAUDE.md: a Lambda snapshot captures memory as well as disk). Then, in
-//! order:
+//! `hidepid=invisible` (a stage cannot see PID 1's or any other uid's processes), `/sys` read-only, and the root
+//! remounted `nosuid,nodev` (a bind remount changes only the per-mount flags of the read-only `SquashFS`), so a
+//! setuid binary the user's image ships, such as a stock `su` or `mount`, cannot give a stage uid 0 inside the
+//! VM, and no file in the image is a device (review WR-01). Nothing per-run exists before the job arrives
+//! (CLAUDE.md: a Lambda snapshot captures memory as well as disk). Then, in order:
 //!
 //! 1. it reads the input disk `/dev/vdb` once, closes it, and removes the device node (mode 0 if the removal
 //!    fails), so no later process can read the per-launch token (05-RESEARCH Pitfall 1, Assumption A1);
-//! 2. it mounts a tmpfs on `/scratch` capped at the job's scratch size, with no devices and no setuid;
+//! 2. it mounts a tmpfs on `/scratch` capped at the job's scratch size, with no devices and no setuid; when the
+//!    root remount failed, the scratch mount is skipped, so `run_job` cannot create its directories on the
+//!    read-only root and sends an authenticated `setup: failed {mount}` status with no stage run;
 //! 3. it calls [`run_job`] with a [`ReadJobSource`] over what it read, a [`ChunkSink`] over [`VsockConnector`],
 //!    a [`LinuxExecutor`], and a [`LinuxHandover`], which bind-mounts `/scratch/tmp` on `/tmp` and
 //!    `/scratch/out` on `/out` as it hands them over, so a stage can write only scratch (the root image is
@@ -55,7 +59,7 @@ use minos_guest::stage::{
 use minos_guest::{BOOT_MARKER, OUTPUT_SENT_MARKER, POWEROFF_MARKER, SETUP_ERROR_MARKER};
 use rustix::fs::{AtFlags, CWD, Gid, Mode, OFlags, Uid, chmod, chownat, fcntl_setfl, sync, unlink};
 use rustix::io::Errno;
-use rustix::mount::{MountFlags, mount, mount_bind};
+use rustix::mount::{MountFlags, mount, mount_bind, mount_remount};
 use rustix::process::{
     Pid, Resource, Rlimit, Signal, WaitOptions, WaitStatus, geteuid, getpid, kill_process_group,
     setrlimit, wait, waitpid,
@@ -77,6 +81,15 @@ const PROC_DATA: &std::ffi::CStr = c"hidepid=invisible";
 /// Flags on the scratch tmpfs: no devices and no setuid. Execution stays allowed, because builds run the programs
 /// they compile there. The `/tmp` and `/out` bind mounts inherit these flags from it.
 const SCRATCH_FLAGS: MountFlags = MountFlags::NOSUID.union(MountFlags::NODEV);
+/// Per-mount flags the root is remounted with: a bind remount keeps it read-only and adds no-setuid and
+/// no-devices, so the setid bits the packer keeps on the user's files are inert (review WR-01). `/dev` is the
+/// kernel's own devtmpfs mount, so `nodev` here does not touch it.
+const ROOT_FLAGS: MountFlags = MountFlags::BIND
+    .union(MountFlags::RDONLY)
+    .union(MountFlags::NOSUID)
+    .union(MountFlags::NODEV);
+/// The root mount point.
+const ROOT: &str = "/";
 /// The trampoline's exit code when it refuses to run or cannot set a limit: no candidate code ran.
 const TRAMPOLINE_REFUSED: u8 = 126;
 /// The trampoline's exit code when `exec` of the stage command failed.
@@ -107,6 +120,7 @@ pub fn pid1() -> ! {
         PSEUDO_FLAGS.union(MountFlags::RDONLY),
         None,
     );
+    let root_hardened = harden_root();
 
     // Per-run work starts here. Nothing above depends on the job.
     let read = read_input();
@@ -123,7 +137,10 @@ pub fn pid1() -> ! {
             }
         }
     };
-    if let Ok(input) = &read {
+    // Without the hardened root no scratch is mounted, so no stage can run: `run_job` fails to create its
+    // directories on the read-only root and reports a mount setup failure, which the host does not blame on
+    // the candidate.
+    if root_hardened && let Ok(input) = &read {
         mount_scratch(input.job().scratch_mib());
     }
 
@@ -177,6 +194,21 @@ fn protect_input_disk() {
         console_line(&format!("minos-guest: unlink {INPUT_DISK}: {errno}"));
         if let Err(errno) = chmod(INPUT_DISK, Mode::empty()) {
             console_line(&format!("minos-guest: chmod {INPUT_DISK}: {errno}"));
+        }
+    }
+}
+
+/// Remounts the root `nosuid,nodev` (and still read-only) with a bind remount, which changes the per-mount
+/// flags of the root `SquashFS` and nothing else. `false`, after a setup-error console line, when the kernel
+/// refused: the caller then mounts no scratch, so no stage runs with a root that could raise its uid.
+fn harden_root() -> bool {
+    match mount_remount(ROOT, ROOT_FLAGS, "") {
+        Ok(()) => true,
+        Err(errno) => {
+            console_line(&format!(
+                "{SETUP_ERROR_MARKER} remount {ROOT} nosuid,nodev: {errno}"
+            ));
+            false
         }
     }
 }

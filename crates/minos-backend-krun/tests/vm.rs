@@ -23,8 +23,8 @@ use minos_sandbox::{Ended, SCORECARD_PATH};
 use serde_json::Value;
 
 use harness::{
-    PROBE, PROBE_NAME, TestResult, VALUE_PATH, base_tar, candidate, diff_text, drop_logs, exited,
-    judge, manifest, metric, probe_json, stage_end, vm,
+    PROBE, PROBE_NAME, PROBE_SETUID, PROBE_SETUID_MODE, TestResult, VALUE_PATH, base_tar,
+    candidate, diff_text, drop_logs, exited, judge, manifest, metric, probe_json, stage_end, vm,
 };
 
 /// Bytes in a MiB.
@@ -185,6 +185,35 @@ fn experiment_applies_diff_and_runs_as_candidate_uid() -> TestResult {
 
     let run = probe_json(&mut output, "out/run.json")?;
     assert!(flag(&run, "exists")?, "the run stage sees the applied file");
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs a signed MINOS_VMM, MINOS_GUEST (with minos-probe beside it), MINOS_KRUNFW; see harness::SETUP"]
+fn setuid_root_binary_in_the_image_does_not_raise_the_stage_uid() -> TestResult {
+    // The test image ships the probe a second time, root-owned and mode 04755, as a stock base image ships `su`
+    // or `mount`. The packer keeps the bit; the root is mounted nosuid, so the bit is inert (review WR-01).
+    let vm = vm()?;
+    let manifest = simple(&[PROBE_SETUID, "env", "/out/build.json"], &NOTHING)?;
+    let (mut output, status) = exited(candidate(&vm, &manifest, &base()?, None)?)?;
+    assert_eq!(status.setup(), SetupStatus::Ok);
+    assert_eq!(
+        stage_end(&status, Stage::Build)?,
+        StageEnd::Exited { code: 0 }
+    );
+
+    let env = probe_json(&mut output, "out/build.json")?;
+    // The bit survived packing, so the exec really was of a setuid-root file.
+    assert_eq!(
+        number(&env, "exe_mode")?,
+        u64::from(PROBE_SETUID_MODE),
+        "the setuid bit of {PROBE_SETUID} in the image"
+    );
+    // And it changed nothing: every id is still the stage's.
+    for key in ["uid", "euid", "gid", "egid"] {
+        assert_eq!(number(&env, key)?, GUEST_ID, "{key}");
+    }
+    assert!(list(&env, "groups")?.is_empty(), "supplementary groups");
     Ok(())
 }
 

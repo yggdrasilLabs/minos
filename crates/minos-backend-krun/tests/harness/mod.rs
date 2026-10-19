@@ -65,6 +65,14 @@ and run:
 /// Where the probe sits in the test image, and the program the build and run argvs name.
 pub const PROBE: &str = "/usr/local/bin/minos-probe";
 
+/// A second copy of the probe in the test image, root-owned with mode 04755 (setuid root), as a stock base
+/// image's `su` or `mount` would be. The packer keeps the bit; the guest's `nosuid` root makes it inert
+/// (review WR-01).
+pub const PROBE_SETUID: &str = "/usr/local/bin/minos-probe-setuid";
+
+/// The mode of [`PROBE_SETUID`] in the test rootfs.
+pub const PROBE_SETUID_MODE: u32 = 0o4755;
+
 /// The probe's binary name beside `MINOS_GUEST`, and the bare word a judge argv uses (it is on the stage `PATH`).
 pub const PROBE_NAME: &str = "minos-probe";
 
@@ -200,7 +208,8 @@ fn append(
     Ok(())
 }
 
-/// The test rootfs tar: `/etc`, `/root`, and `/usr/local/bin/minos-probe` (0755).
+/// The test rootfs tar: `/etc`, `/root`, `/usr/local/bin/minos-probe` (0755), and the same binary again as
+/// [`PROBE_SETUID`] (04755, uid 0).
 fn test_rootfs(probe: &[u8]) -> TestResult<Vec<u8>> {
     let mut builder = Builder::new(Vec::new());
     append(&mut builder, "etc/", 0o755, None)?;
@@ -212,6 +221,12 @@ fn test_rootfs(probe: &[u8]) -> TestResult<Vec<u8>> {
         &mut builder,
         "usr/local/bin/minos-probe",
         0o755,
+        Some(probe),
+    )?;
+    append(
+        &mut builder,
+        PROBE_SETUID.trim_start_matches('/'),
+        PROBE_SETUID_MODE,
         Some(probe),
     )?;
     Ok(builder.into_inner()?)

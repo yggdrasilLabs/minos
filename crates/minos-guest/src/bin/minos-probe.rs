@@ -41,6 +41,7 @@ mod probe {
     use std::fs::{self, File, OpenOptions};
     use std::io::{self, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpStream};
+    use std::os::unix::fs::MetadataExt;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, ExitCode, Stdio};
     use std::time::Duration;
@@ -253,6 +254,9 @@ mod probe {
         groups: Vec<u32>,
         cwd: String,
         limits: Vec<String>,
+        /// The permission bits of the probe's own binary, setid bits included, so a test can prove a setuid
+        /// copy kept its bit in the image and still did not raise `euid` (the root is mounted `nosuid`).
+        exe_mode: u32,
     }
 
     fn env(out: &str) -> ProbeResult {
@@ -274,6 +278,7 @@ mod probe {
             .filter(|line| LIMIT_ROWS.iter().any(|row| line.starts_with(row)))
             .map(str::to_owned)
             .collect();
+        let exe_mode = fs::metadata("/proc/self/exe")?.mode() & 0o7777;
         write_json(
             out,
             &Env {
@@ -286,6 +291,7 @@ mod probe {
                 groups,
                 cwd,
                 limits,
+                exe_mode,
             },
         )
     }

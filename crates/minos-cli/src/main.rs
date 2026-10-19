@@ -142,6 +142,21 @@ fn env_build_command(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
                 pack.symlinks(),
                 pack.init_sha256()
             );
+            // What the packer kept or changed in the user's image (review WR-01): setid bits are kept but
+            // inert, because the guest mounts the root nosuid; the image's own /init is replaced by the guest.
+            println!(
+                "setid files kept: {} (inert: the guest mounts the root nosuid)",
+                pack.setid_files()
+            );
+            println!("hardlinks copied: {}", pack.hardlinks_copied());
+            println!(
+                "/init: {}",
+                if pack.init_overridden() {
+                    "replaced the image's own /init"
+                } else {
+                    "added"
+                }
+            );
             for image in report.base_images() {
                 println!("base image: {}", SafeText::inline(&image.to_string()));
             }
