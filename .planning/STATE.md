@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 05
-current_phase_name: guest-krun-backend-and-environment-build
-status: executing
+current_phase: 6
+current_phase_name: Proposers
+status: verifying
 stopped_at: Completed 05-20-PLAN.md
-last_updated: "2026-10-19T21:34:06.421Z"
+last_updated: "2026-10-19T21:39:16.018Z"
 last_activity: 2026-10-19
-last_activity_desc: "Completed 05-20 (Phase 5 final gate passed; cargo clean)"
+last_activity_desc: Phase 05 complete, transitioned to Phase 6
 progress:
   total_phases: 8
   completed_phases: 5
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 05 (guest-krun-backend-and-environment-build) — COMPLETE (all 22 plans; ready for phase verification)
-Plan: 22 of 22 (05-20 complete; every Phase 5 plan has a SUMMARY)
+Phase: 6 — Proposers
+Plan: Not started
 Status: Phase complete; next is /gsd-verify-work or Phase 6
-Last activity: 2026-10-19 — Completed 05-20 (final gate: vm 10 passed, exit 4 passed, host doctor exit 0; cargo clean ran last)
+Last activity: 2026-10-19 — Phase 05 complete, transitioned to Phase 6
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -39,7 +39,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 
 **Velocity:**
 
-- Total plans completed: 38
+- Total plans completed: 60
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -51,6 +51,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | 02 | 11 | - | - |
 | 03 | 13 | - | - |
 | 04 | 9 | - | - |
+| 05 | 22 | - | - |
 
 **Recent Trend:**
 
