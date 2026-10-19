@@ -106,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-19 after Phase 5: Guest, krun Backend, and Environment Build (22/22 plans; verified 5/5 success criteria and 17/17 requirements, GUEST-05 with one recorded exception; `cargo clean` run after the final gate; code review open: 2 Critical, 4 Warnings, 7 Info in 05-REVIEW.md; `/gsd-secure-phase 5` pending)*
+*Last updated: 2026-10-19 after Phase 5: Guest, krun Backend, and Environment Build (22/22 plans; verified 5/5 success criteria and 17/17 requirements, GUEST-05 with one recorded exception; `cargo clean` run after the final gate; code review: 2 Critical and 4 Warnings fixed in 05-REVIEW-FIX.md, 7 Info open in 05-REVIEW.md; `/gsd-secure-phase 5` pending)*
