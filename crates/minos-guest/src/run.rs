@@ -222,7 +222,7 @@ pub fn run_job<S: JobSource, O: OutputSink, E: StageExecutor, H: Handover>(
     let input = match source.read_input() {
         Ok(input) => input,
         Err(failure) => {
-            let (token, error) = failure.into_parts();
+            let (token, role, error) = failure.into_parts();
             let error = JobError::Source(error);
             if token.is_none() {
                 return JobEnd {
@@ -231,16 +231,16 @@ pub fn run_job<S: JobSource, O: OutputSink, E: StageExecutor, H: Handover>(
                     error: Some(error),
                 };
             }
-            // The job may not have parsed, so its role is unknown. The status claims a candidate with no diff
-            // applied (the form core's own golden test uses); the host reads a failed setup as an infrastructure
-            // failure and consults neither field.
-            return setup_failed(
-                sink,
-                GuestRole::Candidate,
-                ApplyStatus::Baseline,
-                SetupStep::Input,
-                error,
-            );
+            // The status names the job's real role when the job parsed before the failure, with the apply
+            // status core requires for it. When the job did not parse the role is unknown, and the status claims
+            // a candidate with no diff applied (the form core's own golden test uses): the host's `take_status`
+            // reads `setup` before `role` for an input failure and does not check the role, and maps every
+            // failed setup to an infrastructure failure (review CR-02).
+            let (role, apply) = match role {
+                Some(GuestRole::Judge) => (GuestRole::Judge, ApplyStatus::NotApplicable),
+                Some(GuestRole::Candidate) | None => (GuestRole::Candidate, ApplyStatus::Baseline),
+            };
+            return setup_failed(sink, role, apply, SetupStep::Input, error);
         }
     };
     // The sink already holds the token; this copy is dropped here, unbound.
@@ -1022,9 +1022,43 @@ mod tests {
                 step: SetupStep::Input
             }
         );
+        // The job did not parse, so the status carries the placeholder role.
+        assert_eq!(status.role(), GuestRole::Candidate);
+        assert_eq!(status.apply(), &ApplyStatus::Baseline);
         assert!(status.stages().is_empty());
         assert_eq!(status.output(), OutputStatus::NotPacked);
         assert!(executor.seen.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn run_source_failure_with_token_on_a_judge_disk_names_the_judge() -> TestResult {
+        let root = tempfile::tempdir()?;
+        // The judge job parses, then the role check refuses the BASE section a judge must not see.
+        let json = judge_job()?.to_json()?;
+        let disk = disk(&[
+            (SectionKind::Job, &json),
+            (SectionKind::Base, b"a base a judge must not see"),
+            (SectionKind::JudgeData, b"data"),
+            (SectionKind::CandidateOut, b"out"),
+        ])?;
+        let mut executor = Script::new(root.path());
+        let sent = run(disk, &mut executor, &mut Record::default(), root.path())?;
+        assert!(matches!(sent.end.error(), Some(JobError::Source(_))));
+        let (status, _) = sent_status(&sent)?;
+        assert_eq!(
+            status.setup(),
+            SetupStatus::Failed {
+                step: SetupStep::Input
+            }
+        );
+        // The role was known, so the status names the judge, with the apply status core requires for it.
+        assert_eq!(status.role(), GuestRole::Judge);
+        assert_eq!(status.apply(), &ApplyStatus::NotApplicable);
+        assert!(status.stages().is_empty());
+        assert_eq!(status.output(), OutputStatus::NotPacked);
+        assert!(executor.seen.is_empty());
+        assert!(!root.path().join(JUDGE).exists(), "no directory was made");
         Ok(())
     }
 

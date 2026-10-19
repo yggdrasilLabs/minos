@@ -125,12 +125,14 @@ pub trait JobSource {
 /// Why a [`JobSource`] could not produce a job.
 ///
 /// When the header was read, the token is returned, so PID 1 can still send an authenticated `setup: failed
-/// {input}` status the host trusts. A source failure is a host bug or a corrupt disk: an infrastructure failure,
-/// never a candidate fault.
+/// {input}` status the host trusts; when the job parsed before the failure, its role is returned too, so that
+/// status names the real role (review CR-02). A source failure is a host bug or a corrupt disk: an
+/// infrastructure failure, never a candidate fault.
 #[derive(Debug, thiserror::Error)]
 #[error("the job source failed")]
 pub struct SourceFailure {
     token: Option<ChunkToken>,
+    role: Option<GuestRole>,
     #[source]
     error: SourceError,
 }
@@ -142,16 +144,23 @@ impl SourceFailure {
         self.token.as_ref()
     }
 
+    /// The job's role, if the job parsed before the failure.
+    #[must_use]
+    pub const fn role(&self) -> Option<GuestRole> {
+        self.role
+    }
+
     /// What failed.
     #[must_use]
     pub const fn error(&self) -> &SourceError {
         &self.error
     }
 
-    /// The token and the error, so PID 1 can keep the token for its status after logging the error.
+    /// The token, the role, and the error, so PID 1 can keep the token and the role for its status after logging
+    /// the error.
     #[must_use]
-    pub fn into_parts(self) -> (Option<ChunkToken>, SourceError) {
-        (self.token, self.error)
+    pub fn into_parts(self) -> (Option<ChunkToken>, Option<GuestRole>, SourceError) {
+        (self.token, self.role, self.error)
     }
 }
 
@@ -214,6 +223,7 @@ impl JobSource for ReadJobSource {
     fn read_input(&mut self) -> Result<GuestInput, SourceFailure> {
         self.read.take().unwrap_or(Err(SourceFailure {
             token: None,
+            role: None,
             error: SourceError::AlreadyRead,
         }))
     }
@@ -233,11 +243,23 @@ impl<R: Read> JobSource for DiskJobSource<R> {
     fn read_input(&mut self) -> Result<GuestInput, SourceFailure> {
         let mut sections = read_input_disk(&mut self.reader).map_err(|error| SourceFailure {
             token: None,
+            role: None,
             error: SourceError::Disk(error),
         })?;
         let token = sections.token().clone();
-        let decoded = decode(&mut sections);
-        match decoded {
+        let job = match parse_job(&mut sections) {
+            Ok(job) => job,
+            Err(error) => {
+                return Err(SourceFailure {
+                    token: Some(token),
+                    role: None,
+                    error,
+                });
+            }
+        };
+        // From here on the role is known, and a failure reports it.
+        let role = job.role();
+        match decode(&mut sections, job) {
             Ok((job, base, diff, judge_data, candidate_out)) => Ok(GuestInput {
                 token,
                 job,
@@ -248,6 +270,7 @@ impl<R: Read> JobSource for DiskJobSource<R> {
             }),
             Err(error) => Err(SourceFailure {
                 token: Some(token),
+                role: Some(role),
                 error,
             }),
         }
@@ -263,11 +286,14 @@ type Decoded = (
     Option<Vec<u8>>,
 );
 
-/// Parses the JOB section, checks the sections against the job's role, and takes the role's sections.
-fn decode(sections: &mut InputSections) -> Result<Decoded, SourceError> {
+/// Parses the JOB section.
+fn parse_job(sections: &mut InputSections) -> Result<GuestJob, SourceError> {
     let job_bytes = required(sections, SectionKind::Job)?;
-    let job = GuestJob::parse_json(&job_bytes).map_err(SourceError::Job)?;
-    drop(job_bytes);
+    GuestJob::parse_json(&job_bytes).map_err(SourceError::Job)
+}
+
+/// Checks the sections against the parsed job's role, and takes the role's sections.
+fn decode(sections: &mut InputSections, job: GuestJob) -> Result<Decoded, SourceError> {
     sections.check_role(&job).map_err(SourceError::Disk)?;
     match job.role() {
         GuestRole::Candidate => {
@@ -292,7 +318,7 @@ mod tests {
     use std::io::Cursor;
 
     use minos_core::chunk::ChunkToken;
-    use minos_core::guest::{DiskError, SectionKind, write_input_disk};
+    use minos_core::guest::{DiskError, GuestRole, SectionKind, write_input_disk};
     use minos_core::id::BlobId;
 
     use super::{DiskJobSource, GuestInput, JobSource, ReadJobSource, SourceError, SourceFailure};
@@ -396,6 +422,8 @@ mod tests {
         ])?;
         let failure = refused(wrong_base)?;
         assert!(has_fixed_token(&failure));
+        // The job parsed before the base check, so the role is known (review CR-02).
+        assert_eq!(failure.role(), Some(GuestRole::Candidate));
         assert!(matches!(
             failure.error(),
             SourceError::Disk(DiskError::BaseMismatch)
@@ -408,6 +436,7 @@ mod tests {
             .ok_or("empty disk")?;
         let failure = refused(bad_magic)?;
         assert!(failure.token().is_none());
+        assert!(failure.role().is_none());
         assert!(matches!(
             failure.error(),
             SourceError::Disk(DiskError::Magic)
@@ -416,6 +445,8 @@ mod tests {
         let not_a_job = disk(&[(SectionKind::Job, b"{}"), (SectionKind::Base, BASE)])?;
         let failure = refused(not_a_job)?;
         assert!(has_fixed_token(&failure));
+        // The job did not parse, so the role is unknown.
+        assert!(failure.role().is_none());
         assert!(matches!(failure.error(), SourceError::Job(_)));
 
         let judge_json = judge_job()?.to_json()?;
@@ -427,10 +458,15 @@ mod tests {
         ])?;
         let failure = refused(judge_sees_base)?;
         assert!(has_fixed_token(&failure));
+        assert_eq!(failure.role(), Some(GuestRole::Judge));
         assert!(matches!(
             failure.error(),
             SourceError::Disk(DiskError::UnexpectedSection { kind: 2 })
         ));
+        let (token, role, error) = failure.into_parts();
+        assert!(token.is_some_and(|token| token.ct_eq(&TOKEN)));
+        assert_eq!(role, Some(GuestRole::Judge));
+        assert!(matches!(error, SourceError::Disk(_)));
         Ok(())
     }
 
@@ -453,6 +489,7 @@ mod tests {
         let failure = refused(bytes)?;
 
         assert!(has_fixed_token(&failure));
+        assert_eq!(failure.role(), Some(GuestRole::Candidate));
         assert!(matches!(failure.error(), SourceError::DiffNotUtf8));
         Ok(())
     }

@@ -18,7 +18,9 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use minos_core::guest::{GuestRole, GuestStatus, GuestStatusError, MAX_STATUS_BYTES};
+use minos_core::guest::{
+    GuestRole, GuestStatus, GuestStatusError, MAX_STATUS_BYTES, SetupStatus, SetupStep,
+};
 use minos_core::limits::Limits;
 use minos_core::metric::{Scorecard, ScorecardError};
 use minos_core::outcome::Reason;
@@ -118,6 +120,11 @@ pub enum StatusFault {
     #[error("the guest's status is invalid")]
     Invalid(#[source] GuestStatusError),
     /// The status parsed but names a role other than the sandbox's own.
+    ///
+    /// Not raised for a status whose setup failed at [`SetupStep::Input`]: PID 1 sends that status when it could
+    /// not read or parse its job, so the role it carries may be a placeholder. The host reads `setup` before
+    /// `role` for that one case, and Phase 7 maps every failed setup to an infrastructure failure before it reads
+    /// any other field (review CR-02).
     #[error("the guest's status names another role")]
     WrongRole,
 }
@@ -185,10 +192,16 @@ impl<R: Role> Untrusted<GuestOutput<R>> {
     /// refused when its role is not `R`. The file is removed whether or not it validates, so a later call
     /// returns [`StatusFault::Missing`].
     ///
+    /// The role check is skipped for a status whose setup failed at [`SetupStep::Input`]: an input failure
+    /// precedes the role, because PID 1 may not have parsed its job, so the role in that status can be a
+    /// placeholder. Such a status is an infrastructure failure whatever its role says, and the caller must map
+    /// it to one before reading any other field (review CR-02).
+    ///
     /// # Errors
     ///
     /// [`StatusFault::Missing`] when there is no status file; [`StatusFault::Invalid`] when it is over the cap or
-    /// not a guest status; [`StatusFault::WrongRole`] when it names a role other than `R`.
+    /// not a guest status; [`StatusFault::WrongRole`] when its setup did not fail at the input step and it names
+    /// a role other than `R`.
     pub fn take_status(&mut self) -> Result<GuestStatus, StatusFault> {
         let path = self
             .0
@@ -202,7 +215,13 @@ impl<R: Role> Untrusted<GuestOutput<R>> {
             return Err(StatusFault::Invalid(GuestStatusError::TooLarge));
         }
         let status = GuestStatus::parse_json(&bytes).map_err(StatusFault::Invalid)?;
-        if status.role() != guest_role(R::KIND) {
+        let input_failed = matches!(
+            status.setup(),
+            SetupStatus::Failed {
+                step: SetupStep::Input
+            }
+        );
+        if !input_failed && status.role() != guest_role(R::KIND) {
             return Err(StatusFault::WrongRole);
         }
         Ok(status)

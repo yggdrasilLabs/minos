@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use minos_core::guest::{
     ApplyStatus, GuestRole, GuestStatus, GuestStatusError, MAX_STATUS_BYTES, OutputStatus,
-    SetupStatus, StageEnd, StageReport,
+    SetupStatus, SetupStep, StageEnd, StageReport,
 };
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
@@ -455,6 +455,59 @@ fn take_status_refusals() -> TestResult {
     // Every fault is the same ledger reason.
     for fault in [missing, invalid, too_large, wrong_role] {
         assert_eq!(fault.reason(), Reason::OutputInvalid);
+    }
+    Ok(())
+}
+
+/// A status whose setup failed at `step` under `role`, with the apply status core requires for that role.
+fn setup_failed_status(role: GuestRole, step: SetupStep) -> Result<GuestStatus, Box<dyn Error>> {
+    let apply = match role {
+        GuestRole::Candidate => ApplyStatus::Baseline,
+        GuestRole::Judge => ApplyStatus::NotApplicable,
+    };
+    Ok(GuestStatus::new(
+        role,
+        SetupStatus::Failed { step },
+        apply,
+        Vec::new(),
+        OutputStatus::NotPacked,
+    )?)
+}
+
+#[test]
+fn take_status_input_failure_is_accepted_whatever_role_it_names() -> TestResult {
+    // PID 1 could not parse its job on a judge launch, so it sent the placeholder candidate role (review CR-02).
+    let placeholder = setup_failed_status(GuestRole::Candidate, SetupStep::Input)?;
+    let mut output = judge_output(&[(STATUS_PATH, &placeholder.to_json()?)])?;
+    let taken = output.take_status()?;
+    assert_eq!(taken, placeholder);
+    assert_eq!(
+        taken.setup(),
+        SetupStatus::Failed {
+            step: SetupStep::Input
+        },
+        "the caller reads setup first and maps it to an infrastructure failure"
+    );
+
+    // The same input failure the other way round is accepted too.
+    let judge_placeholder = setup_failed_status(GuestRole::Judge, SetupStep::Input)?;
+    let mut output = candidate_output(&[(STATUS_PATH, &judge_placeholder.to_json()?)])?;
+    assert_eq!(output.take_status()?, judge_placeholder);
+
+    // A later setup step is past the role: the role is known by then, and a mismatch is still refused.
+    for step in [
+        SetupStep::Mount,
+        SetupStep::Unpack,
+        SetupStep::Apply,
+        SetupStep::Output,
+    ] {
+        let later = setup_failed_status(GuestRole::Candidate, step)?;
+        let mut output = judge_output(&[(STATUS_PATH, &later.to_json()?)])?;
+        assert_eq!(
+            status_fault(output.take_status())?,
+            StatusFault::WrongRole,
+            "{step:?}"
+        );
     }
     Ok(())
 }

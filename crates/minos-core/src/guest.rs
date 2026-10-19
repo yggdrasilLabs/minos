@@ -535,6 +535,11 @@ pub enum SetupStatus {
 #[serde(rename_all = "snake_case")]
 pub enum SetupStep {
     /// Reading and checking the input disk and the job.
+    ///
+    /// This step precedes the role: when the job did not parse, PID 1 cannot know its role, and the status it
+    /// sends carries a placeholder (`candidate`, with apply `baseline`). The host therefore reads `setup` before
+    /// `role` for an `Input` failure and does not check the role (review CR-02); every failed setup is an
+    /// infrastructure failure whatever the other fields say.
     Input,
     /// Mounting the scratch tmpfs and its bind mounts.
     Mount,
