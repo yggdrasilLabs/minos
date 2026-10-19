@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 05
-current_phase_name: Guest, krun Backend, and Environment Build
+current_phase_name: guest-krun-backend-and-environment-build
 status: executing
-stopped_at: Completed 05-17-PLAN.md
-last_updated: "2026-10-18T22:59:37.633Z"
-last_activity: 2026-10-18
+stopped_at: Completed 05-18-PLAN.md
+last_updated: "2026-10-19T21:12:39.691Z"
+last_activity: 2026-10-19
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 60
-  completed_plans: 57
+  completed_plans: 58
   percent: 50
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 05 — Guest, krun Backend, and Environment Build
+**Current focus:** Phase 05 — guest-krun-backend-and-environment-build
 
 ## Current Position
 
-Phase: 05 (Guest, krun Backend, and Environment Build) — EXECUTING
-Plan: 20 of 22
+Phase: 05 (guest-krun-backend-and-environment-build) — EXECUTING
+Plan: 21 of 22
 Status: Ready to execute
-Last activity: 2026-10-18 — Phase 05 execution started
+Last activity: 2026-10-19 — Completed 05-18 (env build against the real builder)
 
 Progress: [██████████] 100% (29 of 29 plans)
 
@@ -115,6 +115,7 @@ Progress: [██████████] 100% (29 of 29 plans)
 | Phase 05 P15 | 18min | 3 tasks | 8 files |
 | Phase 05 P16 | 12min | 3 tasks | 8 files |
 | Phase 05 P17 | 25min | 2 tasks | 5 files |
+| Phase 05 P18 | 15 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -267,6 +268,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-16: env build rewrites the lock entry without --update when the image digest is unchanged but another input changed; --update gates only a changed image digest (D-10)
 - [Phase 05]: 05-16: env build refuses a non-arm64 [environment] arch and hashes the Dockerfile bytes from the snapshot tarball the builder receives
 - [Phase 05]: 05-17: minos-vmm RLIMIT_NOFILE is 8192 (was 1024): the pinned msb_krun_devices vsock reaper holds each closed connection's host socket for 5 s, and a full output stream is about 4353 connections; at 1024 a 16 MiB output took 20.5 s, at 8192 about 0.6 s
+- [Phase 05]: 05-18: A2 fallback not needed; docker buildx build takes the snapshot tarball on stdin with -f relative to its root
+- [Phase 05]: 05-18: D-12 stated as: the packed image reproduces whenever the builder's rootfs contents reproduce; clock-computed RUN output reproduces only through BuildKit's layer cache
 
 ### Pending Todos
 
@@ -297,6 +300,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-18T22:59:37.628Z
-Stopped at: Completed 05-17-PLAN.md
+Last session: 2026-10-19T21:12:34.113Z
+Stopped at: Completed 05-18-PLAN.md
 Resume file: None
