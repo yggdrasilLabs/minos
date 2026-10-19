@@ -25,10 +25,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use minos_backend_krun::KrunBackend;
 use minos_backend_krun::host::HostPaths;
 use minos_backend_krun::jobdir::{JOB_ROOT_PARENT, JobRoot};
 use minos_backend_krun::rootfs::{PackLimits, check_guest_elf, pack_root_image};
+use minos_backend_krun::{KrunBackend, KrunRunning};
 use minos_core::diff::Diff;
 use minos_core::experiment::Experiment;
 use minos_core::guest::{GuestJob, GuestStatus, StageEnd, StageReport};
@@ -419,11 +419,16 @@ fn judge_version(manifest: &Manifest) -> JudgeVersion {
     JudgeVersion::of(&TreeId::of(b"minos vm test judge data"), manifest.judge())
 }
 
-/// Clears `spec` against the backend's capabilities, launches it, waits, and prints what the host observed.
-fn launch<R: Role>(vm: &Vm, spec: SandboxSpec<R>, label: &str) -> TestResult<Finished<R>> {
+/// Clears `spec` against the backend's capabilities and launches it, without waiting.
+fn start<R: Role>(vm: &Vm, spec: SandboxSpec<R>) -> TestResult<KrunRunning<R>> {
     let cleared = preflight(&vm.backend.capabilities(), spec.seal())
         .map_err(|refusals| format!("preflight refused: {refusals:?}"))?;
-    let finished = vm.backend.launch(cleared)?.wait()?;
+    Ok(vm.backend.launch(cleared)?)
+}
+
+/// Waits for `running` and prints what the host observed.
+fn finish<R: Role>(running: KrunRunning<R>, label: &str) -> TestResult<Finished<R>> {
+    let finished = running.wait()?;
     println!(
         "== {label}: ended {:?} after {:?}",
         finished.ended(),
@@ -434,6 +439,11 @@ fn launch<R: Role>(vm: &Vm, spec: SandboxSpec<R>, label: &str) -> TestResult<Fin
         println!("== {label}: console tail\n{}", console.text().as_str());
     }
     Ok(finished)
+}
+
+/// Clears `spec`, launches it, waits, and prints what the host observed.
+fn launch<R: Role>(vm: &Vm, spec: SandboxSpec<R>, label: &str) -> TestResult<Finished<R>> {
+    finish(start(vm, spec)?, label)
 }
 
 /// Runs one candidate: the base tarball `base`, and the diff `diff` (the baseline when `None`), under `manifest`,
@@ -449,6 +459,21 @@ pub fn candidate(
     base: &[u8],
     diff: Option<&str>,
 ) -> TestResult<Finished<Candidate>> {
+    finish(start_candidate(vm, manifest, base, diff)?, "candidate")
+}
+
+/// As [`candidate`], but returns the running VM without waiting, so `exit_kill9` can read the helper's pid and
+/// job directory (plan 05-19).
+///
+/// # Errors
+///
+/// As [`candidate`], except that nothing has been waited for.
+pub fn start_candidate(
+    vm: &Vm,
+    manifest: &Manifest,
+    base: &[u8],
+    diff: Option<&str>,
+) -> TestResult<KrunRunning<Candidate>> {
     let tree = TreeId::of(base);
     let base_id = vm.blobs.put(base)?;
     if base_id != tree.to_blob_id() {
@@ -475,7 +500,7 @@ pub fn candidate(
         Machine::new(1, manifest.environment().memory_mib())?,
         Arch::Arm64,
     )?;
-    launch(vm, spec, "candidate")
+    start(vm, spec)
 }
 
 /// Runs one judge over the judge data tarball `judge_data` and the candidate output tarball `candidate_out`,
