@@ -24,10 +24,10 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 
 - [x] `minos-store` ships the synchronous `Ledger` and `Blobs` traits with a `MemoryStore` and a crash-safe `FileStore` (locked append-only JSONL with torn-tail repair, temp-then-rename blobs rehashed on read), and `minos-source` packs a deterministic, denylisted, secret-scanned source tarball whose SHA-256 is the `TreeId` — Validated in Phase 4: Store, Source Snapshot, and Sandbox Types (2026-10-15; see 04-VALIDATION.md, 04-EVIDENCE.md and 04-VERIFICATION.md)
 
+- [x] A libkrun backend on macOS arm64 (`minos-backend-krun` driving the signed, Seatbelt-confined `minos-vmm` helper) launches a VM from a sealed `LaunchPlan` with no network device, input delivered as two read-only disk images, and output returned as a token-authenticated chunk stream over vsock parsed under caps into `Untrusted<T>`; `minos-guest` is PID 1 in the VM, applies the base tarball plus diff with core's strict applier, runs the manifest's argv commands as an unprivileged uid under per-stage rlimits and deadlines, and streams results out; `minos env build` turns a digest-pinned Dockerfile into a reproducible SquashFS root image recorded in `minos.lock`, and `minos host doctor` runs the launch preflight. The exit criterion holds on the production backend: egress fails closed, the guest sees no host values (one recorded exception, `KRUN_BOOT_START_NS=<digits>` from msb_krun 0.1.41, user decision 2026-10-19), `kill -9` of the launcher leaves no VM or helper, and a candidate cannot forge the output stream — Validated in Phase 5: Guest, krun Backend, and Environment Build (2026-10-19; see 05-VALIDATION.md, 05-EVIDENCE.md `## Final gate`, and 05-VERIFICATION.md)
+
 ### Active
 
-- [ ] A libkrun backend on macOS arm64 launches a VM from a sealed `LaunchPlan`, with no network device, input delivered as read-only disk images, and output returned as a capped tar stream over vsock wrapped in `Untrusted<T>`
-- [ ] `minos-guest` runs inside the VM: applies the base tarball plus diff with a pure-Rust patch crate, runs the manifest's argv commands under budget, and streams results out
 - [ ] A local loop driver in the CLI process runs generations against a file-backed ledger and blob store, using the same pure core functions the Lambda orchestrator will use later
 - [ ] A `ModelProvider` abstraction in `minos-propose` with one implementation that execs the user's own `claude` binary in print mode, text-only, and parses structured JSON output; Bedrock and API-key implementations are later variants of the same trait or enum
 - [ ] Sweep tier (seeded sampling over declared params, no model) and `single_shot` tier (one model call returning several diffs) both route through `ProposerSpec::eligible`
@@ -86,6 +86,7 @@ Untrusted experiment code runs in a hardware-virtualized sandbox with no network
 | Root-disk kernel args carry `dummy.numdummies=0` and the boot test asserts no virtio-net device | The kernel's built-in dummy driver creates `dummy0`; the user chose to disable it and add the direct check rather than relax the interface assertion | Decided by the user 2026-10-10 (S01-NETIFACES, option 2) |
 | Seatbelt deny-default profile confines `minos-vmm`; dedicated `_minos` user recorded as a recipe only | SPIKE-05 passed with the Unix socket as the only network allowance; the user fallback needs sudo or a LaunchDaemon and was not executed | Proven in 02-09 (2026-10-10); Phase 5 records the user layer as reduced hardening |
 | `minos-cli` uses the clap builder API; clap's `derive` feature is off | clap_derive emits `#[allow(clippy::restriction)]` on every generated impl, which is E0453 under the `forbid` lints; the lint levels are final, so the API surface moved instead (UAT test 6, decision A) | Decided in 01-05 (2026-10-10) |
+| `KRUN_BOOT_START_NS=<digits>` in the guest cmdline is a recorded exception to GUEST-05, not an allowance by default | msb_krun 0.1.41 `build_kernel_cmdline` appends it unconditionally from the host clock; no builder method, feature, or env var removes it and no newer release exists; the guest clock reveals the same time; the user first chose no allowance, then declined a fork of the whole project | Decided 2026-10-19 at the 05-19 checkpoint: `exit_env` allows exactly that one all-digit token; removal path if ever taken is vendoring only the `msb_krun` wrapper crate under `[patch.crates-io]` with a one-line change (CLAUDE.md Open questions) |
 
 ## Evolution
 
@@ -105,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-15 after Phase 4: Store, Source Snapshot, and Sandbox Types (9/9 plans; verified 4/4 success criteria and 11/11 requirements; `cargo clean` run after verification; code review open: 0 Critical, 3 Warnings, 6 Info in 04-REVIEW.md; `/gsd-secure-phase 4` pending)*
+*Last updated: 2026-10-19 after Phase 5: Guest, krun Backend, and Environment Build (22/22 plans; verified 5/5 success criteria and 17/17 requirements, GUEST-05 with one recorded exception; `cargo clean` run after the final gate; code review open: 2 Critical, 4 Warnings, 7 Info in 05-REVIEW.md; `/gsd-secure-phase 5` pending)*
