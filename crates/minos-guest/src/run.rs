@@ -296,13 +296,8 @@ impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
         let unpacked = unpack_tar(&base, &src, &UnpackCaps::BASE);
         drop(base);
         if let Err(error) = unpacked {
-            return setup_failed(
-                self.sink,
-                role,
-                no_diff,
-                SetupStep::Unpack,
-                JobError::Unpack(error),
-            );
+            let step = unpack_step(&error);
+            return setup_failed(self.sink, role, no_diff, step, JobError::Unpack(error));
         }
         let apply = match diff {
             None => ApplyStatus::Baseline,
@@ -313,11 +308,12 @@ impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
                     Ok(ApplyOutcome::Applied) => ApplyStatus::Applied,
                     Ok(ApplyOutcome::Failed { path, hunk }) => ApplyStatus::Failed { path, hunk },
                     Err(error) => {
+                        let step = apply_step(&error);
                         return setup_failed(
                             self.sink,
                             role,
                             no_diff,
-                            SetupStep::Apply,
+                            step,
                             JobError::Apply(error),
                         );
                     }
@@ -388,13 +384,8 @@ impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
         });
         drop(candidate_out);
         if let Err(error) = unpacked {
-            return setup_failed(
-                self.sink,
-                role,
-                apply,
-                SetupStep::Unpack,
-                JobError::Unpack(error),
-            );
+            let step = unpack_step(&error);
+            return setup_failed(self.sink, role, apply, step, JobError::Unpack(error));
         }
         // `judge` and `candidate` stay root-owned: the judge reads its inputs but cannot change them.
         if let Err(error) = self.hand_over(&[OUT, HOME, TMP]) {
@@ -463,6 +454,24 @@ impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
             logs.insert(spec.stage(), run.log);
         }
         (reports, logs)
+    }
+}
+
+/// The setup step an unpack failure is reported as: a full scratch is [`SetupStep::ScratchFull`], a
+/// configuration error the host must not retry; anything else is [`SetupStep::Unpack`] (review WR-02).
+const fn unpack_step(error: &UnpackError) -> SetupStep {
+    match error {
+        UnpackError::ScratchFull => SetupStep::ScratchFull,
+        _ => SetupStep::Unpack,
+    }
+}
+
+/// The setup step an apply failure is reported as: a full scratch is [`SetupStep::ScratchFull`]; anything else
+/// is [`SetupStep::Apply`] (review WR-02).
+const fn apply_step(error: &ApplySetupError) -> SetupStep {
+    match error {
+        ApplySetupError::ScratchFull => SetupStep::ScratchFull,
+        _ => SetupStep::Apply,
     }
 }
 
@@ -1100,6 +1109,30 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    #[test]
+    fn a_full_scratch_is_its_own_setup_step() {
+        // ENOSPC on an unpack or an apply write names the scratch cap, which the host must not retry; every
+        // other failure keeps its step (review WR-02).
+        assert_eq!(
+            unpack_step(&UnpackError::ScratchFull),
+            SetupStep::ScratchFull
+        );
+        assert_eq!(unpack_step(&UnpackError::Truncated), SetupStep::Unpack);
+        assert_eq!(
+            unpack_step(&UnpackError::Io(io::Error::other("x"))),
+            SetupStep::Unpack
+        );
+        assert_eq!(
+            apply_step(&ApplySetupError::ScratchFull),
+            SetupStep::ScratchFull
+        );
+        assert_eq!(apply_step(&ApplySetupError::Identity), SetupStep::Apply);
+        assert_eq!(
+            apply_step(&ApplySetupError::Io(io::Error::other("x"))),
+            SetupStep::Apply
+        );
     }
 
     #[test]

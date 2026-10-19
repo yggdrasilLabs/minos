@@ -608,6 +608,34 @@ fn guest_status_round_trip() -> TestResult {
 }
 
 #[test]
+fn guest_status_scratch_full_step_is_on_the_wire() -> TestResult {
+    // The step added by review WR-02 serializes as snake_case like the others and round-trips under version 1:
+    // an added variant keeps every earlier status parseable. Asserted inline, not as an insta golden, so the
+    // gate never has to accept a new snapshot for it.
+    let status = GuestStatus::new(
+        GuestRole::Candidate,
+        SetupStatus::Failed {
+            step: SetupStep::ScratchFull,
+        },
+        ApplyStatus::Baseline,
+        Vec::new(),
+        OutputStatus::NotPacked,
+    )?;
+    let json = status.to_json()?;
+    let text = std::str::from_utf8(&json)?;
+    assert!(
+        text.contains(r#""setup":{"failed":{"step":"scratch_full"}}"#),
+        "{text}"
+    );
+    assert_eq!(GuestStatus::parse_json(&json)?, status);
+    assert_eq!(
+        serde_json::to_value(SetupStep::ScratchFull)?,
+        Value::String("scratch_full".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
 fn guest_status_getters() -> TestResult {
     let status = candidate_status()?;
     assert_eq!(status.role(), GuestRole::Candidate);

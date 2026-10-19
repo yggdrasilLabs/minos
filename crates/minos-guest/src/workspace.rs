@@ -139,9 +139,34 @@ pub enum UnpackError {
     /// An entry's path, or one of its parent directories, already exists as something it cannot be.
     #[error("a tar entry collides with an earlier entry")]
     Collision,
+    /// The scratch tmpfs filled (`ENOSPC`): the job's scratch cap is below what the tarball needs. Unlike every
+    /// other variant this is a configuration error the same inputs reproduce on every launch, so the status
+    /// reports it as its own setup step and the host must not retry it (review WR-02).
+    #[error("the scratch filled while unpacking: the scratch cap is too small for this input")]
+    ScratchFull,
     /// Writing the tree failed.
     #[error("could not write the unpacked tree")]
     Io(#[source] io::Error),
+}
+
+/// The unpack error for a failed write: a full scratch is [`UnpackError::ScratchFull`], anything else
+/// [`UnpackError::Io`].
+fn write_error(error: io::Error) -> UnpackError {
+    if error.kind() == ErrorKind::StorageFull {
+        UnpackError::ScratchFull
+    } else {
+        UnpackError::Io(error)
+    }
+}
+
+/// The apply error for a failed write: a full scratch is [`ApplySetupError::ScratchFull`], anything else
+/// [`ApplySetupError::Io`].
+fn apply_write_error(error: io::Error) -> ApplySetupError {
+    if error.kind() == ErrorKind::StorageFull {
+        ApplySetupError::ScratchFull
+    } else {
+        ApplySetupError::Io(error)
+    }
 }
 
 /// Unpacks `tar` into the existing directory `dest` under `caps`: regular files only, each named by a `RelPath`,
@@ -199,15 +224,15 @@ pub fn unpack_tar(tar: &[u8], dest: &Path, caps: &UnpackCaps) -> Result<UnpackRe
             .open(&target)
             .map_err(|error| match error.kind() {
                 ErrorKind::AlreadyExists => UnpackError::Collision,
-                _ => UnpackError::Io(error),
+                _ => write_error(error),
             })?;
-        let copied = io::copy(&mut (&mut entry).take(size), &mut file).map_err(UnpackError::Io)?;
+        let copied = io::copy(&mut (&mut entry).take(size), &mut file).map_err(write_error)?;
         if copied != size {
             return Err(UnpackError::Truncated);
         }
         // The create mode passes through the umask; set it exactly.
         file.set_permissions(Permissions::from_mode(mode))
-            .map_err(UnpackError::Io)?;
+            .map_err(write_error)?;
         files = files.saturating_add(1);
     }
     Ok(UnpackReport {
@@ -233,9 +258,9 @@ fn create_parents(dest: &Path, path: &RelPath) -> Result<PathBuf, UnpackError> {
                 DirBuilder::new()
                     .mode(0o755)
                     .create(&current)
-                    .map_err(UnpackError::Io)?;
+                    .map_err(write_error)?;
                 fs::set_permissions(&current, Permissions::from_mode(0o755))
-                    .map_err(UnpackError::Io)?;
+                    .map_err(write_error)?;
             }
             Err(error) => return Err(UnpackError::Io(error)),
         }
@@ -280,6 +305,10 @@ pub enum ApplySetupError {
     /// The applier reported a reason other than `ApplyFailed`.
     #[error("the applier reported an unexpected reason")]
     Reason,
+    /// The scratch tmpfs filled (`ENOSPC`) while an applied file was written back: a configuration error the
+    /// same inputs reproduce on every launch, reported as its own setup step and never retried (review WR-02).
+    #[error("the scratch filled while writing the applied diff: the scratch cap is too small")]
+    ScratchFull,
     /// Reading or writing a touched file failed.
     #[error("could not read or write a file the diff touches")]
     Io(#[source] io::Error),
@@ -322,8 +351,8 @@ pub fn apply_diff(
     };
     for path in diff.paths() {
         let bytes = applied.get(path).ok_or(ApplySetupError::Reason)?;
-        let mut file = open_nofollow_rewrite(&full_path(src, path)).map_err(ApplySetupError::Io)?;
-        file.write_all(bytes).map_err(ApplySetupError::Io)?;
+        let mut file = open_nofollow_rewrite(&full_path(src, path)).map_err(apply_write_error)?;
+        file.write_all(bytes).map_err(apply_write_error)?;
     }
     Ok(ApplyOutcome::Applied)
 }
@@ -374,6 +403,29 @@ mod tests {
     };
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    #[test]
+    fn a_full_scratch_is_scratch_full_and_other_writes_are_io() {
+        // ENOSPC is the one write error that names the scratch cap (review WR-02).
+        let full = || io::Error::from(ErrorKind::StorageFull);
+        assert!(matches!(write_error(full()), UnpackError::ScratchFull));
+        assert!(matches!(
+            apply_write_error(full()),
+            ApplySetupError::ScratchFull
+        ));
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::Other,
+            ErrorKind::ReadOnlyFilesystem,
+        ] {
+            assert!(
+                matches!(write_error(io::Error::from(kind)), UnpackError::Io(error) if error.kind() == kind)
+            );
+            assert!(
+                matches!(apply_write_error(io::Error::from(kind)), ApplySetupError::Io(error) if error.kind() == kind)
+            );
+        }
+    }
 
     /// One tar entry with a raw name, any type, and any mode, appended after `before` and before `after.txt`.
     fn with_raw_entry(

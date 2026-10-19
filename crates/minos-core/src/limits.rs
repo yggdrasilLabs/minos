@@ -214,6 +214,12 @@ pub const GUEST_RESERVE_MIB: u16 = 256;
 /// toolchains (05-RESEARCH Pitfall 10).
 pub const MIN_CANDIDATE_ALLOWANCE_MIB: u16 = 256;
 /// Smallest `[environment] scratch_mib`: the tmpfs scratch cap, in MiB.
+///
+/// This floor is below what a role's largest inputs need (up to 64 MiB of base tree for a candidate; up to 96
+/// MiB of judge data plus 16 MiB of candidate output for a judge), and the manifest does not refuse a scratch
+/// smaller than a project's actual inputs, because it reads no file. A scratch that fills while the guest
+/// unpacks is reported as `guest::SetupStep::ScratchFull`, a configuration error the host must report against
+/// `scratch_mib` and never retry (review WR-02).
 pub const MIN_SCRATCH_MIB: u16 = 64;
 /// Largest `[environment] scratch_mib`, in MiB: the largest VM less the guest reserve and the least candidate
 /// allowance (15872).

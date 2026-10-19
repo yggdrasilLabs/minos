@@ -549,6 +549,13 @@ pub enum SetupStep {
     Apply,
     /// Packing or sending the output.
     Output,
+    /// The scratch tmpfs filled while an input was unpacked or the applied diff was written back: the
+    /// manifest's `[environment] scratch_mib` is too small for the role's inputs (up to 64 MiB of base tree for
+    /// a candidate; up to 96 MiB of judge data plus 16 MiB of candidate output for a judge). The same inputs
+    /// fill it on every launch, so this is a configuration error, not an infrastructure failure: Phase 7 must
+    /// report it against `scratch_mib` and must not retry it (review WR-02). Added after the first status golden;
+    /// an added variant keeps every earlier status parseable, so the version stays 1.
+    ScratchFull,
 }
 
 /// How the candidate's diff went.
