@@ -1924,3 +1924,14 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; fin
 ```
 
 Signature after the last cargo command above: `codesign --display --entitlements - target/debug/minos-vmm` still lists both keys.
+
+### cargo clean (GATE-06)
+
+Every step above exited 0, so `cargo clean` ran next, as the last cargo command of the phase; no cargo command ran after it.
+
+```
+$ cargo clean
+     Removed 165992 files, 17.3GiB total
+```
+
+cargo clean: exit 0, run after the final gate (GATE-06)
