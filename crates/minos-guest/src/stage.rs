@@ -20,8 +20,11 @@
 //!   sanitizers) can fail under it (05-RESEARCH Pitfall 10); the VM's memory is the real bound, tmpfs pages count
 //!   against it, and the defaults are generous and manifest-tunable.
 //! - `RLIMIT_FSIZE` is the scratch cap: no single file can be larger than the whole scratch mount.
-//! - `RLIMIT_CPU` is the stage budget in whole seconds plus one, so the kernel's `SIGXCPU` backs up PID 1's own
-//!   wall-clock deadline without ever firing before it.
+//! - `RLIMIT_CPU` is the stage budget in whole seconds plus one, multiplied by the VM's vCPU count, so the
+//!   kernel's `SIGXCPU` backs up PID 1's own wall-clock deadline without ever firing before it. `RLIMIT_CPU`
+//!   counts the CPU time of every thread of a process, so a process that keeps every vCPU busy for the whole
+//!   budget uses `budget * vcpus` of CPU time; an unscaled limit would kill a parallel build with signal 24
+//!   before the deadline and blame the candidate (review CR-01). PID 1 reads the count from the kernel.
 //! - `RLIMIT_NPROC` is [`MAX_PROCESSES`] and `RLIMIT_NOFILE` is [`MAX_OPEN_FILES`].
 //! - `RLIMIT_CORE` is always 0, so a crashing candidate writes no core file into scratch; it is not a field.
 
@@ -29,7 +32,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use minos_core::guest::{GuestJob, StageSpec};
-use minos_core::limits::{MAX_MEMORY_MIB, MAX_SCRATCH_MIB, MAX_STAGE_MS};
+use minos_core::limits::{MAX_MEMORY_MIB, MAX_SCRATCH_MIB, MAX_STAGE_MS, MAX_VCPUS};
 
 /// The uid every stage runs as (D-08). Far above the ranges distributions give system and login accounts, so it
 /// names no account in any image.
@@ -94,8 +97,9 @@ const MAX_ADDRESS_SPACE_BYTES: u64 = MAX_MEMORY_MIB as u64 * MIB;
 /// The largest file-size limit the trampoline accepts: the largest scratch cap.
 const MAX_FILE_SIZE_BYTES: u64 = MAX_SCRATCH_MIB as u64 * MIB;
 
-/// The largest CPU limit the trampoline accepts: the longest stage budget in seconds, plus one.
-const MAX_CPU_SECONDS: u64 = MAX_STAGE_MS.div_ceil(1000) + 1;
+/// The largest CPU limit the trampoline accepts: the longest stage budget in seconds, plus one, on every vCPU
+/// a sandbox may have.
+const MAX_CPU_SECONDS: u64 = (MAX_STAGE_MS.div_ceil(1000) + 1) * MAX_VCPUS as u64;
 
 /// The rlimits of one stage, derived from the job by [`StageLimits::for_stage`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,16 +112,21 @@ pub struct StageLimits {
 }
 
 impl StageLimits {
-    /// The limits for `stage` of `job`: the candidate allowance as the address space, the scratch cap as the file
-    /// size, the stage budget in whole seconds plus one as the CPU time, and [`MAX_PROCESSES`] and
-    /// [`MAX_OPEN_FILES`].
+    /// The limits for `stage` of `job` on a VM of `vcpus` vCPUs: the candidate allowance as the address space,
+    /// the scratch cap as the file size, the stage budget in whole seconds plus one, times the vCPU count, as
+    /// the CPU time, and [`MAX_PROCESSES`] and [`MAX_OPEN_FILES`].
+    ///
+    /// `vcpus` is clamped to 1 to `MAX_VCPUS`, so the CPU limit never exceeds the trampoline's cap.
     #[must_use]
-    pub fn for_stage(job: &GuestJob, stage: &StageSpec) -> Self {
+    pub fn for_stage(job: &GuestJob, stage: &StageSpec, vcpus: u8) -> Self {
+        let wall_seconds = stage.budget_ms().div_ceil(1000).saturating_add(1);
+        let vcpus = u64::from(vcpus.clamp(1, MAX_VCPUS));
         Self {
             address_space_bytes: u64::from(job.allowance_mib()) * MIB,
             file_size_bytes: u64::from(job.scratch_mib()) * MIB,
             processes: MAX_PROCESSES,
-            cpu_seconds: stage.budget_ms().div_ceil(1000).saturating_add(1),
+            // Every thread of the process may run on its own vCPU for the whole budget.
+            cpu_seconds: wall_seconds.saturating_mul(vcpus),
             open_files: MAX_OPEN_FILES,
         }
     }
@@ -285,6 +294,7 @@ mod tests {
         TRAMPOLINE_FLAG, TrampolineError, parse_trampoline, scratch_mount_data, trampoline_argv,
     };
     use crate::test_fixture::{candidate_job, judge_job};
+    use minos_core::limits::{MAX_STAGE_MS, MAX_VCPUS};
     use minos_core::outcome::Stage;
 
     type TestResult = Result<(), Box<dyn Error>>;
@@ -344,7 +354,7 @@ mod tests {
             .ok_or("no build stage")?;
         assert_eq!(build.budget_ms(), 120_000);
 
-        let limits = StageLimits::for_stage(&job, build);
+        let limits = StageLimits::for_stage(&job, build, 1);
 
         assert_eq!(limits.address_space_bytes(), 768 * 1_048_576);
         assert_eq!(limits.file_size_bytes(), 1024 * 1_048_576);
@@ -360,7 +370,39 @@ mod tests {
         let job = judge_job()?;
         let judge = job.stages().first().ok_or("no judge stage")?;
         // The default judge budget is 2 minutes: 120 s plus the one-second margin.
-        assert_eq!(StageLimits::for_stage(&job, judge).cpu_seconds(), 121);
+        assert_eq!(StageLimits::for_stage(&job, judge, 1).cpu_seconds(), 121);
+        Ok(())
+    }
+
+    #[test]
+    fn stage_cpu_limit_scales_with_vcpus_within_the_cap() -> TestResult {
+        let job = candidate_job()?;
+        let build = job
+            .stages()
+            .iter()
+            .find(|stage| stage.stage() == Stage::Build)
+            .ok_or("no build stage")?;
+        // Eight vCPUs: a process that keeps all eight busy for the 120 s budget uses 968 s of CPU time.
+        let eight = StageLimits::for_stage(&job, build, 8);
+        assert_eq!(eight.cpu_seconds(), 121 * 8);
+        assert!(eight.cpu_seconds() <= MAX_CPU_SECONDS);
+        // The other limits do not scale.
+        assert_eq!(eight.address_space_bytes(), limits().address_space_bytes());
+        assert_eq!(eight.file_size_bytes(), limits().file_size_bytes());
+        assert_eq!(eight.processes(), limits().processes());
+        assert_eq!(eight.open_files(), limits().open_files());
+        // Zero is treated as one vCPU; a count over MAX_VCPUS is clamped to it.
+        assert_eq!(StageLimits::for_stage(&job, build, 0).cpu_seconds(), 121);
+        assert_eq!(
+            StageLimits::for_stage(&job, build, u8::MAX).cpu_seconds(),
+            121 * u64::from(MAX_VCPUS)
+        );
+        // The longest budget on the most vCPUs is exactly the trampoline's cap, so the trampoline accepts
+        // every limit `for_stage` can produce.
+        assert_eq!(
+            MAX_CPU_SECONDS,
+            (MAX_STAGE_MS.div_ceil(1000) + 1) * u64::from(MAX_VCPUS)
+        );
         Ok(())
     }
 

@@ -137,10 +137,18 @@ pub fn pid1() -> ! {
         &mut executor,
         &mut handover,
         Path::new(SCRATCH_MOUNT),
+        vcpus(),
     );
     report_end(&end);
     sync();
     power_off()
+}
+
+/// The VM's vCPU count, as the kernel reports it to PID 1, which runs on every vCPU. Each stage's `RLIMIT_CPU`
+/// is scaled by it (review CR-01). A count the kernel cannot report is taken as one, and a count over `u8` is
+/// saturated; `StageLimits::for_stage` clamps it to the sandbox maximum.
+fn vcpus() -> u8 {
+    thread::available_parallelism().map_or(1, |count| u8::try_from(count.get()).unwrap_or(u8::MAX))
 }
 
 /// Opens the input disk, reads it once through a [`DiskJobSource`], and closes it. `None` when it cannot be

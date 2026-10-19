@@ -209,13 +209,15 @@ impl JobEnd {
     }
 }
 
-/// Runs one job, as the [module docs](self) describe, with the per-run directories under `root`.
+/// Runs one job, as the [module docs](self) describe, with the per-run directories under `root`, on a VM of
+/// `vcpus` vCPUs (which scales each stage's `RLIMIT_CPU`; see [`StageLimits::for_stage`]).
 pub fn run_job<S: JobSource, O: OutputSink, E: StageExecutor, H: Handover>(
     source: &mut S,
     sink: &mut O,
     executor: &mut E,
     handover: &mut H,
     root: &Path,
+    vcpus: u8,
 ) -> JobEnd {
     let input = match source.read_input() {
         Ok(input) => input,
@@ -249,6 +251,7 @@ pub fn run_job<S: JobSource, O: OutputSink, E: StageExecutor, H: Handover>(
         handover,
         root,
         job: &job,
+        vcpus,
     };
     match job.role() {
         GuestRole::Candidate => parts.candidate(base, diff),
@@ -256,13 +259,14 @@ pub fn run_job<S: JobSource, O: OutputSink, E: StageExecutor, H: Handover>(
     }
 }
 
-/// The traits, the scratch root, and the job one [`run_job`] works with.
+/// The traits, the scratch root, the job, and the VM's vCPU count one [`run_job`] works with.
 struct Parts<'a, O, E, H> {
     sink: &'a mut O,
     executor: &'a mut E,
     handover: &'a mut H,
     root: &'a Path,
     job: &'a GuestJob,
+    vcpus: u8,
 }
 
 impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
@@ -450,7 +454,7 @@ impl<O: OutputSink, E: StageExecutor, H: Handover> Parts<'_, O, E, H> {
                 stage: spec.stage(),
                 argv: spec.argv().to_vec(),
                 cwd: cwd.to_path_buf(),
-                limits: StageLimits::for_stage(self.job, spec),
+                limits: StageLimits::for_stage(self.job, spec, self.vcpus),
                 deadline: Duration::from_millis(spec.budget_ms()),
             };
             let run = self.executor.run_stage(&command);
@@ -585,6 +589,9 @@ mod tests {
 
     const TOKEN: [u8; 32] = [0x7e; 32];
 
+    /// The vCPU count every test job runs with.
+    const VCPUS: u8 = 2;
+
     fn token() -> ChunkToken {
         ChunkToken::from_bytes(TOKEN)
     }
@@ -718,7 +725,7 @@ mod tests {
         let memory = Memory::default();
         let mut source = DiskJobSource::new(Cursor::new(disk));
         let mut sink = ChunkSink::new(memory.clone(), token()).with_backoff(Backoff::none());
-        let end = run_job(&mut source, &mut sink, executor, handover, root);
+        let end = run_job(&mut source, &mut sink, executor, handover, root, VCPUS);
         let closed = memory.closed.take();
         let connections = closed.len();
         let tar = if closed.is_empty() {
@@ -824,7 +831,12 @@ mod tests {
             assert_eq!(command.stage(), spec.stage());
             assert_eq!(command.argv(), spec.argv());
             assert_eq!(command.cwd(), root.path().join(SRC));
-            assert_eq!(command.limits(), StageLimits::for_stage(&job, spec));
+            assert_eq!(command.limits(), StageLimits::for_stage(&job, spec, VCPUS));
+            assert_ne!(
+                command.limits().cpu_seconds(),
+                StageLimits::for_stage(&job, spec, 1).cpu_seconds(),
+                "the vCPU count reaches the stage's CPU limit"
+            );
             assert_eq!(command.deadline(), Duration::from_millis(spec.budget_ms()));
         }
 
