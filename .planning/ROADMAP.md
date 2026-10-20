@@ -326,7 +326,7 @@ Plans:
   4. `single_shot` returns several `{rationale, files}` candidates, parsed into closed `deny_unknown_fields` types, from which the canonical diff is derived, and invalid candidates are dropped, not repaired. `sweep` produces proposals from declared params with no model call. Each call's token usage is returned for a `Spent` event and any CLI dollar figure is ignored. A rate-limit or usage-cap response surfaces as an infrastructure failure that stops the run with `StopRequested`, never as an `Outcome` (*superseded wording, 2026-10-19: "`{rationale, diff}` candidates ... invalid diffs are dropped"; the model returns full files and Minos derives the diff, 06-CONTEXT.md D-10, D-11*) (PROP-07, PROP-08, PROP-09, PROP-10)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 6/10 plans executed
+**Plans**: 7/10 plans executed
 Plans:
 **Wave 1**
 
@@ -345,7 +345,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 06-07-PLAN.md — `ClaudeCli` call path with re-resolution and re-preflight, end-to-end provider-agnostic proof, CLAUDE.md provider wording (wave 4)
+- [x] 06-07-PLAN.md — `ClaudeCli` call path with re-resolution and re-preflight, end-to-end provider-agnostic proof, CLAUDE.md provider wording (wave 4)
 
 **Wave 5** *(blocked on 06-07)*
 
@@ -409,6 +409,6 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
-| 6. Proposers | 6/10 | In Progress|  |
+| 6. Proposers | 7/10 | In Progress|  |
 | 7. Runner and Loop | 0/TBD | Not started | - |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
