@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: proposers
 status: executing
 stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-10-20T12:35:59.130Z"
+last_updated: "2026-10-20T12:44:31.484Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 70
-  completed_plans: 67
+  completed_plans: 68
   percent: 63
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 06 (proposers) — EXECUTING
-Plan: 8 of 10
+Plan: 9 of 10
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 06 execution started
 
@@ -126,6 +126,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 06 P05 | 6min | 3 tasks | 12 files |
 | Phase 06 P06 | 9 min | 2 tasks | 4 files |
 | Phase 06 P07 | 12 min | 3 tasks | 7 files |
+| Phase 06 P08 | 15min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -294,6 +295,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-06: RunError gained Io (stdout read failure maps to InfraCause::Io); auth status stdout must start with '{'; an uncheckable work-root ancestor refuses as WorkRootUnusable
 - [Phase 06]: ClaudeCli holds Preflighted behind a Mutex released before the model call; a changed binary is adopted only after reverify passes
 - [Phase 06]: A call directory that cannot be removed is InfraCause::WorkDir carrying the call's usage, never dropped silently
+- [Phase 06]: 06-08: live hostile-fixture hooks use the documented shell form so the positive control fires on any CLI that runs hooks; a fixture root containing a single quote is refused
+- [Phase 06]: 06-08: a model-free, non-ignored test checks the live fixture and the control argv (exactly four isolation elements removed) so a hand run is never spent on a broken fixture
 
 ### Pending Todos
 
@@ -324,6 +327,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-20T12:35:59.125Z
+Last session: 2026-10-20T12:44:27.130Z
 Stopped at: Completed 06-07-PLAN.md
 Resume file: None
