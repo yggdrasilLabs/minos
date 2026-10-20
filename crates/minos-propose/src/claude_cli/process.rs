@@ -13,11 +13,23 @@
 //! started outlives it (06-RESEARCH Anti-Patterns: never join the readers before killing the group).
 
 use std::ffi::OsString;
+use std::io::{self, ErrorKind, Read, Write};
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
-use std::time::Duration;
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use rustix::io::Errno;
+use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, kill_process_group, waitid};
 
 use crate::claude_cli::classify::Exit;
+use crate::limits::POLL_INTERVAL;
 use crate::provider::InfraCause;
+
+/// The stderr reader's chunk size.
+const STDERR_CHUNK_BYTES: usize = 8192;
 
 /// One subprocess to run: what to start, with what, and within which bounds.
 pub(crate) struct RunSpec<'a> {
@@ -79,10 +91,177 @@ impl RunError {
     }
 }
 
+/// Why the watcher stopped polling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ended {
+    /// The leader exited; it is still unreaped.
+    Exited,
+    /// The stdout reader saw more than its cap.
+    Overflow,
+    /// The deadline passed first.
+    Deadline,
+    /// `waitid` failed, so the leader's state is unknown.
+    WaitFailed,
+}
+
 /// Runs `spec` to completion within its bounds.
+///
+/// The process group is killed and the leader reaped before this returns, whatever happened, so no process the
+/// run started is left behind (except one that left the group on its own, which the provider's programs do not).
+///
+/// # Errors
+///
+/// [`RunError::Spawn`] when the process could not be started, [`RunError::Deadline`] when the deadline passed
+/// before the leader exited, [`RunError::StdoutTooLarge`] when stdout passed its cap, [`RunError::Wait`] when the
+/// leader could not be observed or reaped, and [`RunError::Io`] when its stdout could not be read.
 pub(crate) fn run(spec: &RunSpec<'_>) -> Result<RunOutput, RunError> {
-    let _ = spec;
-    Err(RunError::Spawn)
+    let mut child = Command::new(spec.program)
+        .args(spec.args)
+        .env_clear()
+        .envs(spec.env.iter().map(|(name, value)| (name, value)))
+        .current_dir(spec.cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .map_err(|_| RunError::Spawn)?;
+    let started = Instant::now();
+    let pid = Pid::from_child(&child);
+    let (Some(mut stdin), Some(stdout), Some(stderr)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
+        kill_and_reap(&mut child, pid).ok();
+        return Err(RunError::Spawn);
+    };
+    let overflow = AtomicBool::new(false);
+    let (ended, reaped, stdout, stderr_tail) = thread::scope(|scope| {
+        let input = spec.stdin;
+        scope.spawn(move || {
+            // A write error, `BrokenPipe` included, is not a failure: the child may exit without reading its
+            // input, and its output says what happened. Dropping the pipe at the end closes it.
+            stdin.write_all(input).ok();
+        });
+        let out = scope.spawn(|| read_capped(stdout, spec.stdout_cap, &overflow));
+        let err = scope.spawn(move || keep_tail(stderr, spec.stderr_cap));
+        let ended = watch(pid, started, spec.deadline, &overflow);
+        // Before any reader is joined: a straggler holding a pipe would otherwise block the join forever.
+        let reaped = kill_and_reap(&mut child, pid);
+        let stdout = out
+            .join()
+            .unwrap_or_else(|_| Err(io::Error::other("the stdout reader panicked")));
+        let stderr_tail = err.join().unwrap_or_default();
+        (ended, reaped, stdout, stderr_tail)
+    });
+    match ended {
+        Ended::Deadline => return Err(RunError::Deadline),
+        Ended::WaitFailed => return Err(RunError::Wait),
+        Ended::Exited | Ended::Overflow => {}
+    }
+    if overflow.load(Ordering::SeqCst) {
+        return Err(RunError::StdoutTooLarge);
+    }
+    let status = reaped.map_err(|_| RunError::Wait)?;
+    let stdout = stdout.map_err(|_| RunError::Io)?;
+    Ok(RunOutput {
+        exit: exit_of(status).ok_or(RunError::Wait)?,
+        stdout,
+        stderr_tail,
+    })
+}
+
+/// Polls the unreaped leader every [`POLL_INTERVAL`] until it exits, `overflow` is set, or `deadline` has passed
+/// since `started`.
+fn watch(pid: Pid, started: Instant, deadline: Duration, overflow: &AtomicBool) -> Ended {
+    loop {
+        match exited_unreaped(pid) {
+            Ok(true) => return Ended::Exited,
+            Ok(false) => {}
+            Err(_) => return Ended::WaitFailed,
+        }
+        if overflow.load(Ordering::SeqCst) {
+            return Ended::Overflow;
+        }
+        if started.elapsed() >= deadline {
+            return Ended::Deadline;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// Whether the unreaped leader `pid` has exited, observed with `waitid(WNOWAIT)` so it stays a zombie and keeps
+/// its pid, and so its process group id, from being reused (the `minos-backend-krun` supervisor's pattern).
+fn exited_unreaped(pid: Pid) -> Result<bool, Errno> {
+    match waitid(
+        WaitId::Pid(pid),
+        WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+    ) {
+        Ok(status) => Ok(status.is_some()),
+        Err(Errno::INTR) => Ok(false),
+        Err(errno) => Err(errno),
+    }
+}
+
+/// Sends SIGKILL to the group the unreaped `child` leads and to the child, then reaps it.
+///
+/// `ESRCH` (an empty group) and `EPERM` (on macOS, a group whose only members are zombies, proven in 05-15) both
+/// mean nothing is left to kill, and any other error still leaves the reap below to run, so the result is ignored.
+fn kill_and_reap(child: &mut Child, pid: Pid) -> io::Result<ExitStatus> {
+    kill_process_group(pid, Signal::KILL).ok();
+    child.kill().ok();
+    child.wait()
+}
+
+/// Reads `pipe` up to `cap` bytes. On one byte more, sets `overflow` and drains the rest, so the writer never
+/// blocks while the watcher kills the group.
+fn read_capped(pipe: ChildStdout, cap: u64, overflow: &AtomicBool) -> io::Result<Vec<u8>> {
+    let mut pipe = pipe;
+    let mut kept = Vec::new();
+    pipe.by_ref()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut kept)?;
+    if u64::try_from(kept.len()).map_or(true, |len| len > cap) {
+        overflow.store(true, Ordering::SeqCst);
+        kept.clear();
+        io::copy(&mut pipe, &mut io::sink()).ok();
+    }
+    Ok(kept)
+}
+
+/// Reads `pipe` to its end and keeps only the last `cap` bytes.
+///
+/// A read error ends the reading and keeps what was read: the tail is a diagnostic only, never a result.
+fn keep_tail(pipe: ChildStderr, cap: u64) -> Vec<u8> {
+    let cap = usize::try_from(cap).unwrap_or(usize::MAX);
+    let mut pipe = pipe;
+    let mut kept = Vec::new();
+    let mut chunk = [0_u8; STDERR_CHUNK_BYTES];
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => {
+                kept.extend_from_slice(chunk.get(..read).unwrap_or_default());
+                // Trimmed at twice the cap, so the copy is amortized.
+                if kept.len() > cap.saturating_mul(2) {
+                    let excess = kept.len().saturating_sub(cap);
+                    kept.drain(..excess);
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(_) => break,
+        }
+    }
+    let excess = kept.len().saturating_sub(cap);
+    kept.drain(..excess);
+    kept
+}
+
+/// How `status` ended: an exit code or a signal. `None` for a status that is neither, which Unix never reports.
+fn exit_of(status: ExitStatus) -> Option<Exit> {
+    status
+        .code()
+        .map(Exit::Code)
+        .or_else(|| status.signal().map(Exit::Signal))
 }
 
 #[cfg(test)]
@@ -216,7 +395,10 @@ mod tests {
             .trim()
             .parse()?;
         let pid = Pid::from_raw(raw).ok_or("the straggler pid is not positive")?;
-        assert!(gone(pid), "the background sleep {raw} outlived the deadline");
+        assert!(
+            gone(pid),
+            "the background sleep {raw} outlived the deadline"
+        );
         Ok(())
     }
 
@@ -239,7 +421,10 @@ mod tests {
         let start = Instant::now();
         let result = run(&spec);
         assert!(start.elapsed() < PROMPT, "took {:?}", start.elapsed());
-        assert!(matches!(result, Err(RunError::StdoutTooLarge)), "{result:?}");
+        assert!(
+            matches!(result, Err(RunError::StdoutTooLarge)),
+            "{result:?}"
+        );
         Ok(())
     }
 
@@ -254,7 +439,11 @@ mod tests {
         assert!(start.elapsed() < PROMPT, "took {:?}", start.elapsed());
         assert_eq!(output.exit, Exit::Code(0));
         assert_eq!(output.stdout, b"ok");
-        assert!(output.stderr_tail.len() <= 4096, "{}", output.stderr_tail.len());
+        assert!(
+            output.stderr_tail.len() <= 4096,
+            "{}",
+            output.stderr_tail.len()
+        );
         assert!(!output.stderr_tail.is_empty());
         Ok(())
     }
