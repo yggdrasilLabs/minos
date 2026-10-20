@@ -96,8 +96,8 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **PROP-05**: Prompt assembly is deterministic with a stable cacheable prefix (`program.md`, surface files) followed by a dynamic suffix; golden tests and shuffled-input tests guard it
 - [x] **PROP-06**: The dynamic suffix includes a bounded history table (rationale, outcome, delta vs incumbent) and bounded, sanitized failure excerpts from recent experiments, labelled as untrusted text; held-out metric values never appear in any prompt, proven by a test
 - [x] **PROP-07**: `single_shot` returns several `{rationale, files}` candidates, parsed into closed `deny_unknown_fields` types, from which Minos derives the canonical diff; invalid candidates are dropped, not repaired. *Superseded wording (2026-10-19): "returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types; invalid diffs are dropped, not repaired". The model returns the full contents of each writable file it changes and Minos derives the canonical diff with `diff_trees`, so the model never writes hunk headers (06-CONTEXT.md D-10, D-11).*
-- [x] **PROP-08**: Token usage per call is recorded as a `Spent` event; any client-side dollar estimate from the CLI is ignored
-- [x] **PROP-09**: A rate-limit or usage-cap response from the CLI is an infrastructure failure that stops the run with a `StopRequested` event, never an `Outcome`
+- [x] **PROP-08**: Token usage per call is recorded as a `Spent` event; any client-side dollar estimate from the CLI is ignored *Phase 6 returns each call's token usage, per model, for the loop's `Spent` event (Phase 7, LOOP-04).*
+- [x] **PROP-09**: A rate-limit or usage-cap response from the CLI is an infrastructure failure that stops the run with a `StopRequested` event, never an `Outcome` *Phase 6 classifies a limit or auth refusal as a provider stop mapped to `StopReason::ProviderLimit` or `ProviderAuth`; the loop appends `StopRequested` (Phase 7, LOOP-08).*
 - [x] **PROP-10**: The sweep tier produces proposals from declared params with no model call
 
 ### Runner and Loop (LOOP)
@@ -300,6 +300,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-19 after the Phase 5 final gate (GUEST-01 to GUEST-05, KRUN-01 to KRUN-10, CLI-02, CLI-03 complete; GUEST-05 with its one recorded exception)*
+*Last updated: 2026-10-19 after the Phase 6 final gate (PROP-01 to PROP-10 complete)*
+*Earlier update: 2026-10-19 after the Phase 5 final gate (GUEST-01 to GUEST-05, KRUN-01 to KRUN-10, CLI-02, CLI-03 complete; GUEST-05 with its one recorded exception)*
 *Earlier update: 2026-10-19, PROP-07 reworded to `{rationale, files}` candidates (06-CONTEXT.md D-11)*
 *Earlier update: 2026-10-09 after Phase 1 gap closure (GATE-01, GATE-02, GATE-05 reworded: three clippy lints at forbid, a rustflags backstop, and `cargo doc --workspace --no-deps` as the fifth gate command)*
