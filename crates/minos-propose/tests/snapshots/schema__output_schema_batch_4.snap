@@ -1,0 +1,5 @@
+---
+source: crates/minos-propose/tests/schema.rs
+expression: schema.as_str()
+---
+{"additionalProperties":false,"properties":{"proposals":{"items":{"additionalProperties":false,"properties":{"files":{"items":{"additionalProperties":false,"properties":{"content":{"type":"string"},"path":{"enum":["src/parse.rs"],"type":"string"}},"required":["path","content"],"type":"object"},"maxItems":1,"minItems":1,"type":"array"},"rationale":{"maxLength":2000,"minLength":1,"type":"string"}},"required":["rationale","files"],"type":"object"},"maxItems":4,"minItems":1,"type":"array"}},"required":["proposals"],"type":"object"}

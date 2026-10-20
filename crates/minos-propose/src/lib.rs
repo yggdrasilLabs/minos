@@ -15,3 +15,6 @@
 //! backend: each binary picks its provider concretely.
 
 pub mod limits;
+pub mod prompt;
+pub mod provider;
+pub mod schema;

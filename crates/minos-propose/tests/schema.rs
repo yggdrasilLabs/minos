@@ -36,9 +36,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn at<'a>(value: &'a Value, path: &[&str]) -> Result<&'a Value, Box<dyn Error>> {
     let mut here = value;
     for key in path {
-        here = here
-            .get(*key)
-            .ok_or_else(|| format!("missing key {key}"))?;
+        here = here.get(*key).ok_or_else(|| format!("missing key {key}"))?;
     }
     Ok(here)
 }
@@ -66,7 +64,10 @@ fn output_schema_bytes_pinned() -> TestResult {
     let schema = OutputSchema::for_batch(4, &writable(&["src/parse.rs"])?)?;
     let mut text = schema.as_str().to_owned();
     text.push('\n');
-    assert_eq!(sha256_hex(text.as_bytes()), "PIN_PENDING");
+    assert_eq!(
+        sha256_hex(text.as_bytes()),
+        "bd6ccb83d04d7df1d09f29c528e0bdc707e96087445140ff8bd22c2f1e41fd83"
+    );
     Ok(())
 }
 
@@ -119,7 +120,10 @@ fn output_schema_structure() -> TestResult {
 fn output_schema_lists_writable_paths_in_set_order() -> TestResult {
     let schema = OutputSchema::for_batch(2, &writable(&["src/z.rs", "src/a.rs", "lib/m.rs"])?)?;
     let value = parsed(&schema)?;
-    let file = at(&value, &["properties", "proposals", "items", "properties", "files"])?;
+    let file = at(
+        &value,
+        &["properties", "proposals", "items", "properties", "files"],
+    )?;
     assert_eq!(at(file, &["maxItems"])?, &Value::from(3));
     assert_eq!(
         at(file, &["items", "properties", "path", "enum"])?,
