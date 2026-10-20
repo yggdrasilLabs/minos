@@ -1,0 +1,8 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every path below is proven to fire once (06-EVIDENCE.md "Clippy bans fire (06-02)").
+# A mistyped path only warns, so re-prove any entry you change.
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: the prompt is hashed into PromptHash; use BTreeMap or BTreeSet" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: the prompt is hashed into PromptHash; use BTreeMap or BTreeSet" },
+]

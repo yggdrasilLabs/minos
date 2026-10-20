@@ -1,1 +1,17 @@
 //! Prompt assembly, model providers, and proposer tiers.
+//!
+//! # Trust boundary
+//!
+//! Model output and every string that came from a sandbox are hostile input. Model output enters as an opaque
+//! value with no display or copy path and leaves only through this crate's strict parser, which drops an invalid
+//! item rather than repairing it; text shown to a user or placed in a prompt goes through
+//! [`minos_core::text::SafeText`].
+//!
+//! The crate never reads, stores, or forwards a model credential. It reads no process environment: a caller that
+//! needs the parent environment checked passes a snapshot of it as a value. It spawns only the user's own
+//! `claude` binary, always as an argv array, never through a shell.
+//!
+//! Providers are used through generics, never trait objects, exactly as the runner is generic over its sandbox
+//! backend: each binary picks its provider concretely.
+
+pub mod limits;
