@@ -32,8 +32,8 @@
 //! [`ReviewId`] is `IdHasher::new("minos/review/v1").digest(run).u64(kind tag).digest(subject)`.
 //!
 //! [`StopReason`] tags: `UserStop` 1, `SpendCap` 2, `TokenCap` 3, `NoValidCandidates` 4, `InfraFailures` 5,
-//! `ProviderLimit` 6. [`ReviewKind`] tags: `JudgeDesign` 1, `Params` 2, `Dependencies` 3. Tags are explicit match
-//! arms, never enum discriminant casts, so reordering a declaration cannot change a key.
+//! `ProviderLimit` 6, `ProviderAuth` 7. [`ReviewKind`] tags: `JudgeDesign` 1, `Params` 2, `Dependencies` 3. Tags
+//! are explicit match arms, never enum discriminant casts, so reordering a declaration cannot change a key.
 //!
 //! # Generations
 //!
@@ -167,6 +167,9 @@ pub enum StopReason {
     InfraFailures,
     /// The model provider refused for a rate or usage limit.
     ProviderLimit,
+    /// The model provider rejected the login after a passed preflight: the login expired, was revoked, or is no
+    /// longer the subscription login. Never retried and never counted as a rate limit (06-CONTEXT D-15).
+    ProviderAuth,
 }
 
 impl StopReason {
@@ -179,6 +182,7 @@ impl StopReason {
             Self::NoValidCandidates => 4,
             Self::InfraFailures => 5,
             Self::ProviderLimit => 6,
+            Self::ProviderAuth => 7,
         }
     }
 }
@@ -192,6 +196,7 @@ impl fmt::Display for StopReason {
             Self::NoValidCandidates => "no valid candidate in consecutive generations",
             Self::InfraFailures => "consecutive infrastructure failures",
             Self::ProviderLimit => "model provider rate or usage limit",
+            Self::ProviderAuth => "model provider authentication failed; log in again",
         })
     }
 }
