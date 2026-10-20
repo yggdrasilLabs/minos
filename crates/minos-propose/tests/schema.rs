@@ -12,7 +12,7 @@ use std::error::Error;
 
 use minos_core::limits::{BATCH_MAX, BATCH_MIN};
 use minos_core::path::RelPath;
-use minos_propose::limits::MAX_RATIONALE_BYTES;
+use minos_propose::limits::MAX_RATIONALE_CHARS;
 use minos_propose::schema::{OutputSchema, SchemaError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -91,7 +91,7 @@ fn output_schema_structure() -> TestResult {
     );
     assert_eq!(
         at(item, &["properties", "rationale", "maxLength"])?,
-        &Value::from(MAX_RATIONALE_BYTES)
+        &Value::from(MAX_RATIONALE_CHARS)
     );
     assert_eq!(
         at(item, &["properties", "rationale", "minLength"])?,

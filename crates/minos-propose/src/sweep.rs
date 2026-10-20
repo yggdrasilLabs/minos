@@ -15,18 +15,19 @@ use minos_core::limits::Limits;
 use minos_core::manifest::{ProposerSpec, Tier};
 use minos_core::sweep::{SweepError, render, sample};
 
-use crate::limits::MAX_RATIONALE_BYTES;
+use crate::limits::MAX_RATIONALE_CHARS;
 use crate::prompt::cut;
 use crate::proposal::{DropCounts, DropReason, Proposal, finish};
 use crate::proposer::{Proposals, ProposeError, ProposeInput, check_input};
 
 /// The sweep's proposals for `input`'s run and generation.
 ///
-/// Each proposal's rationale is the sample's `name=value` description, cut at a char boundary to
-/// [`MAX_RATIONALE_BYTES`]: Minos's own text, not model output, so cutting it is not a repair. A sample that renders
-/// to the parent is a [`DropReason::SameAsParent`] drop, one that cannot be rendered a [`DropReason::Sweep`] drop,
-/// one that restores the base a [`DropReason::BackToBase`] drop, and one whose diff equals an earlier survivor's
-/// a [`DropReason::DuplicateInBatch`] drop. The result has `Origin::Sweep`, no usage, and no models.
+/// Each proposal's rationale is the sample's `name=value` description, cut at a char boundary to at most
+/// [`MAX_RATIONALE_CHARS`] bytes, which is at most that many characters: Minos's own text, not model output, so
+/// cutting it is not a repair. A sample that renders to the parent is a [`DropReason::SameAsParent`] drop, one that
+/// cannot be rendered a [`DropReason::Sweep`] drop, one that restores the base a [`DropReason::BackToBase`] drop,
+/// and one whose diff equals an earlier survivor's a [`DropReason::DuplicateInBatch`] drop. The result has
+/// `Origin::Sweep`, no usage, and no models.
 ///
 /// # Errors
 ///
@@ -54,7 +55,7 @@ pub fn propose(spec: &ProposerSpec, input: &ProposeInput<'_>) -> Result<Proposal
             .and_then(|candidate| finish(input.base, input.parent, &candidate, writable, &limits))
             .and_then(|diff| {
                 let description = drawn.describe();
-                Proposal::new(diff, cut(&description, MAX_RATIONALE_BYTES).to_owned())
+                Proposal::new(diff, cut(&description, MAX_RATIONALE_CHARS).to_owned())
             });
         match rendered {
             Ok(proposal)

@@ -34,8 +34,13 @@ pub const MAX_PROMPT_BYTES: usize = 1_048_576;
 // Returned proposals (D-10, D-12)
 // ---------------------------------------------------------------------------------------------------------------
 
-/// Longest rationale a model may return, in bytes. Also the output schema's `maxLength` for it.
-pub const MAX_RATIONALE_BYTES: usize = 2_000;
+/// Longest rationale a model may return, in characters: the output schema's `maxLength`, which JSON Schema counts
+/// in characters, not bytes, so the parser counts characters against this cap too and every schema-valid
+/// rationale passes it (review IN-01).
+pub const MAX_RATIONALE_CHARS: usize = 2_000;
+/// Byte ceiling of a rationale, for storage: a UTF-8 character is at most 4 bytes, so every rationale within
+/// [`MAX_RATIONALE_CHARS`] fits, and the parser refuses a string over this ceiling before counting its characters.
+pub const MAX_RATIONALE_BYTES: usize = MAX_RATIONALE_CHARS * 4;
 /// Largest content of one returned file, in bytes: equal to core's single-shot surface cap, because the whole
 /// surface had to fit the prompt for the tier to be eligible.
 pub const MAX_RETURNED_FILE_BYTES: usize = 262_144;

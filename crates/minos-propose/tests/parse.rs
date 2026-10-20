@@ -9,7 +9,7 @@ use minos_core::diff::compose::diff_trees;
 use minos_core::limits::Limits;
 use minos_core::manifest::Manifest;
 use minos_core::path::RelPath;
-use minos_propose::limits::{MAX_RATIONALE_BYTES, MAX_RETURNED_FILE_BYTES};
+use minos_propose::limits::{MAX_RATIONALE_BYTES, MAX_RATIONALE_CHARS, MAX_RETURNED_FILE_BYTES};
 use minos_propose::proposal::{DropReason, Parsed, Proposal, parse_output};
 use minos_propose::provider::ModelOutput;
 use minos_propose::schema::OutputSchema;
@@ -377,7 +377,7 @@ fn drops_rationale_invalid() -> TestResult {
     let files = || vec![file("src/parse.rs", PARSE_ONE)];
     for rationale in [
         String::new(),
-        "r".repeat(MAX_RATIONALE_BYTES + 1),
+        "r".repeat(MAX_RATIONALE_CHARS + 1),
         "has\0nul".to_owned(),
     ] {
         assert_one_drop(
@@ -387,10 +387,40 @@ fn drops_rationale_invalid() -> TestResult {
     }
     // Exactly at the cap is accepted.
     let parsed = parse(output(vec![item(
-        &"r".repeat(MAX_RATIONALE_BYTES),
+        &"r".repeat(MAX_RATIONALE_CHARS),
         files(),
     )]))?;
     assert_eq!(parsed.proposals().len(), 1);
+    Ok(())
+}
+
+/// The schema's `maxLength` counts characters, so the parser does too: a rationale of exactly
+/// `MAX_RATIONALE_CHARS` characters is accepted whatever its byte length, up to the 4-byte ceiling, and one more
+/// character is dropped (review IN-01).
+#[test]
+fn rationale_cap_counts_characters_not_bytes() -> TestResult {
+    let files = || vec![file("src/parse.rs", PARSE_ONE)];
+    // Two bytes per character: over the old byte cap, within the character cap.
+    let two_byte = "\u{e9}".repeat(MAX_RATIONALE_CHARS);
+    assert!(two_byte.len() > MAX_RATIONALE_CHARS);
+    // Four bytes per character: exactly the byte ceiling.
+    let four_byte = "\u{1f600}".repeat(MAX_RATIONALE_CHARS);
+    assert_eq!(four_byte.len(), MAX_RATIONALE_BYTES);
+    for rationale in [two_byte, four_byte] {
+        let parsed = parse(output(vec![item(&rationale, files())]))?;
+        assert_eq!(parsed.proposals().len(), 1, "{} bytes", rationale.len());
+        assert_eq!(parsed.dropped().total(), 0);
+    }
+    for rationale in [
+        "\u{e9}".repeat(MAX_RATIONALE_CHARS + 1),
+        "\u{1f600}".repeat(MAX_RATIONALE_CHARS + 1),
+        "r".repeat(MAX_RATIONALE_BYTES + 1),
+    ] {
+        assert_one_drop(
+            &parse(output(vec![item(&rationale, files())]))?,
+            DropReason::RationaleInvalid,
+        )?;
+    }
     Ok(())
 }
 

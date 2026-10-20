@@ -18,7 +18,7 @@ use minos_core::limits::Limits;
 use minos_core::path::RelPath;
 use serde::Deserialize;
 
-use crate::limits::{MAX_RATIONALE_BYTES, MAX_RETURNED_FILE_BYTES};
+use crate::limits::{MAX_RATIONALE_BYTES, MAX_RATIONALE_CHARS, MAX_RETURNED_FILE_BYTES};
 use crate::provider::ModelOutput;
 
 /// Why one proposal, or a whole output, was dropped. A closed set with fixed text; no variant carries model text.
@@ -133,7 +133,8 @@ impl Proposal {
         &self.diff
     }
 
-    /// The rationale, 1 to [`MAX_RATIONALE_BYTES`] bytes with no NUL. Model text: shown only through `SafeText`.
+    /// The rationale, 1 to [`MAX_RATIONALE_CHARS`] characters (at most [`MAX_RATIONALE_BYTES`] bytes) with no NUL.
+    /// Model text: shown only through `SafeText`.
     #[must_use]
     pub fn rationale(&self) -> &str {
         &self.rationale
@@ -327,9 +328,15 @@ fn parse_item(
     Proposal::new(diff, raw.rationale)
 }
 
-/// A rationale must be 1 to [`MAX_RATIONALE_BYTES`] bytes with no NUL byte.
+/// A rationale must be 1 to [`MAX_RATIONALE_CHARS`] characters, at most [`MAX_RATIONALE_BYTES`] bytes, with no
+/// NUL byte. The character cap is the schema's `maxLength`, so a rationale the CLI's validator accepted is never
+/// dropped for its length; the byte ceiling is checked first, so a huge string is refused without counting it.
 fn check_rationale(rationale: &str) -> Result<(), DropReason> {
-    if rationale.is_empty() || rationale.len() > MAX_RATIONALE_BYTES || rationale.contains('\0') {
+    if rationale.is_empty()
+        || rationale.len() > MAX_RATIONALE_BYTES
+        || rationale.chars().count() > MAX_RATIONALE_CHARS
+        || rationale.contains('\0')
+    {
         return Err(DropReason::RationaleInvalid);
     }
     Ok(())

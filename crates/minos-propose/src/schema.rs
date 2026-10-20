@@ -12,7 +12,7 @@ use minos_core::limits::{BATCH_MAX, BATCH_MIN};
 use minos_core::path::RelPath;
 use serde_json::{Map, Value};
 
-use crate::limits::MAX_RATIONALE_BYTES;
+use crate::limits::MAX_RATIONALE_CHARS;
 
 /// The output schema text for one proposer call.
 ///
@@ -44,7 +44,7 @@ impl OutputSchema {
     /// The schema for a call that may return up to `batch` proposals over the files in `writable`.
     ///
     /// `proposals` has `minItems` 1 and `maxItems` `batch` (D-12); each proposal has a `rationale` of 1 to
-    /// [`MAX_RATIONALE_BYTES`] characters and `files`, 1 to `writable.len()` entries whose `path` is one of the
+    /// [`MAX_RATIONALE_CHARS`] characters and `files`, 1 to `writable.len()` entries whose `path` is one of the
     /// writable paths in set order; every object has `additionalProperties` false.
     ///
     /// # Errors
@@ -88,7 +88,7 @@ impl OutputSchema {
             ("type", Value::from("array")),
         ]);
         let rationale = object([
-            ("maxLength", Value::from(MAX_RATIONALE_BYTES)),
+            ("maxLength", Value::from(MAX_RATIONALE_CHARS)),
             ("minLength", Value::from(1)),
             ("type", Value::from("string")),
         ]);
