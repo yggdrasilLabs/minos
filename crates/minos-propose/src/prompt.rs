@@ -11,8 +11,8 @@
 //! (D-07, D-08, D-09).
 //!
 //! Every embedded text sits in a fenced block: a line `<<<BEGIN KIND label token>>>`, the content, and a line
-//! `<<<END KIND token>>>`, where `token` is the first 8 bytes, in hex, of a hash of the content in the domain
-//! `minos/prompt-fence/v1`. Content cannot contain the hash of itself, so text inside a block, a hostile log
+//! `<<<END KIND token>>>`, where `token` is the first 8 bytes, in hex, of an `IdHasher` hash of the content in
+//! the prompt-fence domain. Content cannot contain the hash of itself, so text inside a block, a hostile log
 //! included, cannot close its block early or open a section of its own. Failure excerpts are marked untrusted
 //! sandbox output. Surface files are shown verbatim, because the model rewrites them in full; every string that
 //! came from a model or a sandbox is sanitized (rationales and excerpts by [`History`], notes by [`SteerNote`]).
