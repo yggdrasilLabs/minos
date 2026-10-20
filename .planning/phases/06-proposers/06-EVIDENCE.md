@@ -38,7 +38,7 @@ The probe functions were then removed and the same command rerun:
 
 ```
 $ cargo clippy -p minos-propose --all-targets -- -D warnings
-    Checking minos-propose v0.1.0 (/Users/seanmcauliffe/Repos/minos/crates/minos-propose)
+    Checking minos-propose v0.1.0 (~/Repos/minos/crates/minos-propose)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
 ```
 
