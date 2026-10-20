@@ -324,6 +324,16 @@ The stack block above is generated from `.planning/research/STACK.md`, which sta
 - K7: answered, the helper's exit code is never the guest's result; the status frame and `minos-vmm`'s own codes and markers classify a run (K7 table, Classification rule for Phase 5).
 - Version compatibility: msb_krun 0.1.41 with libkrunfw 5.6.2 is verified at runtime (S01-ROOTDISK).
 
+## Phase 6 corrections to the stack block (2026-10-19)
+
+These corrections come from `.planning/phases/06-proposers/06-RESEARCH.md` and win over the block if it is ever regenerated.
+
+- Question 9 result parsing: `api_error_status` exists only on `subtype: "success"`. An API error that ends the turn (a 429 usage or rate limit, a 401 or 403 auth failure) arrives as `success` with `is_error` true and the message in `result`; `error_during_execution` carries `errors[]` and never a status (Finding 1).
+- `claude auth status` prints no `apiKeySource` on a clean subscription login; the key appears only when a key source exists, and the value `"none"` appears only in stream-json `system/init`. The preflight requires `loggedIn` true, `authMethod` `"claude.ai"`, `apiProvider` `"firstParty"`, and no `apiKeySource` key (Finding 2).
+- The installed CLI moves under the auto-updater: 2.1.296 is gone, and 2.1.304 was installed on 2026-10-19. The provider re-resolves the native install's link before every call and re-runs `--version` and `auth status` when the target changed (Finding 3).
+- The refused credential variable list is longer than the three in Question 9: 13 credential and redirect variables the CLI reads, plus any `CLAUDE_CODE_USE_*`, refused by name only (Pitfall 4).
+- The model output format is `{rationale, files:[{path, content}]}`, the full contents of each changed writable file, and Minos derives the canonical diff with `diff_trees` (06-CONTEXT D-10).
+
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
 
 ## Conventions
