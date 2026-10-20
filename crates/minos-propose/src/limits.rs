@@ -61,6 +61,11 @@ pub const MAX_PREFLIGHT_STDOUT_BYTES: u64 = 16_384;
 /// Most stderr bytes kept from any provider process; the rest is drained and dropped, and stderr is never shown
 /// raw.
 pub const MAX_STDERR_BYTES: u64 = 65_536;
+/// How long after the process group is killed each pipe thread keeps waiting for its pipe to close before it
+/// abandons the pipe with what it has. A descendant that left the group (`setsid`, `setpgid`) survives the kill
+/// and can hold a pipe open; this grace is what bounds the call then, so a call returns within its deadline plus
+/// this grace (review WR-04).
+pub const DRAIN_GRACE: Duration = Duration::from_secs(5);
 /// The process watcher's poll period, as `minos-cli`'s image builder uses.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 

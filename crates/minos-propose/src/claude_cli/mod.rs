@@ -18,7 +18,9 @@
 //! - **The bounds** are [`CALL_DEADLINE`], after which the whole process group is killed and the call is an
 //!   infrastructure failure, and [`MAX_ENVELOPE_BYTES`] of stdout, over which the group is killed and the call is
 //!   an empty one, [`EmptyCause::OutputTooLarge`], because the reply's size is the model's choice (D-12, D-16).
-//!   Stderr is drained and never surfaces.
+//!   A descendant that left the process group survives the kill, so each pipe is abandoned
+//!   [`DRAIN_GRACE`](crate::limits::DRAIN_GRACE) after it, and a call returns within the deadline plus that
+//!   grace. Stderr is drained and never surfaces.
 //! - **The result** is classified by [`classify::classify`] alone, and never retried here: the loop decides.
 //! - **Authentication** is the user's own subscription login, and nothing else. Minos never reads, stores, or
 //!   forwards a credential: it checks the login only through `claude auth status`, whose account fields are never

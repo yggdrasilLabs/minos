@@ -8,28 +8,37 @@
 //! exit without reaping it, so its pid, and so its process group id, cannot be reused while the group is killed.
 //!
 //! In every case, after the leader exits, after an overflow, or at the deadline, the whole process group is sent
-//! SIGKILL and the leader is reaped, and only then are the reader threads joined. Killing the group after a normal
-//! exit closes any pipe a straggler still holds, so the readers always reach end of file and no process the call
-//! started outlives it (06-RESEARCH Anti-Patterns: never join the readers before killing the group).
+//! SIGKILL and the leader is reaped, and only then are the pipe threads joined. Killing the group after a normal
+//! exit closes any pipe a straggler in the group still holds, so the readers reach end of file (06-RESEARCH
+//! Anti-Patterns: never join the readers before killing the group). A descendant that left the group on its own
+//! (`setsid`, `setpgid`) is not killed and can hold a pipe open; so that it cannot hold the call open, every pipe
+//! thread blocks only in `poll`, and once the group has been killed and [`DRAIN_GRACE`] has passed it abandons
+//! its pipe and returns what it has (review WR-04). A call therefore returns within its deadline plus the grace.
 
 use std::ffi::OsString;
 use std::io::{self, ErrorKind, Read, Write};
+use std::os::fd::AsFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
-use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rustix::io::Errno;
+use rustix::event::{PollFd, PollFlags, Timespec};
+use rustix::io::{Errno, ioctl_fionbio};
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, kill_process_group, waitid};
 
 use crate::claude_cli::classify::Exit;
-use crate::limits::POLL_INTERVAL;
+use crate::limits::{DRAIN_GRACE, POLL_INTERVAL};
 use crate::provider::InfraCause;
 
-/// The stderr reader's chunk size.
-const STDERR_CHUNK_BYTES: usize = 8192;
+/// The readers' chunk size.
+const PIPE_CHUNK_BYTES: usize = 8192;
+
+/// How long one `poll` on a pipe waits before the thread checks whether the group was killed. Only the latency
+/// of noticing the kill, not a bound on anything.
+const DRAIN_POLL: Duration = Duration::from_millis(100);
 
 /// One subprocess to run: what to start, with what, and within which bounds.
 pub(crate) struct RunSpec<'a> {
@@ -107,7 +116,9 @@ enum Ended {
 /// Runs `spec` to completion within its bounds.
 ///
 /// The process group is killed and the leader reaped before this returns, whatever happened, so no process the
-/// run started is left behind (except one that left the group on its own, which the provider's programs do not).
+/// run started is left behind except one that left the group on its own; such a process is not killed, and a
+/// pipe it holds is abandoned [`DRAIN_GRACE`] after the kill, so it cannot hold the call open past the deadline
+/// plus the grace.
 ///
 /// # Errors
 ///
@@ -128,25 +139,26 @@ pub(crate) fn run(spec: &RunSpec<'_>) -> Result<RunOutput, RunError> {
         .map_err(|_| RunError::Spawn)?;
     let started = Instant::now();
     let pid = Pid::from_child(&child);
-    let (Some(mut stdin), Some(stdout), Some(stderr)) =
+    let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
         kill_and_reap(&mut child, pid).ok();
         return Err(RunError::Spawn);
     };
     let overflow = AtomicBool::new(false);
+    let killed = AtomicBool::new(false);
+    let killed = &killed;
     let (ended, reaped, stdout, stderr_tail) = thread::scope(|scope| {
         let input = spec.stdin;
-        scope.spawn(move || {
-            // A write error, `BrokenPipe` included, is not a failure: the child may exit without reading its
-            // input, and its output says what happened. Dropping the pipe at the end closes it.
-            stdin.write_all(input).ok();
-        });
-        let out = scope.spawn(|| read_capped(stdout, spec.stdout_cap, &overflow));
-        let err = scope.spawn(move || keep_tail(stderr, spec.stderr_cap));
+        // The pipe moves into the thread, so it is closed when the writer is done, not when the scope ends.
+        scope.spawn(move || write_input(stdin, input, killed));
+        let out = scope.spawn(|| read_capped(stdout, spec.stdout_cap, &overflow, killed));
+        let err = scope.spawn(|| keep_tail(stderr, spec.stderr_cap, killed));
         let ended = watch(pid, started, spec.deadline, &overflow);
-        // Before any reader is joined: a straggler holding a pipe would otherwise block the join forever.
+        // Before any pipe thread is joined: a straggler in the group holding a pipe would otherwise block the
+        // join; one outside the group is bounded by the grace that starts when `killed` is set.
         let reaped = kill_and_reap(&mut child, pid);
+        killed.store(true, Ordering::SeqCst);
         let stdout = out
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("the stdout reader panicked")));
@@ -212,31 +224,116 @@ fn kill_and_reap(child: &mut Child, pid: Pid) -> io::Result<ExitStatus> {
     child.wait()
 }
 
-/// Reads `pipe` up to `cap` bytes. On one byte more, sets `overflow` and drains the rest, so the writer never
-/// blocks while the watcher kills the group.
-fn read_capped(pipe: ChildStdout, cap: u64, overflow: &AtomicBool) -> io::Result<Vec<u8>> {
+/// A bounded wait on one end of a pipe. Every pipe thread blocks only here, in `poll` with a short timeout, so it
+/// can notice that the group was killed; [`DRAIN_GRACE`] after it first sees that, it abandons the pipe, which
+/// bounds the call even when a process outside the group still holds the other end.
+struct Drain<'a> {
+    killed: &'a AtomicBool,
+    /// When this thread first saw the kill.
+    seen: Option<Instant>,
+}
+
+impl<'a> Drain<'a> {
+    const fn new(killed: &'a AtomicBool) -> Self {
+        Self { killed, seen: None }
+    }
+
+    /// Waits until `fd` is ready for `flags` (a hang-up counts as ready: the read or write then reports it), or
+    /// `false` once the pipe is abandoned.
+    fn ready(&mut self, fd: &impl AsFd, flags: PollFlags) -> io::Result<bool> {
+        let timeout = Timespec::try_from(DRAIN_POLL).map_err(io::Error::other)?;
+        loop {
+            if self.killed.load(Ordering::SeqCst) {
+                let seen = self.seen.get_or_insert_with(Instant::now);
+                if seen.elapsed() >= DRAIN_GRACE {
+                    return Ok(false);
+                }
+            }
+            let mut fds = [PollFd::new(fd, flags)];
+            match rustix::event::poll(&mut fds, Some(&timeout)) {
+                Ok(0) | Err(Errno::INTR) => {}
+                Ok(_) => return Ok(true),
+                Err(errno) => return Err(errno.into()),
+            }
+        }
+    }
+}
+
+/// Writes `input` to the child's stdin, then closes it by dropping the pipe at the end.
+///
+/// A write error, `BrokenPipe` included, is not a failure: the child may exit without reading its input, and its
+/// output says what happened. The pipe is made non-blocking, because a blocking write of more than one pipe
+/// buffer would not return until the child read it all, which a child that never reads its input would prevent
+/// forever; a full pipe is waited on through [`Drain`], so an abandoned pipe is simply closed unread.
+fn write_input(pipe: ChildStdin, input: &[u8], killed: &AtomicBool) {
     let mut pipe = pipe;
+    if ioctl_fionbio(&pipe, true).is_err() {
+        return;
+    }
+    let mut drain = Drain::new(killed);
+    let mut rest = input;
+    while !rest.is_empty() {
+        match drain.ready(&pipe, PollFlags::OUT) {
+            Ok(true) => {}
+            Ok(false) | Err(_) => return,
+        }
+        match pipe.write(rest) {
+            Ok(0) => return,
+            Ok(written) => rest = rest.get(written..).unwrap_or_default(),
+            Err(error)
+                if matches!(error.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock) => {}
+            Err(_) => return,
+        }
+    }
+}
+
+/// Reads `pipe` up to `cap` bytes. On one byte more, sets `overflow`, drops what was kept, and keeps draining
+/// (so the writer never blocks while the watcher kills the group) until end of file or the pipe is abandoned.
+fn read_capped(
+    pipe: ChildStdout,
+    cap: u64,
+    overflow: &AtomicBool,
+    killed: &AtomicBool,
+) -> io::Result<Vec<u8>> {
+    let mut pipe = pipe;
+    let mut drain = Drain::new(killed);
     let mut kept = Vec::new();
-    pipe.by_ref()
-        .take(cap.saturating_add(1))
-        .read_to_end(&mut kept)?;
-    if u64::try_from(kept.len()).map_or(true, |len| len > cap) {
-        overflow.store(true, Ordering::SeqCst);
-        kept.clear();
-        io::copy(&mut pipe, &mut io::sink()).ok();
+    let mut chunk = [0_u8; PIPE_CHUNK_BYTES];
+    loop {
+        if !drain.ready(&pipe, PollFlags::IN)? {
+            break;
+        }
+        // After `poll` reported the pipe readable or hung up, this read returns without blocking.
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(_) if overflow.load(Ordering::SeqCst) => {}
+            Ok(read) => {
+                let total = u64::try_from(kept.len().saturating_add(read)).unwrap_or(u64::MAX);
+                if total > cap {
+                    overflow.store(true, Ordering::SeqCst);
+                    kept = Vec::new();
+                } else {
+                    kept.extend_from_slice(chunk.get(..read).unwrap_or_default());
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(kept)
 }
 
-/// Reads `pipe` to its end and keeps only the last `cap` bytes.
+/// Reads `pipe` to its end, or until it is abandoned, and keeps only the last `cap` bytes.
 ///
 /// A read error ends the reading and keeps what was read: the tail is a diagnostic only, never a result.
-fn keep_tail(pipe: ChildStderr, cap: u64) -> Vec<u8> {
+fn keep_tail(pipe: ChildStderr, cap: u64, killed: &AtomicBool) -> Vec<u8> {
     let cap = usize::try_from(cap).unwrap_or(usize::MAX);
     let mut pipe = pipe;
+    let mut drain = Drain::new(killed);
     let mut kept = Vec::new();
-    let mut chunk = [0_u8; STDERR_CHUNK_BYTES];
-    loop {
+    let mut chunk = [0_u8; PIPE_CHUNK_BYTES];
+    // An abandoned pipe or a poll error ends the reading too.
+    while let Ok(true) = drain.ready(&pipe, PollFlags::IN) {
         match pipe.read(&mut chunk) {
             Ok(0) => break,
             Ok(read) => {
@@ -274,11 +371,12 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use rustix::io::Errno;
-    use rustix::process::{Pid, test_kill_process};
+    use rustix::process::{Pid, Signal, kill_process, test_kill_process};
     use tempfile::TempDir;
 
     use super::{RunError, RunOutput, RunSpec, run};
     use crate::claude_cli::classify::Exit;
+    use crate::limits::DRAIN_GRACE;
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -410,6 +508,68 @@ mod tests {
         let output = expect_output(run(&spec(Path::new("/bin/sh"), &args, dir.path())))?;
         assert!(start.elapsed() < PROMPT, "took {:?}", start.elapsed());
         assert_eq!(output.exit, Exit::Code(0));
+        Ok(())
+    }
+
+    /// The pid the script wrote to `straggler.pid` in `dir`.
+    fn straggler(dir: &Path) -> Result<Pid, Box<dyn Error>> {
+        let raw: i32 = fs::read_to_string(dir.join("straggler.pid"))?
+            .trim()
+            .parse()?;
+        Pid::from_raw(raw).ok_or_else(|| "the straggler pid is not positive".into())
+    }
+
+    /// A background job under `set -m` gets its own process group (verified on this host: `ps -o pgid` shows the
+    /// job's own pid), so it survives the group kill and keeps every inherited pipe open. The leader exits at
+    /// once with nothing read from stdin; the run returns once the grace passes, with the leader's result.
+    #[test]
+    fn a_straggler_outside_the_group_cannot_hold_the_run_past_the_grace() -> TestResult {
+        let dir = TempDir::new()?;
+        let args = shell("set -m; /bin/sleep 30 & echo $! > straggler.pid; printf ok; exit 0");
+        // More than a pipe buffer, so the writer would block forever on the unread input without the bound.
+        let input = vec![b'x'; 1_048_576];
+        let mut spec = spec(Path::new("/bin/sh"), &args, dir.path());
+        spec.stdin = &input;
+        let start = Instant::now();
+        let output = expect_output(run(&spec))?;
+        let took = start.elapsed();
+        let pid = straggler(dir.path())?;
+        // Alive: the group kill did not reach it, which is exactly the case the grace bounds.
+        let alive = test_kill_process(pid) == Ok(());
+        kill_process(pid, Signal::KILL).ok();
+        assert!(alive, "the straggler {pid:?} did not escape the group");
+        assert!(took >= DRAIN_GRACE, "took {took:?}, less than the grace");
+        assert!(
+            took < DRAIN_GRACE.saturating_add(PROMPT),
+            "took {took:?}, more than the grace"
+        );
+        assert_eq!(output.exit, Exit::Code(0));
+        assert_eq!(output.stdout, b"ok");
+        Ok(())
+    }
+
+    /// The same straggler under a leader that runs past a short deadline: the deadline kills the group and the
+    /// grace bounds the drain, so the deadline failure arrives within the deadline plus the grace. The leader
+    /// waits with the `wait` builtin, because under `set -m` a foreground job would also get its own group and
+    /// outlive the test.
+    #[test]
+    fn the_deadline_holds_with_a_straggler_outside_the_group() -> TestResult {
+        let dir = TempDir::new()?;
+        let args = shell("set -m; /bin/sleep 30 & echo $! > straggler.pid; wait");
+        let mut spec = spec(Path::new("/bin/sh"), &args, dir.path());
+        spec.deadline = Duration::from_millis(300);
+        let start = Instant::now();
+        let result = run(&spec);
+        let took = start.elapsed();
+        let pid = straggler(dir.path())?;
+        let alive = test_kill_process(pid) == Ok(());
+        kill_process(pid, Signal::KILL).ok();
+        assert!(alive, "the straggler {pid:?} did not escape the group");
+        assert!(matches!(result, Err(RunError::Deadline)), "{result:?}");
+        assert!(
+            took < DRAIN_GRACE.saturating_add(PROMPT),
+            "took {took:?}, more than the deadline plus the grace"
+        );
         Ok(())
     }
 
