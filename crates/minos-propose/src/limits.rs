@@ -50,8 +50,11 @@ pub const MAX_RETURNED_FILE_BYTES: usize = 262_144;
 pub const CALL_DEADLINE: Duration = Duration::from_mins(15);
 /// Deadline of each `--version` and `auth status` preflight run.
 pub const PREFLIGHT_DEADLINE: Duration = Duration::from_secs(30);
-/// Most stdout bytes read from a model call (4 MiB). The envelope carries the structured output twice, as an
-/// object and as the `result` string, so this is twice the largest output plus room for the envelope.
+/// Most stdout bytes read from a model call (4 MiB). This bounds what the provider reads, not what the schema
+/// permits: a batch of [`BATCH_MAX`](minos_core::limits::BATCH_MAX) proposals, each with every writable file at
+/// [`MAX_RETURNED_FILE_BYTES`], carried twice (as the object and as the `result` string), is far larger. A reply
+/// over this cap is therefore the model's choice and an empty call (`EmptyCause::OutputTooLarge`), never an
+/// infrastructure failure; the per-file cap on what does arrive is enforced by `parse_output`.
 pub const MAX_ENVELOPE_BYTES: u64 = 4_194_304;
 /// Most stdout bytes read from `--version` and `auth status`, which print a line or a small JSON object.
 pub const MAX_PREFLIGHT_STDOUT_BYTES: u64 = 16_384;

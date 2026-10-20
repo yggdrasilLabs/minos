@@ -16,7 +16,9 @@
 //!   one per call, created exclusively and removed when the call ends.
 //! - **The prompt** goes on stdin, whole: the stable prefix, then the suffix (D-06).
 //! - **The bounds** are [`CALL_DEADLINE`], after which the whole process group is killed and the call is an
-//!   infrastructure failure, and [`MAX_ENVELOPE_BYTES`] of stdout (D-16). Stderr is drained and never surfaces.
+//!   infrastructure failure, and [`MAX_ENVELOPE_BYTES`] of stdout, over which the group is killed and the call is
+//!   an empty one, [`EmptyCause::OutputTooLarge`], because the reply's size is the model's choice (D-12, D-16).
+//!   Stderr is drained and never surfaces.
 //! - **The result** is classified by [`classify::classify`] alone, and never retried here: the loop decides.
 //! - **Authentication** is the user's own subscription login, and nothing else. Minos never reads, stores, or
 //!   forwards a credential: it checks the login only through `claude auth status`, whose account fields are never
@@ -39,6 +41,7 @@ pub mod locate;
 pub mod preflight;
 mod process;
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
@@ -46,15 +49,18 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Mutex, TryLockError};
 
+use minos_core::usage::Usage;
+
 use self::classify::classify;
 use self::command::{ClaudeVersion, argv};
 use self::env::ParentEnv;
 use self::locate::locate;
 use self::preflight::{PreflightError, Preflighted, RUN_DIR_PREFIX, reverify};
-use self::process::RunSpec;
+use self::process::{RunError, RunSpec};
 use crate::limits::{CALL_DEADLINE, MAX_ENVELOPE_BYTES, MAX_STDERR_BYTES};
 use crate::provider::{
-    InfraCause, ModelProvider, ModelRequest, ModelResponse, ProviderError, ProviderStop,
+    Completion, EmptyCause, InfraCause, ModelProvider, ModelRequest, ModelResponse, ProviderError,
+    ProviderStop,
 };
 
 /// The `claude` CLI provider.
@@ -135,6 +141,9 @@ impl ModelProvider for ClaudeCli {
     /// in a fresh private directory with the six-variable environment and the prompt on stdin, within
     /// [`CALL_DEADLINE`] and [`MAX_ENVELOPE_BYTES`], and classifies what it printed. Never retried here.
     ///
+    /// A reply over [`MAX_ENVELOPE_BYTES`] is an empty call with [`EmptyCause::OutputTooLarge`], zero usage, and
+    /// no per-model usage, because the envelope was never read.
+    ///
     /// # Errors
     ///
     /// [`ProviderError::Stop`] with [`ProviderStop::Auth`] when a changed binary's login check refuses, and the
@@ -163,9 +172,17 @@ impl ModelProvider for ClaudeCli {
             stdout_cap: MAX_ENVELOPE_BYTES,
             stderr_cap: MAX_STDERR_BYTES,
         };
-        let classified = process::run(&spec)
-            .map_err(|error| infra(error.cause(), None))
-            .and_then(|output| classify(&output.stdout, output.exit));
+        let classified = match process::run(&spec) {
+            Ok(output) => classify(&output.stdout, output.exit),
+            // The reply the model chose to write did not fit the cap: an empty call, never infrastructure (D-12).
+            // The envelope was never read, so no usage is known.
+            Err(RunError::StdoutTooLarge) => Ok(ModelResponse::new(
+                Completion::Empty(EmptyCause::OutputTooLarge),
+                Usage::default(),
+                BTreeMap::new(),
+            )),
+            Err(error) => Err(infra(error.cause(), None)),
+        };
         finish(dir.close(), classified)
     }
 }
@@ -185,7 +202,7 @@ fn finish(
     }
 }
 
-const fn infra(cause: InfraCause, usage: Option<minos_core::usage::Usage>) -> ProviderError {
+const fn infra(cause: InfraCause, usage: Option<Usage>) -> ProviderError {
     ProviderError::Infra { cause, usage }
 }
 

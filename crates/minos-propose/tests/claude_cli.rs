@@ -32,10 +32,12 @@ use minos_propose::claude_cli::command::{ClaudeVersion, argv};
 use minos_propose::claude_cli::env::EnvError;
 use minos_propose::claude_cli::preflight::preflight;
 use minos_propose::fake::{FakeProvider, FakeReply};
+use minos_propose::limits::MAX_ENVELOPE_BYTES;
 use minos_propose::prompt::{History, Prompt};
 use minos_propose::proposer::{Proposals, ProposeError, ProposeInput, Proposer};
 use minos_propose::provider::{
-    Completion, InfraCause, ModelProvider, ModelRequest, ModelResponse, ProviderError, ProviderStop,
+    Completion, EmptyCause, InfraCause, ModelProvider, ModelRequest, ModelResponse, ProviderError,
+    ProviderStop,
 };
 use minos_propose::schema::OutputSchema;
 use minos_propose::{ClaudeCli, ParentEnv, PreflightError, Preflighted, Proposal};
@@ -755,6 +757,30 @@ fn a_429_envelope_is_a_limit_stop_with_usage() -> TestResult {
             usage: Some(verified_usage()),
         }
     );
+    Ok(())
+}
+
+/// A reply over `MAX_ENVELOPE_BYTES` is the model's choice: an empty call with zero usage, never an infrastructure
+/// failure that would feed the loop's streak. The call's directory is still removed.
+#[test]
+fn a_reply_over_the_envelope_cap_is_an_empty_call_with_zero_usage() -> TestResult {
+    let fixture = Fixture::new("2.1.304")?;
+    let cli = ClaudeCli::preflight(&fixture.parent(&[]))?;
+    let over_cap = usize::try_from(MAX_ENVELOPE_BYTES)?.saturating_add(1);
+    fs::write(fixture.fake().join("envelope.json"), vec![b'x'; over_cap])?;
+    let response = completed(cli.complete(&request()?))?;
+    assert!(
+        matches!(
+            response.completion(),
+            Completion::Empty(EmptyCause::OutputTooLarge)
+        ),
+        "expected Empty(OutputTooLarge)"
+    );
+    assert_eq!(response.usage(), &Usage::default());
+    assert!(response.models().is_empty());
+    assert_eq!(response.resolved_model(), None);
+    assert_eq!(fixture.runs("model")?, 1);
+    fresh_directory(&fixture, "model")?;
     Ok(())
 }
 

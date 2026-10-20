@@ -102,6 +102,10 @@ pub enum EmptyCause {
     StructuredOutputRetries,
     /// The model refused (`stop_reason` `refusal`).
     Refusal,
+    /// The reply was larger than the provider's output cap, so it was never read. Its size is the model's choice,
+    /// so this is zero valid proposals for the call and never an infrastructure failure; the usage is unknown,
+    /// because the envelope that carries it was never read, and is recorded as zero.
+    OutputTooLarge,
 }
 
 impl fmt::Display for EmptyCause {
@@ -110,6 +114,9 @@ impl fmt::Display for EmptyCause {
             Self::MaxTurns => "the model call hit its turn cap with no output",
             Self::StructuredOutputRetries => "the model's output failed the schema too many times",
             Self::Refusal => "the model refused",
+            Self::OutputTooLarge => {
+                "the model's reply was larger than the output cap and was not read"
+            }
         })
     }
 }
@@ -238,7 +245,8 @@ pub enum InfraCause {
         /// The signal number.
         signal: i32,
     },
-    /// The provider wrote more output than its cap.
+    /// A preflight query (`--version` or `auth status`) printed more than its cap, which only a broken install
+    /// does. A model call's reply over its cap is [`EmptyCause::OutputTooLarge`] instead, never this.
     #[error("the model provider's output exceeded its cap")]
     OutputTooLarge,
     /// The provider's response envelope did not parse.
