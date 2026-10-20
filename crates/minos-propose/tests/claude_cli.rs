@@ -869,6 +869,51 @@ fn a_reply_over_the_envelope_cap_is_an_empty_call_with_zero_usage() -> TestResul
     Ok(())
 }
 
+/// A call whose directory cannot be removed still returns its valid completion with its usage: the tokens were
+/// spent and the output was classified, so the loop never retries it as an infrastructure failure. The directory
+/// is recorded, `leaked_dirs` names it, every later call retries its removal, and it is forgotten once it is gone
+/// (review IN-04).
+#[test]
+fn a_call_whose_directory_cannot_be_removed_still_returns_its_completion() -> TestResult {
+    let fixture = Fixture::new("2.1.304")?;
+    let guard = LeakGuard::new(&fixture)?;
+    let cli = ready(&fixture)?;
+    assert!(cli.leaked_dirs().is_empty());
+    fixture.write("model.leak", "")?;
+    let response = completed(cli.complete(&request()?))?;
+    assert!(matches!(response.completion(), Completion::Structured(_)));
+    assert_eq!(response.usage(), &verified_usage());
+    assert_eq!(response.resolved_model(), Some(&model("claude-haiku-5-5")?));
+    let leaked = guard.leaked()?;
+    assert_eq!(leaked.len(), 1);
+    assert_eq!(cli.leaked_dirs(), leaked);
+    let pwd = fixture
+        .recorded("model.pwd")?
+        .ok_or("no directory recorded")?;
+    assert_eq!(
+        leaked.first().map(PathBuf::as_path),
+        Some(Path::new(pwd.trim_end()))
+    );
+    let debug = format!("{cli:?}");
+    assert!(debug.contains("leaked: 1"), "{debug}");
+
+    // The next call retries the removal, which still fails, so the directory stays recorded; the call's own
+    // directory is removed as usual.
+    fs::remove_file(fixture.fake().join("model.leak"))?;
+    completed(cli.complete(&request()?))?;
+    assert_eq!(cli.leaked_dirs(), leaked);
+    assert_eq!(guard.leaked()?, leaked);
+
+    // Once the directory can be removed, the next call removes it before running and forgets it.
+    let keep = leaked.first().ok_or("no leaked directory")?.join("keep");
+    fs::set_permissions(&keep, fs::Permissions::from_mode(0o700))?;
+    completed(cli.complete(&request()?))?;
+    assert!(cli.leaked_dirs().is_empty());
+    assert!(guard.leaked()?.is_empty());
+    assert_eq!(fixture.runs("model")?, 3);
+    Ok(())
+}
+
 #[test]
 fn a_moved_link_reruns_the_preflight_queries_once_and_an_unmoved_one_runs_none() -> TestResult {
     let fixture = Fixture::new("2.1.304")?;

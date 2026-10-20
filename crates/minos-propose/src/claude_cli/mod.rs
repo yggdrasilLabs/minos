@@ -13,7 +13,9 @@
 //! - **The environment** is cleared and then holds exactly six variables, built by
 //!   [`env::ParentEnv::child_env`] from a snapshot of the parent environment the caller passes as a value.
 //! - **The working directory** is a fresh, empty, private (0700) `minos-claude-*` directory under the work root,
-//!   one per call, created exclusively and removed when the call ends.
+//!   one per call, created exclusively and removed when the call ends. A directory that cannot be removed never
+//!   changes the call's result, because the tokens were spent and the output was classified either way: its path
+//!   is recorded, [`ClaudeCli::leaked_dirs`] names it, and the next call retries the removal first (review IN-04).
 //! - **The prompt** goes on stdin, whole: the stable prefix, then the suffix (D-06).
 //! - **The bounds** are [`CALL_DEADLINE`], after which the whole process group is killed and the call is an
 //!   infrastructure failure, and [`MAX_ENVELOPE_BYTES`] of stdout, over which the group is killed and the call is
@@ -43,13 +45,14 @@ pub mod locate;
 pub mod preflight;
 mod process;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt;
-use std::io;
+use std::fs;
+use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::sync::{Mutex, TryLockError};
+use std::sync::{Mutex, PoisonError, TryLockError};
 
 use minos_core::usage::Usage;
 
@@ -70,12 +73,15 @@ use crate::provider::{
 /// Only [`ClaudeCli::preflight`] makes one, so holding one proves the per-run checks passed: no credential or
 /// redirect variable set, the native install located, the work root outside any repository, a proven version, and
 /// a subscription login (06-CONTEXT D-01 to D-04). No `Clone` and no `Default`; `Debug` prints the preflighted
-/// version and the binary's path only.
+/// version, the binary's path, and the number of leaked call directories only.
 ///
 /// The preflighted state sits behind a lock because a call may adopt a new binary after the auto-updater moved
-/// the link; the lock is released before the model call starts.
+/// the link; the lock is released before the model call starts. The leaked directories sit behind their own
+/// lock, taken only briefly, and a poisoned one is recovered, because the set is only ever replaced whole.
 pub struct ClaudeCli {
     state: Mutex<Preflighted>,
+    /// Call directories that could not be removed when their call ended, each retried before the next call.
+    leaked: Mutex<BTreeSet<PathBuf>>,
 }
 
 /// What one call runs, copied out of the state so the lock is not held across the model call.
@@ -96,7 +102,39 @@ impl ClaudeCli {
     pub fn preflight(parent: &ParentEnv) -> Result<Self, PreflightError> {
         preflight::preflight(parent).map(|state| Self {
             state: Mutex::new(state),
+            leaked: Mutex::new(BTreeSet::new()),
         })
+    }
+
+    /// The call directories that could not be removed when their call ended and have not been removed since, in
+    /// path order. Each is retried before the next call; what remains is for the user or `minos host doctor` to
+    /// report. Empty on a provider that has leaked nothing.
+    #[must_use]
+    pub fn leaked_dirs(&self) -> Vec<PathBuf> {
+        self.leaked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Records `path`, a call directory whose removal failed.
+    fn record_leak(&self, path: PathBuf) {
+        self.leaked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path);
+    }
+
+    /// Retries the removal of every recorded leaked directory, forgetting each that is removed or already gone
+    /// and keeping the rest. Only directories this provider created are ever named here.
+    fn remove_leaked(&self) {
+        let mut leaked = self.leaked.lock().unwrap_or_else(PoisonError::into_inner);
+        leaked.retain(|path| match fs::remove_dir_all(path) {
+            Ok(()) => false,
+            Err(error) => error.kind() != ErrorKind::NotFound,
+        });
     }
 
     /// The version of the binary calls currently run: the preflighted one, or the one adopted after the link
@@ -146,15 +184,19 @@ impl ModelProvider for ClaudeCli {
     /// A reply over [`MAX_ENVELOPE_BYTES`] is an empty call with [`EmptyCause::OutputTooLarge`], zero usage, and
     /// no per-model usage, because the envelope was never read.
     ///
+    /// Before the call, the removal of every directory an earlier call leaked is retried. After it, the call's own
+    /// directory is removed; when that fails, the result stands as classified and the directory is recorded for
+    /// [`ClaudeCli::leaked_dirs`] (review IN-04).
+    ///
     /// # Errors
     ///
     /// [`ProviderError::Stop`] with [`ProviderStop::Auth`] when a changed binary's login check refuses, and the
     /// classifier's stops; [`ProviderError::Infra`] with [`InfraCause::BinaryMissing`] when the binary cannot be
     /// located, [`InfraCause::Preflight`] when a changed binary fails any other check (or the state's lock is
-    /// poisoned), [`InfraCause::WorkDir`] when the call's directory cannot be created or removed, the runner's
-    /// cause when the process fails (including [`InfraCause::Deadline`] after the group kill), and the
-    /// classifier's causes.
+    /// poisoned), [`InfraCause::WorkDir`] when the call's directory cannot be created, the runner's cause when the
+    /// process fails (including [`InfraCause::Deadline`] after the group kill), and the classifier's causes.
     fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+        self.remove_leaked();
         let call = self.prepare()?;
         // Mode 0700 is set explicitly: `tempfile` otherwise creates the directory with the umask-derived default,
         // which on a shared `TMPDIR` would let another user list the CLI's working directory.
@@ -185,22 +227,14 @@ impl ModelProvider for ClaudeCli {
             )),
             Err(error) => Err(infra(error.cause(), None)),
         };
-        finish(dir.close(), classified)
-    }
-}
-
-/// The call's result once its directory is removed. A directory that could not be removed is reported, never
-/// ignored, as [`InfraCause::WorkDir`] carrying the call's usage, unless the call already ended the run with a
-/// stop, which stands.
-fn finish(
-    removed: io::Result<()>,
-    classified: Result<ModelResponse, ProviderError>,
-) -> Result<ModelResponse, ProviderError> {
-    match (removed, classified) {
-        (Ok(()), classified) => classified,
-        (Err(_), Err(stop @ ProviderError::Stop { .. })) => Err(stop),
-        (Err(_), Ok(response)) => Err(infra(InfraCause::WorkDir, Some(*response.usage()))),
-        (Err(_), Err(error)) => Err(infra(InfraCause::WorkDir, error.usage().copied())),
+        // A directory that cannot be removed is recorded, never ignored, and never changes the result: the tokens
+        // were spent and the reply was classified, so retrying the call as an infrastructure failure would only
+        // spend them again (review IN-04).
+        let path = dir.path().to_owned();
+        if dir.close().is_err() {
+            self.record_leak(path);
+        }
+        classified
     }
 }
 
@@ -218,6 +252,7 @@ impl fmt::Debug for ClaudeCli {
             Err(TryLockError::WouldBlock) => out.field("state", &"in use"),
             Err(TryLockError::Poisoned(_)) => out.field("state", &"poisoned"),
         };
+        out.field("leaked", &self.leaked_dirs().len());
         out.finish_non_exhaustive()
     }
 }
