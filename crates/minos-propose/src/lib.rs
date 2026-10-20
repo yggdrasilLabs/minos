@@ -25,6 +25,9 @@ pub mod schema;
 pub mod single_shot;
 pub mod sweep;
 
+pub use claude_cli::ClaudeCli;
+pub use claude_cli::env::ParentEnv;
+pub use claude_cli::preflight::{PreflightError, Preflighted};
 pub use fake::{FakeProvider, FakeReply};
 pub use prompt::{History, HistoryEntry, Prompt, SteerNote};
 pub use proposal::{DropCounts, DropReason, Proposal};

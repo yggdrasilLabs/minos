@@ -37,7 +37,7 @@ use minos_propose::provider::{
     Completion, InfraCause, ModelProvider, ModelRequest, ModelResponse, ProviderError, ProviderStop,
 };
 use minos_propose::schema::OutputSchema;
-use minos_propose::{ClaudeCli, ParentEnv, PreflightError, Preflighted};
+use minos_propose::{ClaudeCli, ParentEnv, PreflightError, Preflighted, Proposal};
 use serde_json::{Map, Value};
 use tempfile::TempDir;
 
@@ -943,7 +943,7 @@ fn the_same_single_shot_code_gives_the_same_proposals_over_claude_cli_and_the_fa
         via_cli
             .items()
             .iter()
-            .map(|proposal| proposal.rationale())
+            .map(Proposal::rationale)
             .collect::<Vec<_>>(),
         ["count bytes", "count chars"]
     );
