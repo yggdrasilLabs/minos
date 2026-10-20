@@ -665,10 +665,9 @@ fn completed(
 }
 
 fn failed(result: Result<ModelResponse, ProviderError>) -> Result<ProviderError, Box<dyn Error>> {
-    match result {
-        Ok(_) => Err("expected a failure, got a completion".into()),
-        Err(error) => Ok(error),
-    }
+    result
+        .err()
+        .ok_or_else(|| Box::<dyn Error>::from("expected a failure, got a completion"))
 }
 
 #[test]

@@ -55,8 +55,8 @@ const PROJECT_MARKERS: [&str; 3] = [".git", "CLAUDE.md", ".mcp.json"];
 /// The project configuration directory, refused anywhere but the canonical `HOME`.
 const CLAUDE_DIR: &str = ".claude";
 
-/// The prefix of each preflight run's private directory under the work root.
-const RUN_DIR_PREFIX: &str = "minos-claude-";
+/// The prefix of each preflight run's and each model call's private directory under the work root.
+pub(crate) const RUN_DIR_PREFIX: &str = "minos-claude-";
 
 /// Most bytes of CLI output kept in a refusal, cut at a character boundary.
 const DETAIL_BYTES: usize = 256;
@@ -280,6 +280,16 @@ impl Preflighted {
     #[must_use]
     pub fn work_root(&self) -> &Path {
         &self.work_root
+    }
+
+    /// Adopts `located` as the binary every later call runs.
+    ///
+    /// Call it only after [`reverify`] passed for that same `located` under this value's environment and work
+    /// root: that keeps the proof valid, because the version and login checks then hold for the new binary as
+    /// they did for the old one. Crate-private, and the only way the located binary changes: there is no public
+    /// setter.
+    pub(crate) fn replace_located(&mut self, located: Located) {
+        self.located = located;
     }
 }
 

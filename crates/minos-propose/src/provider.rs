@@ -280,8 +280,8 @@ pub enum InfraCause {
     /// A repeated preflight failed during the run.
     #[error("the model provider's preflight failed")]
     Preflight,
-    /// The per-call working directory could not be created.
-    #[error("the model call's working directory could not be created")]
+    /// The per-call working directory could not be created or removed.
+    #[error("the model call's working directory could not be created or removed")]
     WorkDir,
     /// A scripted failure from a test provider.
     #[error("a scripted test failure")]
