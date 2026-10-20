@@ -15,15 +15,16 @@ use minos_core::usage::Usage;
 use minos_propose::fake::{FakeProvider, FakeReply, RecordedRequest};
 use minos_propose::prompt::History;
 use minos_propose::proposal::DropReason;
-use minos_propose::proposer::{ProposeError, ProposeInput, Proposals};
-use minos_propose::provider::{
-    EmptyCause, InfraCause, ModelProvider, ProviderError, ProviderStop,
-};
+use minos_propose::proposer::{Proposals, ProposeError, ProposeInput};
+use minos_propose::provider::{EmptyCause, InfraCause, ModelProvider, ProviderError, ProviderStop};
 use minos_propose::schema::OutputSchema;
 use minos_propose::single_shot;
 use serde_json::{Map, Value};
 
 type TestResult = Result<(), Box<dyn Error>>;
+
+/// One call's result and the requests the fake recorded.
+type OneCall = (Result<Proposals, ProposeError>, Vec<RecordedRequest>);
 
 // ---------------------------------------------------------------------------------------------------------------
 // Fixtures
@@ -191,7 +192,7 @@ fn propose_with<P: ModelProvider>(
 }
 
 /// Runs the standard fixture (batch 4) against a fake scripted with `reply`.
-fn run_one(reply: FakeReply) -> Result<(Result<Proposals, ProposeError>, Vec<RecordedRequest>), Box<dyn Error>> {
+fn run_one(reply: FakeReply) -> Result<OneCall, Box<dyn Error>> {
     let fake = FakeProvider::new(vec![reply]);
     let result = propose_with(&fake, &spec(4)?, &manifest()?, &base()?, &parent()?);
     Ok((result, fake.requests()?))
@@ -237,7 +238,10 @@ fn two_valid_proposals_carry_usage_and_the_resolved_model() -> TestResult {
     let base = base()?;
     for proposal in proposals.items() {
         let applied = apply(&base, proposal.diff())?;
-        assert_eq!(applied.get(&path("src/fmt.rs")?), Some(FMT_PARENT.as_bytes()));
+        assert_eq!(
+            applied.get(&path("src/fmt.rs")?),
+            Some(FMT_PARENT.as_bytes())
+        );
     }
     Ok(())
 }
@@ -424,7 +428,9 @@ fn an_exhausted_script_is_an_infra_failure_and_requests_keep_call_order() -> Tes
         .collect();
     let expected = [4, 2, 3]
         .into_iter()
-        .map(|batch| OutputSchema::for_batch(batch, manifest.writable()).map(|s| s.as_str().to_owned()))
+        .map(|batch| {
+            OutputSchema::for_batch(batch, manifest.writable()).map(|s| s.as_str().to_owned())
+        })
         .collect::<Result<Vec<_>, _>>()?;
     assert_eq!(schemas, expected);
     Ok(())
