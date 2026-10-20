@@ -3,7 +3,7 @@ status: complete
 phase: 06-proposers
 source: [06-01-SUMMARY.md, 06-02-SUMMARY.md, 06-03-SUMMARY.md, 06-04-SUMMARY.md, 06-05-SUMMARY.md, 06-06-SUMMARY.md, 06-07-SUMMARY.md, 06-08-SUMMARY.md, 06-09-SUMMARY.md, 06-10-SUMMARY.md]
 started: 2026-10-20T14:20:09Z
-updated: 2026-10-20T14:42:11Z
+updated: 2026-10-20T14:43:43Z
 ---
 
 ## Current Test
@@ -14,6 +14,8 @@ updated: 2026-10-20T14:42:11Z
 
 - The recorded final gate (06-EVIDENCE.md "## Final gate", HEAD a114940) and 06-VERIFICATION.md predate the code review fixes (WR-01 to WR-05, IN-01 to IN-04). 06-REVIEW-FIX.md records a full workspace gate after the fixes (1378 passed, 0 failed, 23 ignored) but says the live suite and cargo clean were not rerun, and target/ exists. Tests 1, 9, and 11 cover that.
 - Coverage blocks that the classifier could not validate, so their entries became human checkpoints (never dropped): 06-02 D1 (verification kind "build") and D5 (kind "property"); 06-03 D3 and D5 (kind "property"); 06-07 D6 (human_judgment true with no rationale); 06-08 D3 (kind "manual", status "pending"). Allowed kinds are unit, integration, e2e, automated_ui, manual_procedural, other; allowed statuses are pass, fail, unknown.
+
+- Test 11: after the pass was reported, target/ still held 4.4 GB of build output dated before this session, so the clean had not run. Claude ran `cargo clean` in the UAT session (removed 40094 files, 5.0 GiB) and confirmed `test ! -d target` exits 0. No cargo command ran after it in this session.
 
 ## Tests
 
