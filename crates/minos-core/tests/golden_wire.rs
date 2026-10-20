@@ -664,6 +664,13 @@ fn golden_records() -> Result<Vec<(&'static str, Record)>, Box<dyn Error>> {
             },
         ),
         (
+            "record_v1_stop_requested_provider_auth",
+            Event::StopRequested {
+                generation: 3,
+                reason: StopReason::ProviderAuth,
+            },
+        ),
+        (
             "record_v1_review_requested",
             Event::ReviewRequested {
                 request: review_request(),
@@ -743,7 +750,7 @@ fn record_rejected(text: &str) -> TestResult {
 #[test]
 fn golden_snapshots() -> TestResult {
     let lines = goldens()?;
-    assert_eq!(lines.len(), 24);
+    assert_eq!(lines.len(), 25);
     for (name, line) in lines {
         insta::assert_snapshot!(name, line);
     }
@@ -761,8 +768,9 @@ fn all_golden_bytes_pinned() -> TestResult {
     //            record_v1_judged_crashed record_v1_judged_timed_out record_v1_selected_improved \
     //            record_v1_selected_kept record_v1_selected_no_valid record_v1_spent_model_call \
     //            record_v1_spent_candidate record_v1_spent_judge record_v1_steered record_v1_stop_requested \
-    //            record_v1_review_requested record_v1_reviewed record_v1_report_acknowledged line_v1 \
-    //            scorecard_v1 job_request_baseline job_request_candidate job_result; do
+    //            record_v1_stop_requested_provider_auth record_v1_review_requested record_v1_reviewed \
+    //            record_v1_report_acknowledged line_v1 scorecard_v1 job_request_baseline \
+    //            job_request_candidate job_result; do
     //     awk 'n >= 2 { print } /^---$/ { n++ }' "golden_wire__$n.snap"
     //   done | shasum -a 256
     let mut all = String::new();
@@ -772,7 +780,7 @@ fn all_golden_bytes_pinned() -> TestResult {
     }
     assert_eq!(
         sha256_hex(all.as_bytes()),
-        "8020cfdeb958e6e74187ffafc315a7aea756daef4011aceeb61a647d9f2b1039"
+        "dedebd15e58765bb6106c6932023bab9d99c623f918cc5abcb58b3e4870a368f"
     );
     Ok(())
 }
