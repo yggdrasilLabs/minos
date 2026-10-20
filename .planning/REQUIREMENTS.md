@@ -98,7 +98,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **PROP-07**: `single_shot` returns several `{rationale, files}` candidates, parsed into closed `deny_unknown_fields` types, from which Minos derives the canonical diff; invalid candidates are dropped, not repaired. *Superseded wording (2026-10-19): "returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types; invalid diffs are dropped, not repaired". The model returns the full contents of each writable file it changes and Minos derives the canonical diff with `diff_trees`, so the model never writes hunk headers (06-CONTEXT.md D-10, D-11).*
 - [x] **PROP-08**: Token usage per call is recorded as a `Spent` event; any client-side dollar estimate from the CLI is ignored
 - [x] **PROP-09**: A rate-limit or usage-cap response from the CLI is an infrastructure failure that stops the run with a `StopRequested` event, never an `Outcome`
-- [ ] **PROP-10**: The sweep tier produces proposals from declared params with no model call
+- [x] **PROP-10**: The sweep tier produces proposals from declared params with no model call
 
 ### Runner and Loop (LOOP)
 
@@ -259,7 +259,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROP-07 | Phase 6 | Complete |
 | PROP-08 | Phase 6 | Complete |
 | PROP-09 | Phase 6 | Complete |
-| PROP-10 | Phase 6 | Pending |
+| PROP-10 | Phase 6 | Complete |
 | LOOP-01 | Phase 7 | Pending |
 | LOOP-02 | Phase 7 | Pending |
 | LOOP-03 | Phase 7 | Pending |

@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: proposers
 status: executing
 stopped_at: Completed 06-04-PLAN.md
-last_updated: "2026-10-20T12:01:56.961Z"
+last_updated: "2026-10-20T12:12:01.000Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 70
-  completed_plans: 64
+  completed_plans: 65
   percent: 63
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 06 (proposers) — EXECUTING
-Plan: 5 of 10
+Plan: 6 of 10
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 06 execution started
 
@@ -123,6 +123,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 06 P02 | 14min | 3 tasks | 14 files |
 | Phase 06 P03 | 14min | 3 tasks | 7 files |
 | Phase 06 P04 | 15min | 3 tasks | 11 files |
+| Phase 06 P05 | 6min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -286,6 +287,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-03: History holds rendered text only; rows read only JudgeSpec::gates and Objective::metric, so held-out values are unreachable by construction
 - [Phase 06]: 06-03: Prompt blocks are fenced with a 16-hex token of IdHasher(minos/prompt-fence/v1, content); a block ends only at the END line with its own token
 - [Phase 06]: 06-04: locate refuses at the first failed check in a fixed order and never follows a link path whose kind is unknown; a dangling link names its own read_link text — D-01: only the native install runs, and every refusal names the paths checked
+- [Phase 06]: 06-05: Origin::Model records the single resolved model from per-model usage, else the manifest's requested model
+- [Phase 06]: 06-05: Proposer<P> without a provider proposes only sweeps; planned and agentic are TierNotInThisRelease
 
 ### Pending Todos
 
@@ -316,6 +319,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-20T12:01:56.956Z
+Last session: 2026-10-20T12:11:49.804Z
 Stopped at: Completed 06-04-PLAN.md
 Resume file: None
