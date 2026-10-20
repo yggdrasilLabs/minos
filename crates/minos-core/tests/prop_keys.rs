@@ -540,7 +540,7 @@ fn spec_strategy() -> impl Strategy<Value = Spec> {
             ordinal,
             note
         }),
-        (small(), 0_u8..6)
+        (small(), 0_u8..7)
             .prop_map(|(generation, reason)| Spec::StopRequested { generation, reason }),
         (0_u8..3, seed()).prop_map(|(kind, subject)| Spec::ReviewRequested { kind, subject }),
         (0_u8..3, seed(), any::<bool>()).prop_map(|(kind, subject, approved)| Spec::Reviewed {
@@ -567,7 +567,8 @@ fn stop_reason(seed: u8) -> StopReason {
         2 => StopReason::TokenCap,
         3 => StopReason::NoValidCandidates,
         4 => StopReason::InfraFailures,
-        _ => StopReason::ProviderLimit,
+        5 => StopReason::ProviderLimit,
+        _ => StopReason::ProviderAuth,
     }
 }
 
@@ -989,6 +990,10 @@ fn stop_reason_display_strings_are_fixed() {
             StopReason::ProviderLimit,
             "model provider rate or usage limit",
         ),
+        (
+            StopReason::ProviderAuth,
+            "model provider authentication failed; log in again",
+        ),
     ];
     for (reason, text) in cases {
         assert_eq!(reason.to_string(), text);
@@ -996,10 +1001,59 @@ fn stop_reason_display_strings_are_fixed() {
 }
 
 #[test]
+fn provider_auth_stop_record_parses() -> TestResult {
+    let text = r#"{"v":"1","stop_requested":{"generation":3,"reason":"provider_auth"}}"#;
+    let record: Record = serde_json::from_str(text)?;
+    let expected = Record::v1(Event::StopRequested {
+        generation: 3,
+        reason: StopReason::ProviderAuth,
+    });
+    assert_eq!(
+        record.event(),
+        &Event::StopRequested {
+            generation: 3,
+            reason: StopReason::ProviderAuth,
+        }
+    );
+    assert_eq!(record, expected);
+    assert_eq!(serde_json::to_string(&expected)?, text);
+    Ok(())
+}
+
+#[test]
+fn provider_auth_key_differs_from_every_other_reason() {
+    let run = run();
+    let reasons = [
+        StopReason::UserStop,
+        StopReason::SpendCap,
+        StopReason::TokenCap,
+        StopReason::NoValidCandidates,
+        StopReason::InfraFailures,
+        StopReason::ProviderLimit,
+        StopReason::ProviderAuth,
+    ];
+    let keys: BTreeSet<EventKey> = reasons
+        .iter()
+        .map(|&reason| {
+            Event::StopRequested {
+                generation: 3,
+                reason,
+            }
+            .key(&run)
+        })
+        .collect();
+    assert_eq!(keys.len(), 7);
+}
+
+#[test]
 fn closed_enums_serialize_as_snake_case() -> TestResult {
     assert_eq!(
         serde_json::to_string(&StopReason::NoValidCandidates)?,
         r#""no_valid_candidates""#
+    );
+    assert_eq!(
+        serde_json::to_string(&StopReason::ProviderAuth)?,
+        r#""provider_auth""#
     );
     assert_eq!(
         serde_json::to_string(&ReviewKind::JudgeDesign)?,
