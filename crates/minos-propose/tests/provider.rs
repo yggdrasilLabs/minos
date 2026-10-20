@@ -40,7 +40,7 @@ struct ViaDisplay;
 impl<T: ?Sized + Display> NotImplemented<ViaDisplay> for T {}
 
 struct ViaClone;
-impl<T: ?Sized + Clone> NotImplemented<ViaClone> for T {}
+impl<T: Clone> NotImplemented<ViaClone> for T {}
 
 struct ViaDeref;
 impl<T: ?Sized + Deref> NotImplemented<ViaDeref> for T {}

@@ -16,5 +16,6 @@
 
 pub mod limits;
 pub mod prompt;
+pub mod proposal;
 pub mod provider;
 pub mod schema;

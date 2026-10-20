@@ -2,7 +2,6 @@
 //! diffs are canonical and cumulative from the base, and every item that breaks a rule is dropped and counted by
 //! its closed reason, never repaired.
 
-use std::collections::BTreeSet;
 use std::error::Error;
 
 use minos_core::diff::apply::Tree;
@@ -11,7 +10,7 @@ use minos_core::limits::Limits;
 use minos_core::manifest::Manifest;
 use minos_core::path::RelPath;
 use minos_propose::limits::{MAX_RATIONALE_BYTES, MAX_RETURNED_FILE_BYTES};
-use minos_propose::proposal::{DropReason, Parsed, parse_output};
+use minos_propose::proposal::{DropReason, Parsed, Proposal, parse_output};
 use minos_propose::provider::ModelOutput;
 use minos_propose::schema::OutputSchema;
 use proptest::prelude::*;
@@ -195,9 +194,13 @@ fn two_items_yield_two_cumulative_proposals() -> TestResult {
             Ok(diff_trees(&base, &candidate, manifest.writable(), &limits)?)
         })
         .collect::<Result<_, _>>()?;
-    let got: Vec<_> = parsed.proposals().iter().map(|p| p.diff().clone()).collect();
+    let got: Vec<_> = parsed
+        .proposals()
+        .iter()
+        .map(|p| p.diff().clone())
+        .collect();
     assert_eq!(got, expected);
-    let rationales: Vec<_> = parsed.proposals().iter().map(|p| p.rationale()).collect();
+    let rationales: Vec<_> = parsed.proposals().iter().map(Proposal::rationale).collect();
     assert_eq!(rationales, ["count bytes", "count chars"]);
     // Cumulative from the base: the parent's own change to src/fmt.rs is in every diff.
     for proposal in parsed.proposals() {
@@ -328,7 +331,10 @@ fn drops_every_item_of_an_over_batch_output() -> TestResult {
         .map(|n| {
             item(
                 "x",
-                vec![file("src/parse.rs", &format!("pub fn parse() -> u8 {{ {n} }}\n"))],
+                vec![file(
+                    "src/parse.rs",
+                    &format!("pub fn parse() -> u8 {{ {n} }}\n"),
+                )],
             )
         })
         .collect();
@@ -380,7 +386,10 @@ fn drops_rationale_invalid() -> TestResult {
         )?;
     }
     // Exactly at the cap is accepted.
-    let parsed = parse(output(vec![item(&"r".repeat(MAX_RATIONALE_BYTES), files())]))?;
+    let parsed = parse(output(vec![item(
+        &"r".repeat(MAX_RATIONALE_BYTES),
+        files(),
+    )]))?;
     assert_eq!(parsed.proposals().len(), 1);
     Ok(())
 }
@@ -437,7 +446,10 @@ fn drops_a_dot_prefixed_path_without_normalizing_it() -> TestResult {
 #[test]
 fn drops_duplicate_path() -> TestResult {
     assert_item_dropped(
-        vec![file("src/parse.rs", PARSE_ONE), file("src/parse.rs", PARSE_TWO)],
+        vec![
+            file("src/parse.rs", PARSE_ONE),
+            file("src/parse.rs", PARSE_TWO),
+        ],
         DropReason::DuplicatePath,
     )
 }
@@ -457,7 +469,10 @@ fn drops_not_in_parent() -> TestResult {
 #[test]
 fn drops_forbidden_byte() -> TestResult {
     for content in ["pub fn parse() {}\r\n", "pub fn parse() {}\0\n"] {
-        assert_item_dropped(vec![file("src/parse.rs", content)], DropReason::ForbiddenByte)?;
+        assert_item_dropped(
+            vec![file("src/parse.rs", content)],
+            DropReason::ForbiddenByte,
+        )?;
     }
     Ok(())
 }
@@ -465,13 +480,19 @@ fn drops_forbidden_byte() -> TestResult {
 #[test]
 fn drops_file_too_large() -> TestResult {
     let content = "a".repeat(MAX_RETURNED_FILE_BYTES + 1);
-    assert_item_dropped(vec![file("src/parse.rs", &content)], DropReason::FileTooLarge)
+    assert_item_dropped(
+        vec![file("src/parse.rs", &content)],
+        DropReason::FileTooLarge,
+    )
 }
 
 #[test]
 fn drops_same_as_parent() -> TestResult {
     assert_item_dropped(
-        vec![file("src/parse.rs", PARSE_BASE), file("src/fmt.rs", FMT_PARENT)],
+        vec![
+            file("src/parse.rs", PARSE_BASE),
+            file("src/fmt.rs", FMT_PARENT),
+        ],
         DropReason::SameAsParent,
     )
 }
@@ -481,22 +502,43 @@ fn drops_back_to_base() -> TestResult {
     assert_item_dropped(vec![file("src/fmt.rs", FMT_BASE)], DropReason::BackToBase)
 }
 
+/// 3,000 numbered lines, with every `every`-th line (from line 0) changed when `every` is not zero.
+fn numbered(every: usize) -> String {
+    (0..3000_usize)
+        .map(|n| {
+            if every != 0 && n % every == 0 {
+                format!("changed {n}\n")
+            } else {
+                format!("line {n}\n")
+            }
+        })
+        .collect()
+}
+
 #[test]
-fn drops_compose_over_the_diff_line_cap() -> TestResult {
-    // 40,000 changed lines give a diff of about 80,000 lines, over core's 65,536-line cap.
-    let old = "a\n".repeat(40_000);
-    let new = "b\n".repeat(40_000);
+fn drops_compose_over_the_hunk_cap() -> TestResult {
+    // 300 changed lines, ten lines apart, give 300 separate hunks (three lines of context each side never
+    // touch), over core's 256 hunks per file. The edit distance stays small, so the diff is quick to compute.
     let base = tree(&[
         ("src/fmt.rs", FMT_BASE),
         ("src/lib.rs", LIB),
-        ("src/parse.rs", &old),
+        ("src/parse.rs", &numbered(0)),
     ])?;
     let parsed = parse_with(
-        output(vec![item("x", vec![file("src/parse.rs", &new)])]),
+        output(vec![item("x", vec![file("src/parse.rs", &numbered(10))])]),
         &base,
         &base,
     )?;
-    assert_one_drop(&parsed, DropReason::Compose)
+    assert_one_drop(&parsed, DropReason::Compose)?;
+
+    // Control: the same edit every twentieth line (150 hunks) is within the cap and accepted.
+    let parsed = parse_with(
+        output(vec![item("x", vec![file("src/parse.rs", &numbered(20))])]),
+        &base,
+        &base,
+    )?;
+    assert_eq!(parsed.proposals().len(), 1);
+    Ok(())
 }
 
 #[test]
@@ -507,7 +549,7 @@ fn drops_duplicate_in_batch() -> TestResult {
     ]))?;
     assert_eq!(parsed.proposals().len(), 1);
     assert_eq!(
-        parsed.proposals().first().map(|p| p.rationale()),
+        parsed.proposals().first().map(Proposal::rationale),
         Some("first")
     );
     assert_eq!(parsed.dropped().get(DropReason::DuplicateInBatch), 1);
