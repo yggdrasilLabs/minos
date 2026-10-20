@@ -1,0 +1,22 @@
+---
+source: crates/minos-propose/tests/argv_golden.rs
+expression: "text.trim_end_matches('\\n')"
+---
+-p
+--model
+haiku
+--tools
+
+--output-format
+json
+--json-schema
+{"additionalProperties":false,"properties":{"proposals":{"items":{"additionalProperties":false,"properties":{"files":{"items":{"additionalProperties":false,"properties":{"content":{"type":"string"},"path":{"enum":["src/parse.rs"],"type":"string"}},"required":["path","content"],"type":"object"},"maxItems":1,"minItems":1,"type":"array"},"rationale":{"maxLength":2000,"minLength":1,"type":"string"}},"required":["rationale","files"],"type":"object"},"maxItems":4,"minItems":1,"type":"array"}},"required":["proposals"],"type":"object"}
+--no-session-persistence
+--strict-mcp-config
+--mcp-config
+{"mcpServers":{}}
+--safe-mode
+--permission-prompts
+none
+--max-turns
+1

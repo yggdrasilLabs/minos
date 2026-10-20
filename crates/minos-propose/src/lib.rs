@@ -14,6 +14,7 @@
 //! Providers are used through generics, never trait objects, exactly as the runner is generic over its sandbox
 //! backend: each binary picks its provider concretely.
 
+pub mod claude_cli;
 pub mod limits;
 pub mod prompt;
 pub mod proposal;

@@ -85,7 +85,7 @@ fn claude_argv_bytes_pinned() -> TestResult {
     // so the bytes hashed here are the argv elements, each followed by one newline.
     assert_eq!(
         sha256_hex(argv_text()?.as_bytes()),
-        "0000000000000000000000000000000000000000000000000000000000000000"
+        "9c421eb32cba7a0126e2dc0926125722fac117edd6da36fcae336682cb8464f6"
     );
     Ok(())
 }
@@ -190,7 +190,10 @@ fn child_env_refuses_a_missing_user_or_logname() {
     let parent = ParentEnv::from_vars(vars(&[("HOME", "/h"), ("LOGNAME", "u"), ("TMPDIR", "/t")]));
     assert_eq!(parent.child_env(), Err(EnvError::Missing { name: "USER" }));
     let parent = ParentEnv::from_vars(vars(&[("HOME", "/h"), ("USER", "u"), ("TMPDIR", "/t")]));
-    assert_eq!(parent.child_env(), Err(EnvError::Missing { name: "LOGNAME" }));
+    assert_eq!(
+        parent.child_env(),
+        Err(EnvError::Missing { name: "LOGNAME" })
+    );
 }
 
 #[test]
@@ -211,7 +214,10 @@ fn child_env_refuses_a_relative_tmpdir_or_home() {
         ("LOGNAME", "u"),
         ("TMPDIR", "/t"),
     ]));
-    assert_eq!(parent.child_env(), Err(EnvError::NotAbsolute { name: "HOME" }));
+    assert_eq!(
+        parent.child_env(),
+        Err(EnvError::NotAbsolute { name: "HOME" })
+    );
 }
 
 #[test]
