@@ -171,7 +171,9 @@ fn scored_row_shows_gates_and_signed_delta() -> TestResult {
         )
     );
     let b = row_or_err(&history, "b")?;
-    assert!(b.contains("| candidate | scored | gates: identical_output fail | throughput_mb_s -5.00% |"));
+    assert!(b.contains(
+        "| candidate | scored | gates: identical_output fail | throughput_mb_s -5.00% |"
+    ));
     assert_eq!(history.row_count(), 2);
     assert_eq!(history.omitted_rows(), 0);
     Ok(())
@@ -184,7 +186,12 @@ fn gate_passes_only_at_exactly_one() -> TestResult {
         &judge()?,
         2,
         &incumbent,
-        vec![entry(1, "a", false, vec![(0, scored(105.0, 0.999_999, 51.0)?)])],
+        vec![entry(
+            1,
+            "a",
+            false,
+            vec![(0, scored(105.0, 0.999_999, 51.0)?)],
+        )],
     );
     assert!(row_or_err(&history, "a")?.contains("gates: identical_output fail"));
     Ok(())
@@ -224,7 +231,12 @@ fn delta_is_not_available_without_a_usable_incumbent() -> TestResult {
 #[test]
 fn incumbent_reduces_over_its_scored_trials_only() -> TestResult {
     // The incumbent's one crashed trial is skipped (TrialRule::ScoredOnly), as select_greedy does.
-    let incumbent = vec![Outcome::TimedOut { stage: Stage::Judge }, scored(100.0, 1.0, 50.0)?];
+    let incumbent = vec![
+        Outcome::TimedOut {
+            stage: Stage::Judge,
+        },
+        scored(100.0, 1.0, 50.0)?,
+    ];
     let history = History::new(
         &judge()?,
         2,
@@ -251,14 +263,22 @@ fn one_unscored_trial_makes_the_row_unscored() -> TestResult {
             "a",
             false,
             vec![
-                (2, Outcome::TimedOut { stage: Stage::Judge }),
+                (
+                    2,
+                    Outcome::TimedOut {
+                        stage: Stage::Judge,
+                    },
+                ),
                 (0, scored(105.0, 1.0, 51.0)?),
                 (1, Outcome::Crashed { stage: Stage::Run }),
             ],
         )],
     );
     let a = row_or_err(&history, "a")?;
-    assert!(a.contains("| candidate | crashed in run | rationale: "), "{a}");
+    assert!(
+        a.contains("| candidate | crashed in run | rationale: "),
+        "{a}"
+    );
     assert!(!a.contains("scored"));
     assert!(!a.contains("throughput_mb_s"));
     Ok(())
@@ -273,7 +293,10 @@ fn build_failure_renders_its_fixed_phrase() -> TestResult {
 #[test]
 fn gate_failure_names_the_gate() -> TestResult {
     let gate = "identical_output".parse()?;
-    assert!(rejected_row(Reason::GateFailed { gate })?.contains("| rejected: gate identical_output failed |"));
+    assert!(
+        rejected_row(Reason::GateFailed { gate })?
+            .contains("| rejected: gate identical_output failed |")
+    );
     Ok(())
 }
 
@@ -293,7 +316,10 @@ fn scorecard_shape_reasons_name_no_metric() -> TestResult {
     ];
     for reason in reasons {
         let text = rejected_row(reason)?;
-        assert!(text.contains("| rejected: the judge's scorecard was invalid |"), "{text}");
+        assert!(
+            text.contains("| rejected: the judge's scorecard was invalid |"),
+            "{text}"
+        );
         assert!(!text.contains("held_out"), "{text}");
     }
     Ok(())
@@ -311,7 +337,10 @@ fn other_reasons_use_their_display_text() -> TestResult {
         ),
         (Reason::RunFailed, "rejected: the run failed"),
         (Reason::OutputInvalid, "rejected: the output is invalid"),
-        (Reason::OutputTooLarge, "rejected: the output is over its cap"),
+        (
+            Reason::OutputTooLarge,
+            "rejected: the output is over its cap",
+        ),
         (
             Reason::ChunkProtocol,
             "rejected: the output stream broke the chunk protocol",
@@ -332,8 +361,23 @@ fn crash_and_timeout_name_their_stage() -> TestResult {
         2,
         &incumbent,
         vec![
-            entry(1, "a", false, vec![(0, Outcome::Crashed { stage: Stage::Run })]),
-            entry(1, "b", false, vec![(0, Outcome::TimedOut { stage: Stage::Judge })]),
+            entry(
+                1,
+                "a",
+                false,
+                vec![(0, Outcome::Crashed { stage: Stage::Run })],
+            ),
+            entry(
+                1,
+                "b",
+                false,
+                vec![(
+                    0,
+                    Outcome::TimedOut {
+                        stage: Stage::Judge,
+                    },
+                )],
+            ),
         ],
     );
     assert!(row_or_err(&history, "a")?.contains("| crashed in run |"));
@@ -352,7 +396,10 @@ fn all_scored_trials_that_do_not_reduce_render_an_invalid_scorecard() -> TestRes
             1,
             "a",
             false,
-            vec![(0, scored(105.0, 1.0, 51.0)?), (1, scored_without_objective()?)],
+            vec![
+                (0, scored(105.0, 1.0, 51.0)?),
+                (1, scored_without_objective()?),
+            ],
         )],
     );
     assert!(row_or_err(&history, "a")?.contains("| rejected: the judge's scorecard was invalid |"));
@@ -382,7 +429,10 @@ fn rationale_is_inline_sanitized_and_cut() -> TestResult {
     );
     assert_eq!(history.table().lines().count(), 1);
     let a = row_or_err(&history, "a")?;
-    assert!(a.ends_with("| rationale: line one<U+000A>line two [31mred<U+202E>reversed"), "{a}");
+    assert!(
+        a.ends_with("| rationale: line one<U+000A>line two [31mred<U+202E>reversed"),
+        "{a}"
+    );
     assert!(!history.table().contains('\u{1b}'));
     assert!(!history.table().contains('\u{202e}'));
 
@@ -433,8 +483,14 @@ fn window_keeps_recent_rows_and_every_winner_in_order() -> TestResult {
     } else {
         ("edge-two", "edge")
     };
-    let first_at = history.table().find(&short(&exp(first))).ok_or("first missing")?;
-    let second_at = history.table().find(&short(&exp(second))).ok_or("second missing")?;
+    let first_at = history
+        .table()
+        .find(&short(&exp(first)))
+        .ok_or("first missing")?;
+    let second_at = history
+        .table()
+        .find(&short(&exp(second)))
+        .ok_or("second missing")?;
     assert!(first_at < second_at);
 
     // Input order does not matter.
@@ -466,11 +522,10 @@ fn table_stays_under_its_cap_dropping_the_oldest_non_winners_first() -> TestResu
     assert!(history.table().len() <= HISTORY_TABLE_MAX_BYTES);
     assert!(history.omitted_rows() > 0);
     assert_eq!(history.row_count() + history.omitted_rows(), 500);
-    assert!(
-        history
-            .table()
-            .ends_with(&format!("({} earlier rows omitted)\n", history.omitted_rows()))
-    );
+    assert!(history.table().ends_with(&format!(
+        "({} earlier rows omitted)\n",
+        history.omitted_rows()
+    )));
     // The oldest row is the only winner, so it stays; the newest row stays too.
     assert!(row(&history, "e0").is_some());
     assert!(row(&history, "e499").is_some());
@@ -505,7 +560,11 @@ fn excerpts_keep_the_newest_whole_excerpts_under_their_cap() -> TestResult {
     let history = History::new(&judge()?, 9, &incumbent, entries);
     let total: usize = history.excerpts().iter().map(|(_, text)| text.len()).sum();
     assert!(total <= EXCERPTS_MAX_BYTES);
-    let labels: Vec<&str> = history.excerpts().iter().map(|(label, _)| label.as_str()).collect();
+    let labels: Vec<&str> = history
+        .excerpts()
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect();
     let expected: Vec<String> = (4..8_u32)
         .map(|index| {
             format!(
@@ -516,7 +575,12 @@ fn excerpts_keep_the_newest_whole_excerpts_under_their_cap() -> TestResult {
         })
         .collect();
     assert_eq!(labels, expected);
-    assert!(history.excerpts().iter().all(|(_, text)| text.len() == 4096));
+    assert!(
+        history
+            .excerpts()
+            .iter()
+            .all(|(_, text)| text.len() == 4096)
+    );
     Ok(())
 }
 
@@ -553,5 +617,12 @@ fn held_out_values_do_not_change_the_history() -> TestResult {
     assert_eq!(low, high);
     assert!(!low.table().contains("held_out"));
     assert!(!low.table().contains("123456"));
+    Ok(())
+}
+
+#[test]
+fn entry_with_no_trials_is_not_judged() -> TestResult {
+    let history = History::new(&judge()?, 2, &[], vec![entry(1, "a", false, Vec::new())]);
+    assert!(row_or_err(&history, "a")?.contains("| candidate | not judged | rationale: "));
     Ok(())
 }

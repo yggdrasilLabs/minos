@@ -11,6 +11,10 @@ use minos_core::id::PromptHash;
 
 use crate::limits::MAX_PROMPT_BYTES;
 
+mod history;
+
+pub use history::{History, HistoryEntry};
+
 /// A prompt: a stable prefix followed by a dynamic suffix, at most [`MAX_PROMPT_BYTES`] bytes.
 ///
 /// `Debug` prints the lengths and the hash only, never the text, so a log line cannot carry a prompt that holds
