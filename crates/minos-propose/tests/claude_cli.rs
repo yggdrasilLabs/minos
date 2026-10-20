@@ -21,18 +21,23 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
-use minos_core::id::ModelId;
+use minos_core::diff::apply::Tree;
+use minos_core::id::{ManifestId, ModelId, PromptHash, RunId, TreeId};
+use minos_core::ledger::Origin;
+use minos_core::manifest::{Manifest, ProposerSpec, Tier};
 use minos_core::path::RelPath;
 use minos_core::usage::Usage;
-use minos_propose::claude_cli::ClaudeCli;
 use minos_propose::claude_cli::command::{ClaudeVersion, argv};
-use minos_propose::claude_cli::env::{EnvError, ParentEnv};
-use minos_propose::claude_cli::preflight::{PreflightError, Preflighted, preflight};
-use minos_propose::prompt::Prompt;
+use minos_propose::claude_cli::env::EnvError;
+use minos_propose::claude_cli::preflight::preflight;
+use minos_propose::fake::{FakeProvider, FakeReply};
+use minos_propose::prompt::{History, Prompt};
+use minos_propose::proposer::{Proposals, ProposeError, ProposeInput, Proposer};
 use minos_propose::provider::{
     Completion, InfraCause, ModelProvider, ModelRequest, ModelResponse, ProviderError, ProviderStop,
 };
 use minos_propose::schema::OutputSchema;
+use minos_propose::{ClaudeCli, ParentEnv, PreflightError, Preflighted};
 use serde_json::{Map, Value};
 use tempfile::TempDir;
 
@@ -636,6 +641,7 @@ fn item(rationale: &str, files: Vec<Value>) -> Value {
     Value::Object(map)
 }
 
+const PARSE_BASE: &str = "pub fn parse(input: &str) -> usize {\n    input.len()\n}\n";
 const PARSE_ONE: &str = "pub fn parse(input: &str) -> usize {\n    input.bytes().count()\n}\n";
 const PARSE_TWO: &str = "pub fn parse(input: &str) -> usize {\n    input.chars().count()\n}\n";
 
@@ -819,5 +825,150 @@ fn a_removed_link_is_binary_missing() -> TestResult {
         }
     );
     assert_eq!(fixture.runs("model")?, 0);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The tier code is provider-agnostic (PROP-01)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A single-shot project: one writable file, the model alias `haiku`, batch 2.
+const MANIFEST: &str = r#"[project]
+name = "logparse"
+kind = "optimize"
+program = "program.md"
+
+[surface]
+writable = ["src/parse.rs"]
+readable = ["src/lib.rs"]
+
+[source]
+exclude = ["judge/"]
+
+[environment]
+dockerfile = "minos.Dockerfile"
+requires = { arch = "arm64" }
+
+[commands]
+build = ["cargo", "build", "--release"]
+run = ["./target/release/bench"]
+
+[budget]
+build = "2m"
+run = "5m"
+spend_usd = 40
+
+[judge]
+version = 1
+command = ["./judge/score"]
+
+[[judge.gate]]
+metric = "identical_output"
+
+[[judge.objective]]
+metric = "throughput_mb_s"
+goal = "maximize"
+min_improvement = "5%"
+
+[policy]
+kind = "greedy"
+width = 4
+
+[[proposer]]
+kind = "single_shot"
+model = "haiku"
+batch = 2
+"#;
+
+const LIB: &str = "pub mod parse;\n";
+const PROGRAM: &[u8] = b"Make parsing faster.\n";
+
+/// The project's manifest, its single-shot spec, and its base tree, which is also generation 1's parent.
+fn project() -> Result<(Manifest, ProposerSpec, Tree), Box<dyn Error>> {
+    let manifest = Manifest::parse_toml(MANIFEST)?;
+    let spec = ProposerSpec::new(Tier::SingleShot, Some(model("haiku")?), 2)?;
+    let mut base = Tree::new();
+    base.insert(rel("src/lib.rs")?, LIB.as_bytes().to_vec());
+    base.insert(rel("src/parse.rs")?, PARSE_BASE.as_bytes().to_vec());
+    Ok((manifest, spec, base))
+}
+
+/// Generation 1 of `spec` through `proposer`, with empty history and no notes: the one call shape both providers
+/// are driven with, so a difference in the result can only come from the provider.
+fn propose_with<P: ModelProvider>(
+    proposer: &Proposer<P>,
+    spec: &ProposerSpec,
+    manifest: &Manifest,
+    base: &Tree,
+    parent: &Tree,
+) -> Result<Proposals, ProposeError> {
+    let history = History::empty();
+    let run = RunId::of(&ManifestId::of(b"m"), &TreeId::of(b"t"), 1_760_000_000);
+    let input = ProposeInput {
+        manifest,
+        run: &run,
+        generation: 1,
+        base,
+        parent,
+        program: PROGRAM,
+        history: &history,
+        notes: &[],
+    };
+    proposer.propose(spec, &input)
+}
+
+#[test]
+fn the_same_single_shot_code_gives_the_same_proposals_over_claude_cli_and_the_fake() -> TestResult {
+    let (manifest, spec, base) = project()?;
+    let structured = two_proposals();
+
+    let fixture = Fixture::new("2.1.304")?;
+    fixture.write("envelope.json", &envelope(&structured)?)?;
+    let cli = Proposer::with_provider(ClaudeCli::preflight(&fixture.parent(&[]))?);
+    let via_cli = propose_with(&cli, &spec, &manifest, &base, &base)?;
+
+    let fake = Proposer::with_provider(FakeProvider::new(vec![FakeReply::Structured {
+        output: structured,
+        usage: verified_usage(),
+        models: BTreeMap::from([(model("claude-haiku-5-5")?, verified_usage())]),
+    }]));
+    let via_fake = propose_with(&fake, &spec, &manifest, &base, &base)?;
+
+    assert_eq!(via_cli.items().len(), 2);
+    for (left, right) in via_cli.items().iter().zip(via_fake.items()) {
+        assert_eq!(left.diff(), right.diff());
+        assert_eq!(left.rationale(), right.rationale());
+    }
+    assert_eq!(
+        via_cli
+            .items()
+            .iter()
+            .map(|proposal| proposal.rationale())
+            .collect::<Vec<_>>(),
+        ["count bytes", "count chars"]
+    );
+    assert_eq!(via_cli, via_fake);
+    Ok(())
+}
+
+#[test]
+fn through_claude_cli_the_origin_is_the_resolved_model_and_the_hash_of_the_bytes_sent() -> TestResult
+{
+    let (manifest, spec, base) = project()?;
+    let fixture = Fixture::new("2.1.304")?;
+    fixture.write("envelope.json", &envelope(&two_proposals())?)?;
+    let cli = Proposer::with_provider(ClaudeCli::preflight(&fixture.parent(&[]))?);
+    let proposals = propose_with(&cli, &spec, &manifest, &base, &base)?;
+
+    let sent = fixture.recorded_bytes("stdin")?;
+    assert!(!sent.is_empty());
+    assert_eq!(
+        proposals.origin(),
+        &Origin::Model {
+            model: model("claude-haiku-5-5")?,
+            prompt: PromptHash::of(&sent),
+        }
+    );
+    assert_eq!(proposals.usage(), Some(&verified_usage()));
     Ok(())
 }
