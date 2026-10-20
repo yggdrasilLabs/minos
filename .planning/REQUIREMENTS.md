@@ -97,7 +97,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **PROP-06**: The dynamic suffix includes a bounded history table (rationale, outcome, delta vs incumbent) and bounded, sanitized failure excerpts from recent experiments, labelled as untrusted text; held-out metric values never appear in any prompt, proven by a test
 - [ ] **PROP-07**: `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types; invalid diffs are dropped, not repaired
 - [ ] **PROP-08**: Token usage per call is recorded as a `Spent` event; any client-side dollar estimate from the CLI is ignored
-- [ ] **PROP-09**: A rate-limit or usage-cap response from the CLI is an infrastructure failure that stops the run with a `StopRequested` event, never an `Outcome`
+- [x] **PROP-09**: A rate-limit or usage-cap response from the CLI is an infrastructure failure that stops the run with a `StopRequested` event, never an `Outcome`
 - [ ] **PROP-10**: The sweep tier produces proposals from declared params with no model call
 
 ### Runner and Loop (LOOP)
@@ -258,7 +258,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROP-06 | Phase 6 | Pending |
 | PROP-07 | Phase 6 | Pending |
 | PROP-08 | Phase 6 | Pending |
-| PROP-09 | Phase 6 | Pending |
+| PROP-09 | Phase 6 | Complete |
 | PROP-10 | Phase 6 | Pending |
 | LOOP-01 | Phase 7 | Pending |
 | LOOP-02 | Phase 7 | Pending |

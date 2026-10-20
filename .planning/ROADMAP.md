@@ -326,11 +326,11 @@ Plans:
   4. `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types, and invalid diffs are dropped, not repaired. `sweep` produces proposals from declared params with no model call. Each call's token usage is returned for a `Spent` event and any CLI dollar figure is ignored. A rate-limit or usage-cap response surfaces as an infrastructure failure that stops the run with `StopRequested`, never as an `Outcome` (PROP-07, PROP-08, PROP-09, PROP-10)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 10 plans
+**Plans**: 1/10 plans executed
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — `StopReason::ProviderAuth` in core: variant, key tag 7, Display, prop_keys coverage, one pinned golden line (wave 1)
+- [x] 06-01-PLAN.md — `StopReason::ProviderAuth` in core: variant, key tag 7, Display, prop_keys coverage, one pinned golden line (wave 1)
 - [ ] 06-02-PLAN.md — `minos-propose` contracts: dependencies and clippy ban, limits, output schema golden, `ModelProvider` and its types, `Prompt`, the strict output parser with closed drop reasons (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -409,6 +409,6 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
-| 6. Proposers | 0/TBD | Not started | - |
+| 6. Proposers | 1/10 | In Progress|  |
 | 7. Runner and Loop | 0/TBD | Not started | - |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |

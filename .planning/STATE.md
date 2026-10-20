@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 6
-current_phase_name: Proposers
+current_phase: 06
+current_phase_name: proposers
 status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-10-20T00:59:50.656Z"
-last_activity: 2026-10-19
-last_activity_desc: Phase 05 complete, transitioned to Phase 6
+last_updated: "2026-10-20T01:07:59.583Z"
+last_activity: 2026-10-20
+last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 8
   completed_phases: 5
-  total_plans: 60
-  completed_plans: 60
+  total_plans: 70
+  completed_plans: 61
   percent: 63
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 05 — guest-krun-backend-and-environment-build
+**Current focus:** Phase 06 — proposers
 
 ## Current Position
 
-Phase: 6 — Proposers
-Plan: Not started
+Phase: 06 (proposers) — EXECUTING
+Plan: 2 of 10
 Status: Ready to execute
-Last activity: 2026-10-19 — Phase 05 complete, transitioned to Phase 6
+Last activity: 2026-10-20 — Phase 06 execution started
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -119,6 +119,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 05 P18 | 15 min | 3 tasks | 3 files |
 | Phase 05 P19 | 25 min | 3 tasks | 3 files |
 | Phase 05 P20 | 8min | 3 tasks | 4 files |
+| Phase 06 P01 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -276,6 +277,7 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-19: KRUN_BOOT_START_NS=<digits> is the one host-derived /proc/cmdline token exit_env allows, as a recorded exception (user chose no-allowance first, then after root cause 'Allow it as a recorded exception', both 2026-10-19); removal path: vendor only the top-level msb_krun crate under [patch.crates-io], no whole-project fork
 - [Phase 05]: 05-20: the final gate passed on one build (vm 10, exit 4, host doctor exit 0, Docker test); GUEST-05 checked with the KRUN_BOOT_START_NS recorded exception (user decision 2026-10-19)
 - [Phase 05]: 05-20: the chunked protocol's one-VM cost is answered and folds into the K8 open question (deferred with NEXT-04)
+- [Phase 06]: StopReason::ProviderAuth is a closed ledger variant with key tag 7, distinct from ProviderLimit (6), so an auth failure after preflight is never counted as a rate limit (D-15)
 
 ### Pending Todos
 
@@ -306,6 +308,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-19T23:40:26.839Z
+Last session: 2026-10-20T01:07:50.462Z
 Stopped at: Phase 6 context gathered
 Resume file: .planning/phases/06-proposers/06-CONTEXT.md
