@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: proposers
 status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-10-20T01:22:36.307Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-10-20T01:37:58.549Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 70
-  completed_plans: 62
+  completed_plans: 63
   percent: 63
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 06 (proposers) — EXECUTING
-Plan: 3 of 10
+Plan: 4 of 10
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 06 execution started
 
@@ -121,6 +121,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 05 P20 | 8min | 3 tasks | 4 files |
 | Phase 06 P01 | 4min | 2 tasks | 4 files |
 | Phase 06 P02 | 14min | 3 tasks | 14 files |
+| Phase 06 P03 | 14min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -281,6 +282,8 @@ Recent decisions affecting current work:
 - [Phase 06]: StopReason::ProviderAuth is a closed ledger variant with key tag 7, distinct from ProviderLimit (6), so an auth failure after preflight is never counted as a rate limit (D-15)
 - [Phase 06]: 06-02: parse_output checks rationale caps in bytes, applies per-file rules file by file with the first failure deciding the item's one DropReason, and drops every item of an over-batch output as OutputShape
 - [Phase 06]: 06-02: OutputSchema inserts keys in sorted order so its pinned text is unchanged even under serde_json preserve_order
+- [Phase 06]: 06-03: History holds rendered text only; rows read only JudgeSpec::gates and Objective::metric, so held-out values are unreachable by construction
+- [Phase 06]: 06-03: Prompt blocks are fenced with a 16-hex token of IdHasher(minos/prompt-fence/v1, content); a block ends only at the END line with its own token
 
 ### Pending Todos
 
@@ -311,6 +314,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-20T01:22:36.303Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-10-20T01:37:58.545Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
