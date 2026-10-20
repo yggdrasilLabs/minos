@@ -1,24 +1,34 @@
 //! The native-install locator (06-CONTEXT D-01 and its amendment; 06-RESEARCH Pattern 3 step 1, Pitfall 1).
 //!
-//! The provider runs only the user's own native install of `claude`: `$HOME/.local/bin/claude`, a symlink whose
-//! canonical target is a direct child of `$HOME/.local/share/claude/versions/`. A PATH lookup, a Homebrew or npm
-//! install, or a wrapper is refused, because the first `claude` on `PATH` may be a shim that injects settings
+//! The provider runs only the user's own native install of `claude`: `$HOME/.local/bin/claude`, a symlink that
+//! names, directly, a child of `$HOME/.local/share/claude/versions/`. A PATH lookup, a Homebrew or npm install, or
+//! a wrapper is refused, because the first `claude` on `PATH` may be a shim that injects settings
 //! (02-SPIKE-EVIDENCE.md C-01: it was a cmux shim). There is no configuration file and no override, as for
 //! `minos-vmm` (05-CONTEXT D-04).
 //!
 //! The auto-updater moves the link between versions and deletes old ones, so the provider calls [`locate`] again
 //! before every call and compares the result with the one it preflighted (D-01 amendment).
 //!
+//! Replacing the binary needs write permission on a directory, not on the file: unlinking and creating, or
+//! renaming over, the target needs it on the versions directory, and repointing the link needs it on the link's
+//! directory. So the locator checks those two directories as it checks the target, and it never follows the link:
+//! it reads the link's text and requires that text to name a direct child of the versions directory, so no
+//! intermediate hop, which could sit in a directory the locator never checked, is ever followed (review WR-05).
+//!
 //! [`locate`] checks, in order, and refuses at the first failure, naming every path it checked:
 //!
 //! 1. The link exists and is a symlink, by `symlink_metadata`, so a regular file in its place (a wrapper script)
 //!    is refused before anything is followed.
 //! 2. The versions directory canonicalizes to a directory.
-//! 3. The link canonicalizes; a link that resolves to nothing is dangling.
-//! 4. The canonical target's parent is the canonical versions directory, so a link out of it, or into a
-//!    subdirectory of it, is refused.
-//! 5. The target is a regular file owned by the current user, with no group or world write bit and at least one
-//!    execute bit.
+//! 3. The link's directory, `$HOME/.local/bin`, is a directory and not a symlink, and it and the canonical
+//!    versions directory are owned by the current user with no group or world write bit.
+//! 4. The link's text, read with `read_link` and never followed, names a direct child of the versions directory:
+//!    either `<versions>/<name>`, with the versions directory written as `$HOME` gives it or in its canonical
+//!    form, or the relative `../share/claude/versions/<name>`. Anything else, a path elsewhere, a subdirectory, or
+//!    a hop through another link, is refused.
+//! 5. The target, `<canonical versions>/<name>`, exists (else the link dangles) and, by `symlink_metadata` so a
+//!    link inside the versions directory is refused too, is a regular file owned by the current user, with no
+//!    group or world write bit and at least one execute bit.
 //! 6. The target's file name is a version, `X.Y.Z`.
 
 use std::fmt;
@@ -35,7 +45,11 @@ pub const LINK: &str = ".local/bin/claude";
 /// The directory the native installer keeps its versions in, relative to `HOME`.
 pub const VERSIONS_DIR: &str = ".local/share/claude/versions";
 
-/// The group and world write bits: a target with either could be replaced by another user.
+/// The versions directory as a link text relative to the link's directory.
+const VERSIONS_FROM_LINK_DIR: &str = "../share/claude/versions";
+
+/// The group and world write bits: a target with either could be replaced by another user, and a directory with
+/// either lets another user replace or repoint what it holds.
 const GROUP_OR_WORLD_WRITE: u32 = 0o022;
 
 /// The execute bits for owner, group, and world.
@@ -62,6 +76,24 @@ impl Located {
     }
 }
 
+/// A directory the locator checks because write permission on it controls which binary the link names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocateDir {
+    /// The link's directory, `$HOME/.local/bin`: whoever can write it can repoint the link.
+    LinkDir,
+    /// The canonical versions directory: whoever can write it can replace the target.
+    Versions,
+}
+
+impl fmt::Display for LocateDir {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::LinkDir => "the link's directory",
+            Self::Versions => "the versions directory",
+        })
+    }
+}
+
 /// Why [`locate`] refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocateFailure {
@@ -71,9 +103,24 @@ pub enum LocateFailure {
     NotALink,
     /// The versions directory does not exist or is not a directory.
     VersionsDirMissing,
-    /// The link resolves to nothing.
+    /// A checked directory is not a directory, or is a symlink to one.
+    DirNotADirectory {
+        /// Which directory.
+        dir: LocateDir,
+    },
+    /// A checked directory is owned by another user.
+    DirWrongOwner {
+        /// Which directory.
+        dir: LocateDir,
+    },
+    /// A checked directory is group- or world-writable.
+    DirWritable {
+        /// Which directory.
+        dir: LocateDir,
+    },
+    /// The link's text names nothing that exists.
     Dangling,
-    /// The link's canonical target is not a direct child of the versions directory.
+    /// The link's text does not name a direct child of the versions directory.
     OutsideVersions,
     /// The target is not a regular file.
     NotAFile,
@@ -89,20 +136,23 @@ pub enum LocateFailure {
 
 impl fmt::Display for LocateFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::LinkMissing => "the link does not exist",
-            Self::NotALink => "the link path is not a symlink",
-            Self::VersionsDirMissing => "the versions directory does not exist",
-            Self::Dangling => "the link does not resolve to a file",
+        match self {
+            Self::LinkMissing => f.write_str("the link does not exist"),
+            Self::NotALink => f.write_str("the link path is not a symlink"),
+            Self::VersionsDirMissing => f.write_str("the versions directory does not exist"),
+            Self::DirNotADirectory { dir } => write!(f, "{dir} is not a directory"),
+            Self::DirWrongOwner { dir } => write!(f, "{dir} is not owned by the current user"),
+            Self::DirWritable { dir } => write!(f, "{dir} is group- or world-writable"),
+            Self::Dangling => f.write_str("the link does not resolve to a file"),
             Self::OutsideVersions => {
-                "the link does not resolve to a direct child of the versions directory"
+                f.write_str("the link does not name a direct child of the versions directory")
             }
-            Self::NotAFile => "the link target is not a regular file",
-            Self::WrongOwner => "the link target is not owned by the current user",
-            Self::Writable => "the link target is group- or world-writable",
-            Self::NotExecutable => "the link target is not executable",
-            Self::NotAVersion => "the link target's file name is not a version",
-        })
+            Self::NotAFile => f.write_str("the link target is not a regular file"),
+            Self::WrongOwner => f.write_str("the link target is not owned by the current user"),
+            Self::Writable => f.write_str("the link target is group- or world-writable"),
+            Self::NotExecutable => f.write_str("the link target is not executable"),
+            Self::NotAVersion => f.write_str("the link target's file name is not a version"),
+        }
     }
 }
 
@@ -142,7 +192,8 @@ impl LocateError {
         &self.versions
     }
 
-    /// The link's target, when it got that far: the canonical target, or the link's own text when it dangles.
+    /// The link's target, when it got that far: the link's own text when that text was refused or names nothing,
+    /// else the canonical target it names.
     #[must_use]
     pub fn target(&self) -> Option<&Path> {
         self.target.as_deref()
@@ -163,7 +214,8 @@ impl fmt::Display for TargetText<'_> {
 
 /// Locates the native install under `home`, the user's `HOME` as the caller read it.
 ///
-/// Reads the filesystem only: no environment variable, no configuration file, and no process is run.
+/// Reads the filesystem only: no environment variable, no configuration file, and no process is run. The link is
+/// read, never followed.
 ///
 /// # Errors
 ///
@@ -194,18 +246,28 @@ pub fn locate(home: &Path) -> Result<Located, LocateError> {
         _ => return Err(refuse(LocateFailure::VersionsDirMissing, None)),
     };
 
-    let Ok(target) = fs::canonicalize(&link) else {
-        // A link that resolves to nothing, or to a loop: named by its own text, the only target there is.
-        return Err(refuse(LocateFailure::Dangling, fs::read_link(&link).ok()));
-    };
-
-    if target.parent() != Some(canonical_versions.as_path()) {
-        return Err(refuse(LocateFailure::OutsideVersions, Some(target)));
+    let link_dir = link.parent().unwrap_or(home);
+    if let Err(failure) = check_dir(link_dir, LocateDir::LinkDir) {
+        return Err(refuse(failure, None));
+    }
+    if let Err(failure) = check_dir(&canonical_versions, LocateDir::Versions) {
+        return Err(refuse(failure, None));
     }
 
-    // The target is canonical, so `symlink_metadata` describes the file itself.
+    let Ok(text) = fs::read_link(&link) else {
+        return Err(refuse(LocateFailure::NotALink, None));
+    };
+    let Some(name) = direct_child_name(&text, &versions, &canonical_versions) else {
+        return Err(refuse(LocateFailure::OutsideVersions, Some(text)));
+    };
+    let target = canonical_versions.join(name);
+
+    // Never followed: a symlink inside the versions directory is not a regular file.
     let meta = match fs::symlink_metadata(&target) {
         Ok(meta) if meta.file_type().is_file() => meta,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(refuse(LocateFailure::Dangling, Some(text)));
+        }
         _ => return Err(refuse(LocateFailure::NotAFile, Some(target))),
     };
     if meta.uid() != rustix::process::getuid().as_raw() {
@@ -219,11 +281,7 @@ pub fn locate(home: &Path) -> Result<Located, LocateError> {
         return Err(refuse(LocateFailure::NotExecutable, Some(target)));
     }
 
-    let Some(version) = target
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(ClaudeVersion::parse)
-    else {
+    let Some(version) = name.to_str().and_then(ClaudeVersion::parse) else {
         return Err(refuse(LocateFailure::NotAVersion, Some(target)));
     };
 
@@ -231,4 +289,50 @@ pub fn locate(home: &Path) -> Result<Located, LocateError> {
         path: target,
         version,
     })
+}
+
+/// Step 3 for one directory: by `symlink_metadata`, so a symlink in its place is refused rather than followed, it
+/// is a directory owned by the current user with no group or world write bit.
+fn check_dir(path: &Path, dir: LocateDir) -> Result<(), LocateFailure> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_dir() => meta,
+        _ => return Err(LocateFailure::DirNotADirectory { dir }),
+    };
+    if meta.uid() != rustix::process::getuid().as_raw() {
+        return Err(LocateFailure::DirWrongOwner { dir });
+    }
+    if meta.mode() & GROUP_OR_WORLD_WRITE != 0 {
+        return Err(LocateFailure::DirWritable { dir });
+    }
+    Ok(())
+}
+
+/// Step 4: the file name `text` names when it is a direct child of the versions directory, written absolutely as
+/// `versions` or `canonical_versions`, or relatively as [`VERSIONS_FROM_LINK_DIR`] from the link's directory.
+///
+/// Purely lexical: nothing is followed. A relative text with any other shape, `.` or `..` in the name, or a bare
+/// name is refused, as is a text whose parent is any other path.
+fn direct_child_name<'a>(
+    text: &'a Path,
+    versions: &Path,
+    canonical_versions: &Path,
+) -> Option<&'a std::ffi::OsStr> {
+    let parent = text.parent()?;
+    let direct = if text.is_absolute() {
+        parent == versions || parent == canonical_versions
+    } else {
+        parent == Path::new(VERSIONS_FROM_LINK_DIR)
+    };
+    if !direct {
+        return None;
+    }
+    // `Path::file_name` is `None` for a text ending in `..`, and `Path` drops a trailing `.`, so `<versions>/.`
+    // has the versions directory's parent as its parent and was refused above; the last component is still
+    // required to be a normal one, so nothing but a plain name passes.
+    let name = text.file_name()?;
+    let normal = text
+        .components()
+        .next_back()
+        .is_some_and(|last| matches!(last, std::path::Component::Normal(_)));
+    normal.then_some(name)
 }
