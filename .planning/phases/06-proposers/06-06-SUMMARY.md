@@ -146,3 +146,8 @@ None.
 ## Next Phase Readiness
 
 06-07 can build the `ClaudeCli` provider from a `Preflighted`: `process::run` with `command::argv`, `CALL_DEADLINE`, and `MAX_ENVELOPE_BYTES`, `classify` on the output, and `locate` before each call with `reverify` when the located binary differs.
+
+## Self-Check: PASSED
+
+- FOUND: crates/minos-propose/src/claude_cli/process.rs, preflight.rs; crates/minos-propose/tests/claude_cli.rs
+- FOUND commits: 81c59e6, d646b3d, c2df383, 182ca52
