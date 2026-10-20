@@ -17,8 +17,10 @@
 //!   run can be refused naming one (D-03), and their values are dropped on construction.
 //!
 //! Every decision here is a pure function with a golden or table test; the process that runs the call is wired to
-//! them separately, so nothing in this module spawns a process or reads the process environment.
+//! them separately, so nothing in this module spawns a process or reads the process environment. Only
+//! [`locate::locate`] touches the filesystem, and only to inspect the native install's link and versions directory.
 
 pub mod classify;
 pub mod command;
 pub mod env;
+pub mod locate;
