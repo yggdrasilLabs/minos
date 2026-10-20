@@ -269,16 +269,18 @@ fn golden_prompt() -> TestResult {
 #[test]
 fn golden_prompt_bytes_pinned() -> TestResult {
     // The pin was computed outside the code under test, from the accepted snapshot body (the text after the
-    // file's second `---` line), which `awk` prints followed by one newline:
+    // file's second `---` line), which `awk` prints with one newline after each line:
     //
     //   cd crates/minos-propose/tests/snapshots
     //   awk 'n >= 2 { print } /^---$/ { n++ }' prompt__golden_prompt.snap | shasum -a 256
     //
-    // so the bytes hashed here are the prompt text plus one newline.
+    // The prompt already ends with exactly one newline, so those bytes are the prompt text itself.
     let prompt = golden()?;
-    let mut text = prompt.as_str().to_owned();
-    text.push('\n');
-    assert_eq!(sha256_hex(text.as_bytes()), "PIN-NOT-YET-COMPUTED");
+    assert!(prompt.as_str().ends_with(">>>\n"));
+    assert_eq!(
+        sha256_hex(prompt.as_bytes()),
+        "c75a29cef272e83311ed570a5b1768e727ea937347f3cf7d0fcf93a5ec195ca8"
+    );
     Ok(())
 }
 
