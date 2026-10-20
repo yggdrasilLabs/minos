@@ -9,7 +9,10 @@
 
 use std::time::Duration;
 
-use minos_core::limits::SINGLE_SHOT_SURFACE_MAX_BYTES;
+use minos_core::limits::{
+    MAX_GATES, MAX_NAME_BYTES, MAX_OBJECTIVES, MAX_PATH_BYTES, MAX_READABLE, MAX_WRITABLE,
+    SINGLE_SHOT_SURFACE_MAX_BYTES,
+};
 
 // ---------------------------------------------------------------------------------------------------------------
 // Prompt (06-CONTEXT D-07, D-08, D-09)
@@ -22,9 +25,21 @@ pub const HISTORY_TABLE_MAX_BYTES: usize = 32_768;
 /// Total failure-excerpt bytes per prompt: four full log excerpts, so a flood of failures cannot push
 /// `program.md`'s instructions out of the prompt (D-08).
 pub const EXCERPTS_MAX_BYTES: usize = 16_384;
+/// Most failure excerpts per prompt, the newest first. The byte cap bounds their text, not their number, and each
+/// excerpt's fence and label cost up to [`EXCERPT_BLOCK_OVERHEAD_BYTES`] whatever its length, so the count is
+/// capped too; an excerpt whose sanitized text is empty is skipped rather than counted (review IN-03).
+pub const EXCERPTS_MAX_COUNT: usize = 32;
 /// Total steer-note bytes per prompt. Older ordinals are dropped first, so the user's latest note stays (D-09).
 pub const STEER_NOTES_MAX_BYTES: usize = 16_384;
-/// Budget for the fixed instruction block, headings, and fences, in bytes.
+/// Most steer notes per prompt, the highest ordinals first, because each note's fence costs
+/// [`NOTE_BLOCK_OVERHEAD_BYTES`] whatever its length (review IN-03).
+pub const STEER_NOTES_MAX_COUNT: usize = 64;
+/// Budget, in bytes, for everything in a prompt that is neither content under one of the four content caps nor
+/// proportional to the surface: the fixed instruction block and headings (`FIXED_TEXT_MAX_BYTES`), the objective
+/// and gate lines (`JUDGE_LINES_MAX_BYTES`), the `HISTORY` fence, [`EXCERPTS_MAX_COUNT`] excerpt fences with
+/// their labels at [`EXCERPT_BLOCK_OVERHEAD_BYTES`] each, and [`STEER_NOTES_MAX_COUNT`] note fences at
+/// [`NOTE_BLOCK_OVERHEAD_BYTES`] each. The assertions below prove that sum fits, and that this budget plus the
+/// surface-proportional fences (`SURFACE_OVERHEAD_MAX_BYTES`) and the four content caps fit [`MAX_PROMPT_BYTES`].
 pub const PROMPT_OVERHEAD_BYTES: usize = 65_536;
 /// Largest whole prompt, in bytes (1 MiB). The CLI caps piped stdin at 10 MB
 /// (code.claude.com/docs/en/headless), so a prompt this size always fits.
@@ -81,9 +96,69 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// The CLI's piped-stdin cap, in bytes (code.claude.com/docs/en/headless).
 const CLI_STDIN_CAP_BYTES: u64 = 10_000_000;
 
+/// Bytes a fenced block costs besides its content, kind, and label: `<<<BEGIN `, the space before the token, the
+/// 16-hex-character token, `>>>\n`, the newline added when the content lacks one, `<<<END `, the space, the
+/// token, and `>>>\n` (`prompt::push_block`).
+const FENCE_FIXED_BYTES: usize = 9 + 1 + 16 + 4 + 1 + 7 + 1 + 16 + 4;
+
+/// The bytes a block of `kind` with a label of at most `label_max` bytes costs besides its content: the kind is on
+/// both lines, and a label is followed by one space.
+const fn block_overhead(kind: &str, label_max: usize) -> usize {
+    FENCE_FIXED_BYTES + 2 * kind.len() + label_max + 1
+}
+
+/// Digits of the longest `u32`.
+const U32_DIGITS: usize = 10;
+
+/// The longest excerpt label: `gen <u32> exp <12 hex> ` and the longest unscored text, `rejected: ` plus the
+/// longest `Reason` display, `hunk <u32> of <path> does not apply` with the path at [`MAX_PATH_BYTES`]
+/// (`prompt::history::render_row`).
+const EXCERPT_LABEL_MAX_BYTES: usize =
+    4 + U32_DIGITS + 5 + 12 + 1 + 10 + (5 + U32_DIGITS + 4 + MAX_PATH_BYTES + 15);
+
+/// Most bytes one `USER NOTE` block costs besides its text: the fence and the ordinal label.
+pub const NOTE_BLOCK_OVERHEAD_BYTES: usize = block_overhead("USER NOTE", U32_DIGITS);
+
+/// Most bytes one `UNTRUSTED SANDBOX OUTPUT` block costs besides its text: the fence and the longest label.
+pub const EXCERPT_BLOCK_OVERHEAD_BYTES: usize =
+    block_overhead("UNTRUSTED SANDBOX OUTPUT", EXCERPT_LABEL_MAX_BYTES);
+
+/// Most bytes one `FILE` block costs besides its content: the fence, the path, and ` final-newline: yes`.
+const FILE_BLOCK_OVERHEAD_BYTES: usize =
+    block_overhead("FILE", MAX_PATH_BYTES + " final-newline: yes".len());
+
+/// Prompt bytes proportional to the surface besides the file contents, which [`SINGLE_SHOT_SURFACE_MAX_BYTES`]
+/// caps: the writable list (`- <path>\n` per file), the program heading (a blank line, then
+/// `## Instructions from the project (<path>)\n`) and its `PROGRAM` fence, and one `FILE` fence per surface file, every path at
+/// [`MAX_PATH_BYTES`].
+const SURFACE_OVERHEAD_MAX_BYTES: usize = MAX_WRITABLE * (2 + MAX_PATH_BYTES + 1)
+    + (37 + MAX_PATH_BYTES)
+    + block_overhead("PROGRAM", MAX_PATH_BYTES)
+    + (MAX_WRITABLE + MAX_READABLE) * FILE_BLOCK_OVERHEAD_BYTES;
+
+/// The fixed instruction block, every heading, `None yet.`, and the two omitted-count lines: about 1.5 KiB as
+/// written, budgeted generously so wording can grow without touching the proof.
+const FIXED_TEXT_MAX_BYTES: usize = 8_192;
+
+/// The objective lines (`- <name>: maximize\n`) and gate lines (`- <name>\n`), names at [`MAX_NAME_BYTES`].
+const JUDGE_LINES_MAX_BYTES: usize =
+    MAX_OBJECTIVES * (2 + MAX_NAME_BYTES + 11) + MAX_GATES * (2 + MAX_NAME_BYTES + 1);
+
 const _: () = assert!((MAX_PROMPT_BYTES as u64) < CLI_STDIN_CAP_BYTES);
+// What PROMPT_OVERHEAD_BYTES covers fits in it: the fixed text, the judge lines, the HISTORY fence, and every
+// excerpt and note fence at their count caps (review IN-03).
+const _: () = assert!(
+    FIXED_TEXT_MAX_BYTES
+        + JUDGE_LINES_MAX_BYTES
+        + block_overhead("HISTORY", 0)
+        + EXCERPTS_MAX_COUNT * EXCERPT_BLOCK_OVERHEAD_BYTES
+        + STEER_NOTES_MAX_COUNT * NOTE_BLOCK_OVERHEAD_BYTES
+        <= PROMPT_OVERHEAD_BYTES
+);
+// The four content caps, the surface-proportional fences, and the overhead budget fit the prompt cap.
 const _: () = assert!(
     SINGLE_SHOT_SURFACE_MAX_BYTES
+        + SURFACE_OVERHEAD_MAX_BYTES as u64
         + HISTORY_TABLE_MAX_BYTES as u64
         + EXCERPTS_MAX_BYTES as u64
         + STEER_NOTES_MAX_BYTES as u64

@@ -10,7 +10,7 @@ use minos_core::metric::Scorecard;
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::path::RelPath;
 use minos_core::text::LogExcerpt;
-use minos_propose::limits::{EXCERPTS_MAX_BYTES, HISTORY_TABLE_MAX_BYTES};
+use minos_propose::limits::{EXCERPTS_MAX_BYTES, EXCERPTS_MAX_COUNT, HISTORY_TABLE_MAX_BYTES};
 use minos_propose::prompt::{History, HistoryEntry};
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -581,6 +581,90 @@ fn excerpts_keep_the_newest_whole_excerpts_under_their_cap() -> TestResult {
             .iter()
             .all(|(_, text)| text.len() == 4096)
     );
+    Ok(())
+}
+
+/// An excerpt whose sanitized text is empty would cost a fence and nothing against the byte cap, so it is skipped;
+/// the row itself stays (review IN-03).
+#[test]
+fn empty_excerpts_are_skipped() -> TestResult {
+    let incumbent = vec![scored(100.0, 1.0, 50.0)?];
+    let entries = vec![
+        HistoryEntry::new(
+            1,
+            exp("blank"),
+            false,
+            "build it",
+            vec![(0, Outcome::Rejected(Reason::BuildFailed))],
+            Some(LogExcerpt::from_bytes(b"", 4096)),
+        ),
+        HistoryEntry::new(
+            1,
+            exp("escapes"),
+            false,
+            "build it",
+            vec![(0, Outcome::Crashed { stage: Stage::Run })],
+            // ESC is dropped by sanitization, so the text is empty.
+            Some(LogExcerpt::from_bytes(b"\x1b\x1b", 4096)),
+        ),
+        HistoryEntry::new(
+            1,
+            exp("real"),
+            false,
+            "build it",
+            vec![(0, Outcome::Rejected(Reason::RunFailed))],
+            Some(LogExcerpt::from_bytes(b"x", 4096)),
+        ),
+    ];
+    let history = History::new(&judge()?, 2, &incumbent, entries);
+    assert_eq!(history.row_count(), 3);
+    assert!(row_or_err(&history, "blank")?.contains("rejected: the build failed"));
+    assert!(row_or_err(&history, "escapes")?.contains("crashed in run"));
+    assert_eq!(
+        history.excerpts(),
+        &[(
+            format!("gen 1 exp {} rejected: the run failed", short(&exp("real"))),
+            "x".to_owned()
+        )]
+    );
+    Ok(())
+}
+
+/// The byte cap alone would keep thousands of one-byte excerpts, each costing a fence and a label; the count cap
+/// keeps the newest `EXCERPTS_MAX_COUNT` (review IN-03).
+#[test]
+fn excerpts_are_capped_by_count() -> TestResult {
+    let incumbent = vec![scored(100.0, 1.0, 50.0)?];
+    let total = EXCERPTS_MAX_COUNT + 8;
+    let entries: Vec<HistoryEntry> = (0..total)
+        .map(|index| {
+            HistoryEntry::new(
+                1,
+                exp(&format!("e{index}")),
+                false,
+                "build it",
+                vec![(0, Outcome::Rejected(Reason::BuildFailed))],
+                Some(LogExcerpt::from_bytes(b"x", 4096)),
+            )
+        })
+        .collect();
+    let history = History::new(&judge()?, 2, &incumbent, entries);
+    assert_eq!(history.row_count(), total);
+    assert_eq!(history.excerpts().len(), EXCERPTS_MAX_COUNT);
+    // Rows of one generation order by experiment, so the newest are the highest IDs, in table order.
+    let mut ids: Vec<ExperimentId> = (0..total).map(|index| exp(&format!("e{index}"))).collect();
+    ids.sort();
+    let expected: Vec<String> = ids
+        .iter()
+        .skip(total - EXCERPTS_MAX_COUNT)
+        .map(|id| format!("gen 1 exp {} rejected: the build failed", short(id)))
+        .collect();
+    let labels: Vec<&str> = history
+        .excerpts()
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect();
+    assert_eq!(labels, expected);
     Ok(())
 }
 

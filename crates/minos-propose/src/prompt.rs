@@ -27,7 +27,7 @@ use minos_core::manifest::{Goal, Manifest};
 use minos_core::path::RelPath;
 use minos_core::text::SafeText;
 
-use crate::limits::{MAX_PROMPT_BYTES, STEER_NOTES_MAX_BYTES};
+use crate::limits::{MAX_PROMPT_BYTES, STEER_NOTES_MAX_BYTES, STEER_NOTES_MAX_COUNT};
 
 mod history;
 
@@ -143,8 +143,8 @@ pub struct PromptInputs<'a> {
 /// Assembles the prompt for one model call.
 ///
 /// The prefix and suffix are laid out as the [module docs](self) describe. Notes are sorted by ordinal and text;
-/// when they exceed [`STEER_NOTES_MAX_BYTES`] the highest ordinals are kept and the section ends with a line
-/// counting the dropped ones.
+/// the highest ordinals are kept, at most [`STEER_NOTES_MAX_COUNT`] of them and while their text stays within
+/// [`STEER_NOTES_MAX_BYTES`], and when any is dropped the section ends with a line counting the dropped ones.
 ///
 /// # Errors
 ///
@@ -370,6 +370,7 @@ fn render_suffix(inputs: &PromptInputs<'_>) -> String {
     let kept = notes
         .iter()
         .rev()
+        .take(STEER_NOTES_MAX_COUNT)
         .take_while(|note| {
             let next = total.saturating_add(note.text.len());
             let fits = next <= STEER_NOTES_MAX_BYTES;

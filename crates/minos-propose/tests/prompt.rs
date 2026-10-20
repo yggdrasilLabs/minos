@@ -18,7 +18,9 @@ use minos_core::metric::Scorecard;
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::path::RelPath;
 use minos_core::text::LogExcerpt;
-use minos_propose::limits::STEER_NOTES_MAX_BYTES;
+use minos_propose::limits::{
+    NOTE_BLOCK_OVERHEAD_BYTES, STEER_NOTES_MAX_BYTES, STEER_NOTES_MAX_COUNT,
+};
 use minos_propose::prompt::{
     History, HistoryEntry, Prompt, PromptError, PromptInputs, SteerNote, assemble,
 };
@@ -472,6 +474,40 @@ fn notes_keep_the_highest_ordinals_within_their_cap() -> TestResult {
     assert!(!suffix.contains("<<<BEGIN USER NOTE 1 "));
     assert!(suffix.contains("<<<BEGIN USER NOTE 5 "));
     assert!(suffix.ends_with("(2 earlier notes omitted)\n"));
+    Ok(())
+}
+
+/// The byte cap alone would keep thousands of one-byte notes, each costing a fence; the count cap bounds that
+/// (review IN-03). The highest ordinals are kept.
+#[test]
+fn notes_are_capped_by_count() -> TestResult {
+    let total = STEER_NOTES_MAX_COUNT + 36;
+    let notes: Vec<SteerNote> = (0..total)
+        .map(|ordinal| SteerNote::new(u32::try_from(ordinal).unwrap_or(u32::MAX), "n"))
+        .collect();
+    let prompt = build(&History::empty(), &notes, 4)?;
+    let suffix = prompt.suffix();
+    assert_eq!(
+        suffix.matches("<<<BEGIN USER NOTE ").count(),
+        STEER_NOTES_MAX_COUNT
+    );
+    assert!(!suffix.contains("<<<BEGIN USER NOTE 35 "));
+    assert!(suffix.contains("<<<BEGIN USER NOTE 36 "));
+    assert!(suffix.contains(&format!("<<<BEGIN USER NOTE {} ", total - 1)));
+    assert!(suffix.ends_with("(36 earlier notes omitted)\n"));
+    Ok(())
+}
+
+/// A note block at the longest ordinal costs exactly `NOTE_BLOCK_OVERHEAD_BYTES` besides its text, so the
+/// compile-time budget in `limits` describes the real render.
+#[test]
+fn a_note_block_costs_its_documented_overhead() -> TestResult {
+    let without = build(&History::empty(), &[], 4)?;
+    let with = build(&History::empty(), &[SteerNote::new(u32::MAX, "n")], 4)?;
+    let added = with.suffix().len() - without.suffix().len();
+    // A blank line, the heading line, then the block around one byte of text.
+    let heading = 1 + NOTES_HEADING.len() + 1;
+    assert_eq!(added, heading + NOTE_BLOCK_OVERHEAD_BYTES + 1);
     Ok(())
 }
 

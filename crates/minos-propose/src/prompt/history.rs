@@ -17,7 +17,9 @@ use minos_core::outcome::{Outcome, Reason};
 use minos_core::policy::{ReducedScore, TrialRule, reduce_trials};
 use minos_core::text::{LogExcerpt, SafeText};
 
-use crate::limits::{EXCERPTS_MAX_BYTES, HISTORY_GENERATIONS, HISTORY_TABLE_MAX_BYTES};
+use crate::limits::{
+    EXCERPTS_MAX_BYTES, EXCERPTS_MAX_COUNT, HISTORY_GENERATIONS, HISTORY_TABLE_MAX_BYTES,
+};
 
 /// Hex characters of an experiment ID shown in a row: enough to tell the rows of one run apart.
 const SHORT_ID_CHARS: usize = 12;
@@ -127,8 +129,9 @@ impl History {
     ///
     /// When the table would exceed [`HISTORY_TABLE_MAX_BYTES`], rows are dropped one at a time, the oldest
     /// non-winner first and then the oldest winner, and the table ends with a line counting them. Excerpts come
-    /// from the kept unscored rows that carry one, the newest first while their total stays within
-    /// [`EXCERPTS_MAX_BYTES`], and are stored oldest first.
+    /// from the kept unscored rows that carry one with non-empty sanitized text, the newest first while they
+    /// number at most [`EXCERPTS_MAX_COUNT`] and their total stays within [`EXCERPTS_MAX_BYTES`], and are stored
+    /// oldest first.
     #[must_use]
     pub fn new(
         judge: &JudgeSpec,
@@ -158,7 +161,12 @@ impl History {
 
         let mut excerpts = Vec::new();
         let mut total: usize = 0;
-        for (label, text) in rows.iter().rev().filter_map(|row| row.excerpt.as_ref()) {
+        for (label, text) in rows
+            .iter()
+            .rev()
+            .filter_map(|row| row.excerpt.as_ref())
+            .take(EXCERPTS_MAX_COUNT)
+        {
             let next = total.saturating_add(text.len());
             if next > EXCERPTS_MAX_BYTES {
                 break;
@@ -241,7 +249,8 @@ fn fit_table(rows: &mut Vec<Row>) -> usize {
     omitted
 }
 
-/// Renders one entry's row and, when it is unscored and carries one, its excerpt.
+/// Renders one entry's row and, when it is unscored and carries one with non-empty sanitized text, its excerpt.
+/// An empty excerpt is skipped, so every kept excerpt carries at least one byte against the byte cap.
 fn render_row(
     judge: &JudgeSpec,
     incumbent: Option<&ReducedScore>,
@@ -278,6 +287,7 @@ fn render_row(
         entry
             .excerpt
             .as_ref()
+            .filter(|excerpt| !excerpt.text().is_empty())
             .map(|excerpt| (label, excerpt.text().as_str().to_owned()))
     });
     line.push_str(" | rationale: ");
