@@ -364,3 +364,14 @@ C-02, `grep -rnE '#!?\[allow\(' crates --include='*.rs'`: printed nothing, grep 
 
 - The live suite (`MINOS_CLAUDE_LIVE=1 cargo test -p minos-propose --test live -- --ignored ...`): run by the user at 06-09's checkpoint and recorded above in "Live provider tests (06-09)"; not rerun.
 - The ignored VM tests (`cargo test -p minos-backend-krun --test vm` and `--test exit` with `--ignored`): Phase 6 changed no code in `minos-backend-krun`, `minos-vmm`, or `minos-guest`; last run in the Phase 5 final gate (05-EVIDENCE.md).
+
+### cargo clean
+
+Every step above exited 0, and SUMMARY, STATE, and ROADMAP were committed (`9a957a9`), so `cargo clean` ran next as the last cargo command of the phase; no cargo command ran after it. Afterwards `test ! -d target/debug` exited 0 and `target/` no longer exists.
+
+```
+$ cargo clean
+     Removed 61913 files, 7.2GiB total
+```
+
+cargo clean: exit 0, run after the final gate (GATE-06)
