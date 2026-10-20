@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use minos_core::id::ModelId;
+use minos_core::ledger::StopReason;
 use minos_core::usage::Usage;
 
 use crate::prompt::Prompt;
@@ -184,13 +185,26 @@ impl ModelResponse {
     }
 }
 
-/// A provider refusal that ends the run, never retried. Plan 06-04 maps each to a ledger `StopReason`.
+/// A provider refusal that ends the run, never retried. [`ProviderStop::stop_reason`] maps each to the ledger's
+/// [`StopReason`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ProviderStop {
     /// A rate or usage limit the provider gave up retrying (`StopReason::ProviderLimit`).
     Limit,
     /// The provider rejected the login (`StopReason::ProviderAuth`, D-15).
     Auth,
+}
+
+impl ProviderStop {
+    /// The ledger's stop reason for this refusal: `ProviderLimit` for a limit and `ProviderAuth` for a rejected
+    /// login (06-CONTEXT D-15).
+    #[must_use]
+    pub const fn stop_reason(self) -> StopReason {
+        match self {
+            Self::Limit => StopReason::ProviderLimit,
+            Self::Auth => StopReason::ProviderAuth,
+        }
+    }
 }
 
 impl fmt::Display for ProviderStop {
@@ -304,6 +318,15 @@ impl ProviderError {
     pub const fn usage(&self) -> Option<&Usage> {
         match self {
             Self::Stop { usage, .. } | Self::Infra { usage, .. } => usage.as_ref(),
+        }
+    }
+
+    /// The ledger's stop reason when this failure ends the run, and `None` for an infrastructure failure.
+    #[must_use]
+    pub const fn stop_reason(&self) -> Option<StopReason> {
+        match self {
+            Self::Stop { stop, .. } => Some(stop.stop_reason()),
+            Self::Infra { .. } => None,
         }
     }
 

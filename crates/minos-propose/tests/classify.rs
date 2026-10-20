@@ -54,10 +54,9 @@ fn ok(result: Result<ModelResponse, ProviderError>) -> Result<ModelResponse, Box
 }
 
 fn err(result: Result<ModelResponse, ProviderError>) -> Result<ProviderError, Box<dyn Error>> {
-    match result {
-        Ok(_) => Err("expected an error, got a response".into()),
-        Err(error) => Ok(error),
-    }
+    result
+        .err()
+        .ok_or_else(|| Box::<dyn Error>::from("expected an error, got a response"))
 }
 
 fn stop(stop: ProviderStop, usage: Option<Usage>) -> ProviderError {
