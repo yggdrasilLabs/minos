@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: proposers
 status: executing
-stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-10-20T12:44:31.484Z"
+stopped_at: Completed 06-09-PLAN.md
+last_updated: "2026-10-20T13:06:22.435Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 70
-  completed_plans: 68
+  completed_plans: 69
   percent: 63
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 06 (proposers) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 06 execution started
 
@@ -127,6 +127,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 06 P06 | 9 min | 2 tasks | 4 files |
 | Phase 06 P07 | 12 min | 3 tasks | 7 files |
 | Phase 06 P08 | 15min | 2 tasks | 2 files |
+| Phase 06 P09 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -297,6 +298,8 @@ Recent decisions affecting current work:
 - [Phase 06]: A call directory that cannot be removed is InfraCause::WorkDir carrying the call's usage, never dropped silently
 - [Phase 06]: 06-08: live hostile-fixture hooks use the documented shell form so the positive control fires on any CLI that runs hooks; a fixture root containing a single quote is refused
 - [Phase 06]: 06-08: a model-free, non-ignored test checks the live fixture and the control argv (exactly four isolation elements removed) so a hand run is never spent on a broken fixture
+- [Phase 06]: claude 2.1.304 live run by the user's hand (2026-10-20): all three cases passed, no variable unset; (b) clean and (c) fired all three canaries, so PROP-03 holds on 2.1.304 for the fixture; a later CLI version needs a rerun
+- [Phase 06]: 06-09: the --nocapture run splits each 'test <name> ... ok' across lines, so 06-EVIDENCE.md keeps the verbatim output unaltered and lists the three results separately
 
 ### Pending Todos
 
@@ -327,6 +330,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-20T12:44:27.130Z
-Stopped at: Completed 06-07-PLAN.md
+Last session: 2026-10-20T13:05:55.029Z
+Stopped at: Completed 06-09-PLAN.md
 Resume file: None
