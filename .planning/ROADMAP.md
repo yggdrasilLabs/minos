@@ -326,7 +326,7 @@ Plans:
   4. `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types, and invalid diffs are dropped, not repaired. `sweep` produces proposals from declared params with no model call. Each call's token usage is returned for a `Spent` event and any CLI dollar figure is ignored. A rate-limit or usage-cap response surfaces as an infrastructure failure that stops the run with `StopRequested`, never as an `Outcome` (PROP-07, PROP-08, PROP-09, PROP-10)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 9 plans
+**Plans**: 10 plans
 Plans:
 **Wave 1**
 
@@ -351,9 +351,13 @@ Plans:
 
 - [ ] 06-08-PLAN.md — Ignored live suite: hostile fixture project, golden argv in the fixture, positive control; CLAUDE.md Testing and Commands (wave 5)
 
-**Wave 6** *(blocked on all prior plans)*
+**Wave 6** *(blocked on 06-08; stops at a blocking checkpoint for the user's live run)*
 
-- [ ] 06-09-PLAN.md — Live run recorded, verified facts, final gate, requirements, validation map, then `cargo clean` (wave 6)
+- [ ] 06-09-PLAN.md — Live provider suite run by the user on their logged-in machine (checkpoint, D-17), the redacted record, and the verified facts (wave 6)
+
+**Wave 7** *(blocked on all prior plans)*
+
+- [ ] 06-10-PLAN.md — Final gate, requirements, validation map checked against the real test targets, then `cargo clean` (wave 7)
 
 **Research**: Needs research-phase (`claude -p` flag interplay and subscription behavior, especially anything SPIKE-07 left open)
 
