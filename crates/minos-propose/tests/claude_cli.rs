@@ -9,8 +9,10 @@
 //! `$HOME/fake/auth.code` or 0. On `-p` it records its arguments one per line in `$HOME/fake/model.argv`, copies
 //! its stdin to `$HOME/fake/stdin`, prints `$HOME/fake/envelope.json`, and exits with `$HOME/fake/model.code` or
 //! 0. Each step first appends to `$HOME/fake/<step>.count` and records its environment, its canonical working
-//! directory, that directory's mode (`stat -f %Lp`, so the fake runs on macOS only), and that directory's listing;
-//! it never writes into its working directory.
+//! directory, that directory's mode (`stat -f %Lp`, so the fake runs on macOS only), and that directory's listing.
+//! It never writes into its working directory, except when `$HOME/fake/<step>.leak` exists: then it leaves a
+//! read-only `keep` directory holding a file there, which the provider cannot remove, so a test can see what a
+//! removal failure does; [`LeakGuard`] repairs and removes what is left.
 //!
 //! Tests cannot set process variables in edition 2024, so each builds its [`ParentEnv`] by hand (06-RESEARCH
 //! Pitfall 6).
@@ -30,9 +32,9 @@ use minos_core::path::RelPath;
 use minos_core::usage::Usage;
 use minos_propose::claude_cli::command::{ClaudeVersion, argv};
 use minos_propose::claude_cli::env::EnvError;
-use minos_propose::claude_cli::preflight::preflight;
+use minos_propose::claude_cli::preflight::{PreflightStep, preflight};
 use minos_propose::fake::{FakeProvider, FakeReply};
-use minos_propose::limits::MAX_ENVELOPE_BYTES;
+use minos_propose::limits::{MAX_ENVELOPE_BYTES, MAX_PREFLIGHT_STDOUT_BYTES};
 use minos_propose::prompt::{History, Prompt};
 use minos_propose::proposer::{Proposals, ProposeError, ProposeInput, Proposer};
 use minos_propose::provider::{
@@ -60,6 +62,7 @@ echo ran >> "$fake/$step.count"
 /bin/pwd -P > "$fake/$step.pwd"
 /usr/bin/stat -f %Lp . > "$fake/$step.mode"
 /bin/ls -A > "$fake/$step.ls"
+if [ -f "$fake/$step.leak" ]; then /bin/mkdir keep && : > keep/file && /bin/chmod 500 keep; fi
 if [ "$step" = model ]; then
   printf '%s\n' "$@" > "$fake/model.argv"
   /bin/cat > "$fake/stdin"
@@ -583,6 +586,88 @@ fn a_missing_work_root_is_unusable() -> TestResult {
     let tmp = fixture.tmp().join("does-not-exist");
     let error = refused(preflight(&parent_env(Some(fixture.home()), &tmp, &[])))?;
     assert_eq!(error, PreflightError::WorkRootUnusable { path: tmp });
+    Ok(())
+}
+
+/// Repairs and removes every `minos-claude-*` directory left under the fixture's work root when dropped, so a
+/// read-only `keep` the fake left behind never outlives its test, whether or not the assertions passed.
+struct LeakGuard {
+    root: PathBuf,
+}
+
+impl LeakGuard {
+    fn new(fixture: &Fixture) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            root: fs::canonicalize(fixture.tmp())?,
+        })
+    }
+
+    /// The `minos-claude-*` directories still under the work root, in name order.
+    fn leaked(&self) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+        let mut dirs: Vec<PathBuf> = fs::read_dir(&self.root)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("minos-claude-"))
+            })
+            .collect();
+        dirs.sort();
+        Ok(dirs)
+    }
+}
+
+impl Drop for LeakGuard {
+    fn drop(&mut self) {
+        if let Ok(dirs) = self.leaked() {
+            for dir in dirs {
+                // Best effort: the test's own assertions already ran.
+                let _ = fs::set_permissions(dir.join("keep"), fs::Permissions::from_mode(0o700));
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
+    }
+}
+
+/// When the fake leaves a read-only directory behind (`version.leak`), the query's directory cannot be removed. A
+/// query that itself failed is still reported as that failure, never masked by the removal (review IN-02).
+#[test]
+fn a_failed_query_is_reported_even_when_its_directory_cannot_be_removed() -> TestResult {
+    let fixture = Fixture::new("2.1.304")?;
+    let guard = LeakGuard::new(&fixture)?;
+    let over_cap = usize::try_from(MAX_PREFLIGHT_STDOUT_BYTES)?.saturating_add(1);
+    fs::write(fixture.fake().join("version.out"), vec![b'x'; over_cap])?;
+    fixture.write("version.leak", "")?;
+    let error = refused(preflight(&fixture.parent(&[])))?;
+    assert_eq!(
+        error,
+        PreflightError::Process {
+            step: PreflightStep::Version,
+            cause: InfraCause::OutputTooLarge,
+        }
+    );
+    assert_eq!(fixture.runs("auth")?, 0);
+    // The removal did fail: the directory is still there.
+    assert_eq!(guard.leaked()?.len(), 1);
+    Ok(())
+}
+
+/// The other arm: when the query succeeded but its directory cannot be removed, the work root is unusable.
+#[test]
+fn a_directory_that_cannot_be_removed_after_a_successful_query_is_unusable() -> TestResult {
+    let fixture = Fixture::new("2.1.304")?;
+    let guard = LeakGuard::new(&fixture)?;
+    fixture.write("version.leak", "")?;
+    let error = refused(preflight(&fixture.parent(&[])))?;
+    assert_eq!(
+        error,
+        PreflightError::WorkRootUnusable {
+            path: fs::canonicalize(fixture.tmp())?,
+        }
+    );
+    assert_eq!(fixture.runs("auth")?, 0);
+    assert_eq!(guard.leaked()?.len(), 1);
     Ok(())
 }
 

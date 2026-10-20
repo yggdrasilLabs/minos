@@ -392,6 +392,9 @@ fn holds(dir: &Path, name: &str) -> Result<bool, PreflightError> {
 }
 
 /// Runs `step` with the located binary in a fresh private directory under `work_root`, removed afterwards.
+///
+/// A directory that cannot be removed makes the work root unusable, unless the query itself failed, which is the
+/// more useful diagnosis and is reported instead; the removal failure never masks it (review IN-02).
 fn run_step(
     step: PreflightStep,
     located: &Located,
@@ -422,8 +425,11 @@ fn run_step(
         step,
         cause: error.cause(),
     });
-    dir.close().map_err(|_| unusable())?;
-    output
+    match (dir.close(), output) {
+        (Ok(()), output) => output,
+        (Err(_), Err(process)) => Err(process),
+        (Err(_), Ok(_)) => Err(unusable()),
+    }
 }
 
 /// Step 5: the version output parses, equals the file name's version, and is at least the minimum.
