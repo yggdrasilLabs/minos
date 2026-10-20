@@ -31,6 +31,7 @@ use crate::limits::{MAX_PROMPT_BYTES, STEER_NOTES_MAX_BYTES};
 
 mod history;
 
+pub(crate) use history::cut;
 pub use history::{History, HistoryEntry};
 
 /// Domain of the fence tokens.

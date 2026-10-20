@@ -9,10 +9,10 @@ use minos_core::id::{ManifestId, ModelId, RunId, TreeId};
 use minos_core::ledger::Origin;
 use minos_core::manifest::{Manifest, ParamName, ProposerSpec, Tier};
 use minos_core::path::RelPath;
-use minos_core::sweep::{SweepError, sample};
+use minos_core::sweep::{ParamValue, SweepError, sample};
 use minos_propose::prompt::History;
 use minos_propose::proposal::DropReason;
-use minos_propose::proposer::{ProposeError, ProposeInput, Proposals};
+use minos_propose::proposer::{Proposals, ProposeError, ProposeInput};
 use minos_propose::sweep;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -170,7 +170,7 @@ fn b_values(
         .iter()
         .map(|item| {
             item.get(&name)
-                .map(minos_core::sweep::ParamValue::render_text)
+                .map(ParamValue::render_text)
                 .ok_or_else(|| "a sample has no value for b".into())
         })
         .collect()
@@ -203,14 +203,17 @@ fn sweep_proposals_apply_to_the_base_with_sample_rationales() -> TestResult {
     for (proposal, drawn) in proposals.items().iter().zip(&samples) {
         assert_eq!(proposal.rationale(), drawn.describe());
         let applied = apply(&base, proposal.diff())?;
-        let a_text = drawn.get(&a).map(|value| value.render_text());
-        let b_text = drawn.get(&b).map(|value| value.render_text());
+        let a_text = drawn.get(&a).map(ParamValue::render_text);
+        let b_text = drawn.get(&b).map(ParamValue::render_text);
         let expected = format!(
             "const A: i64 = {}\nconst B: &str = {}\n",
             a_text.unwrap_or_default(),
             b_text.unwrap_or_default()
         );
-        assert_eq!(applied.get(&path("src/parse.rs")?), Some(expected.as_bytes()));
+        assert_eq!(
+            applied.get(&path("src/parse.rs")?),
+            Some(expected.as_bytes())
+        );
         assert_eq!(applied.get(&path("src/fmt.rs")?), Some(FMT_BASE.as_bytes()));
     }
     Ok(())
@@ -244,7 +247,10 @@ fn sweep_diffs_are_cumulative_from_the_base() -> TestResult {
     assert!(!proposals.items().is_empty());
     for proposal in proposals.items() {
         let applied = apply(&base, proposal.diff())?;
-        assert_eq!(applied.get(&path("src/fmt.rs")?), Some(FMT_PARENT.as_bytes()));
+        assert_eq!(
+            applied.get(&path("src/fmt.rs")?),
+            Some(FMT_PARENT.as_bytes())
+        );
         assert!(proposal.diff().paths().any(|p| p.as_str() == "src/fmt.rs"));
     }
     Ok(())

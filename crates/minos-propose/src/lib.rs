@@ -18,5 +18,7 @@ pub mod claude_cli;
 pub mod limits;
 pub mod prompt;
 pub mod proposal;
+pub mod proposer;
 pub mod provider;
 pub mod schema;
+pub mod sweep;

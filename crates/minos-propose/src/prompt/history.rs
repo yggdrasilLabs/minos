@@ -385,7 +385,7 @@ fn reason_phrase(reason: &Reason) -> Option<String> {
 }
 
 /// `text` cut to at most `max` bytes at a char boundary.
-pub(super) fn cut(text: &str, max: usize) -> &str {
+pub(crate) fn cut(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;
     }
