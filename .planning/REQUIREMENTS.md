@@ -89,13 +89,13 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 
 ### Propose (PROP)
 
-- [ ] **PROP-01**: A `ModelProvider` abstraction (trait or closed enum) with request and response types for prompt parts, a structured JSON schema, model ID, and token usage; adding a Bedrock or API-key provider requires no change to callers
+- [x] **PROP-01**: A `ModelProvider` abstraction (trait or closed enum) with request and response types for prompt parts, a structured JSON schema, model ID, and token usage; adding a Bedrock or API-key provider requires no change to callers
 - [ ] **PROP-02**: The `ClaudeCli` provider execs the user's `claude` binary from a fresh empty temp directory outside any repo, with an allowlisted environment (`HOME`, `PATH`, `USER`, `LOGNAME`, `TMPDIR`, `LANG`), all built-in tools disabled, a strict empty MCP config, session persistence off, the prompt on stdin, and `--json-schema`; the argv is guarded by a golden test
 - [ ] **PROP-03**: A fixture test with a hostile `.claude/settings.json`, hooks, and `.mcp.json` in the project directory proves none of them run during a proposal
 - [ ] **PROP-04**: The provider never reads, stores, or forwards Claude credentials; a preflight confirms the active auth method is the subscription login and refuses if an API key variable would be used unintentionally
 - [ ] **PROP-05**: Prompt assembly is deterministic with a stable cacheable prefix (`program.md`, surface files) followed by a dynamic suffix; golden tests and shuffled-input tests guard it
 - [ ] **PROP-06**: The dynamic suffix includes a bounded history table (rationale, outcome, delta vs incumbent) and bounded, sanitized failure excerpts from recent experiments, labelled as untrusted text; held-out metric values never appear in any prompt, proven by a test
-- [ ] **PROP-07**: `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types; invalid diffs are dropped, not repaired
+- [x] **PROP-07**: `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types; invalid diffs are dropped, not repaired
 - [ ] **PROP-08**: Token usage per call is recorded as a `Spent` event; any client-side dollar estimate from the CLI is ignored
 - [x] **PROP-09**: A rate-limit or usage-cap response from the CLI is an infrastructure failure that stops the run with a `StopRequested` event, never an `Outcome`
 - [ ] **PROP-10**: The sweep tier produces proposals from declared params with no model call
@@ -250,13 +250,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | KRUN-08 | Phase 5 | Complete |
 | KRUN-09 | Phase 5 | Complete |
 | KRUN-10 | Phase 5 | Complete |
-| PROP-01 | Phase 6 | Pending |
+| PROP-01 | Phase 6 | Complete |
 | PROP-02 | Phase 6 | Pending |
 | PROP-03 | Phase 6 | Pending |
 | PROP-04 | Phase 6 | Pending |
 | PROP-05 | Phase 6 | Pending |
 | PROP-06 | Phase 6 | Pending |
-| PROP-07 | Phase 6 | Pending |
+| PROP-07 | Phase 6 | Complete |
 | PROP-08 | Phase 6 | Pending |
 | PROP-09 | Phase 6 | Complete |
 | PROP-10 | Phase 6 | Pending |

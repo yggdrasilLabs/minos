@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: proposers
 status: executing
-stopped_at: Phase 6 context gathered
-last_updated: "2026-10-20T01:07:59.583Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-10-20T01:22:36.307Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 70
-  completed_plans: 61
+  completed_plans: 62
   percent: 63
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 06 (proposers) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 06 execution started
 
@@ -120,6 +120,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 05 P19 | 25 min | 3 tasks | 3 files |
 | Phase 05 P20 | 8min | 3 tasks | 4 files |
 | Phase 06 P01 | 4min | 2 tasks | 4 files |
+| Phase 06 P02 | 14min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -278,6 +279,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-20: the final gate passed on one build (vm 10, exit 4, host doctor exit 0, Docker test); GUEST-05 checked with the KRUN_BOOT_START_NS recorded exception (user decision 2026-10-19)
 - [Phase 05]: 05-20: the chunked protocol's one-VM cost is answered and folds into the K8 open question (deferred with NEXT-04)
 - [Phase 06]: StopReason::ProviderAuth is a closed ledger variant with key tag 7, distinct from ProviderLimit (6), so an auth failure after preflight is never counted as a rate limit (D-15)
+- [Phase 06]: 06-02: parse_output checks rationale caps in bytes, applies per-file rules file by file with the first failure deciding the item's one DropReason, and drops every item of an over-batch output as OutputShape
+- [Phase 06]: 06-02: OutputSchema inserts keys in sorted order so its pinned text is unchanged even under serde_json preserve_order
 
 ### Pending Todos
 
@@ -308,6 +311,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-20T01:07:50.462Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-proposers/06-CONTEXT.md
+Last session: 2026-10-20T01:22:36.303Z
+Stopped at: Completed 06-02-PLAN.md
+Resume file: None
