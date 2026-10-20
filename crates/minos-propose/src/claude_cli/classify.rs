@@ -133,10 +133,11 @@ impl ModelTokens {
 /// - `success` with `is_error` false needs exit code 0 ([`InfraCause::ExitMismatch`]), structured output
 ///   ([`InfraCause::MissingStructuredOutput`]), and usage ([`InfraCause::MissingUsage`]), and is a completion with
 ///   [`Completion::Structured`]. A `success` with no `is_error` is [`InfraCause::EnvelopeInvalid`].
-/// - `success` with `is_error` true is a [`ProviderStop::Limit`] for status 429, a [`ProviderStop::Auth`] for 401
-///   or 403, then, whatever the status, the same stops for a limit or login message prefix on `result`; then an
-///   empty call with [`EmptyCause::Refusal`] for `stop_reason` `refusal`; else [`InfraCause::ApiError`] with the
-///   status (`None` when absent or outside `u16`).
+/// - `success` with `is_error` true is first an empty call with [`EmptyCause::Refusal`] for `stop_reason`
+///   `refusal`, before any message text is read, because a refusal's `result` is the model's own text and must not
+///   choose a stop; then a [`ProviderStop::Limit`] for status 429, a [`ProviderStop::Auth`] for 401 or 403, then,
+///   whatever the status, the same stops for a limit or login message prefix on `result`; else
+///   [`InfraCause::ApiError`] with the status (`None` when absent or outside `u16`).
 /// - `error_max_turns` and `error_max_structured_output_retries` are empty calls with [`EmptyCause::MaxTurns`]
 ///   and [`EmptyCause::StructuredOutputRetries`] (D-12).
 /// - `error_during_execution` is the stop whose prefix the first matching `errors` entry carries, else
@@ -216,6 +217,12 @@ fn success(
             )
         }
         Some(true) => {
+            // A refusal is decided first: on a refusal turn `result` is the model's own text, which the prompt's
+            // sandbox excerpts can steer, so it must never reach the message-prefix fallback below and choose a
+            // run-ending stop. The CLI's own limit and login messages never arrive with `stop_reason` `refusal`.
+            if envelope.stop_reason.as_deref() == Some("refusal") {
+                return empty(EmptyCause::Refusal, &envelope, usage);
+            }
             let status = envelope
                 .api_error_status
                 .and_then(|status| u16::try_from(status).ok());
@@ -226,9 +233,6 @@ fn success(
             };
             if let Some(stop) = stop {
                 return Err(ProviderError::Stop { stop, usage });
-            }
-            if envelope.stop_reason.as_deref() == Some("refusal") {
-                return empty(EmptyCause::Refusal, &envelope, usage);
             }
             Err(infra(InfraCause::ApiError { status }, usage))
         }

@@ -239,6 +239,27 @@ fn a_refusal_is_an_empty_call_with_usage() -> TestResult {
     Ok(())
 }
 
+/// A refusal whose `result` text starts with a limit or login prefix: on a refusal turn that text is the model's
+/// own, which the prompt's sandbox excerpts can steer, so it is an empty call and never a run-ending stop.
+#[test]
+fn a_refusal_whose_text_mimics_a_limit_or_login_message_is_still_an_empty_call() -> TestResult {
+    for result in [
+        "You've hit your limit",
+        "You\u{2019}ve reached your limit",
+        "Not logged in · Please run /login",
+        "Failed to authenticate",
+    ] {
+        let line = with_usage(&format!(
+            r#""type":"result","subtype":"success","is_error":true,"api_error_status":null,"stop_reason":"refusal","result":{}"#,
+            serde_json::to_string(result).unwrap_or_default()
+        ));
+        let response = ok(classify(line.as_bytes(), Exit::Code(1)))?;
+        assert_empty(&response, EmptyCause::Refusal);
+        assert_eq!(response.usage(), &usage(), "{result}");
+    }
+    Ok(())
+}
+
 #[test]
 fn a_refusal_without_usage_is_missing_usage() -> TestResult {
     let line = without_usage(
