@@ -24,3 +24,13 @@ pub mod provider;
 pub mod schema;
 pub mod single_shot;
 pub mod sweep;
+
+pub use fake::{FakeProvider, FakeReply};
+pub use prompt::{History, HistoryEntry, Prompt, SteerNote};
+pub use proposal::{DropCounts, DropReason, Proposal};
+pub use proposer::{Proposals, ProposeError, ProposeInput, Proposer};
+pub use provider::{
+    Completion, EmptyCause, InfraCause, ModelOutput, ModelProvider, ModelRequest, ModelResponse,
+    ProviderError, ProviderStop,
+};
+pub use schema::OutputSchema;

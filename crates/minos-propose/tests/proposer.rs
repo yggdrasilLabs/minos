@@ -11,7 +11,7 @@ use minos_core::manifest::{Manifest, ProposerSpec, Tier};
 use minos_core::path::RelPath;
 use minos_core::usage::Usage;
 use minos_propose::{
-    FakeProvider, FakeReply, History, ProposeError, ProposeInput, Proposals, Proposer,
+    FakeProvider, FakeReply, History, Proposals, ProposeError, ProposeInput, Proposer,
 };
 use minos_propose::{single_shot, sweep};
 use serde_json::{Map, Value};
@@ -126,10 +126,7 @@ fn script() -> Vec<FakeReply> {
     file.insert("content".to_owned(), Value::from(PARSE_NEW));
     let mut item = Map::new();
     item.insert("rationale".to_owned(), Value::from("raise A"));
-    item.insert(
-        "files".to_owned(),
-        Value::Array(vec![Value::Object(file)]),
-    );
+    item.insert("files".to_owned(), Value::Array(vec![Value::Object(file)]));
     let mut output = Map::new();
     output.insert(
         "proposals".to_owned(),
@@ -143,9 +140,7 @@ fn script() -> Vec<FakeReply> {
 }
 
 /// Calls `f` with the standard input for generation 1, base equal to parent.
-fn with_input<T>(
-    f: impl FnOnce(&ProposeInput<'_>) -> T,
-) -> Result<T, Box<dyn Error>> {
+fn with_input<T>(f: impl FnOnce(&ProposeInput<'_>) -> T) -> Result<T, Box<dyn Error>> {
     let manifest = manifest()?;
     let base = base()?;
     let history = History::empty();

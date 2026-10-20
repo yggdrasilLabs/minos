@@ -12,14 +12,15 @@ use std::collections::BTreeMap;
 use minos_core::diff::apply::Tree;
 use minos_core::id::{ModelId, RunId};
 use minos_core::ledger::{Origin, StopReason};
-use minos_core::manifest::{Manifest, Tier};
+use minos_core::manifest::{Manifest, ProposerSpec, Tier};
 use minos_core::sweep::SweepError;
 use minos_core::usage::Usage;
 
 use crate::prompt::{History, PromptError, SteerNote};
 use crate::proposal::{DropCounts, Proposal};
-use crate::provider::{EmptyCause, ProviderError};
+use crate::provider::{EmptyCause, ModelProvider, ProviderError};
 use crate::schema::SchemaError;
+use crate::{single_shot, sweep};
 
 /// Everything one propose step reads: a parameter bundle the loop builds from the folded run state, not a
 /// validated type. The tiers check its invariants (a generation of at least 1, and a parent with the base's
@@ -233,4 +234,62 @@ pub(crate) fn check_input(
         return Err(ProposeError::TreeMismatch);
     }
     Ok(())
+}
+
+/// The loop's one entry point per generation: it dispatches a proposer spec to its tier.
+///
+/// Generic over the provider, exactly as the runner is generic over its sandbox backend, and never a trait object:
+/// each binary picks its provider concretely, so the same tier code runs over [`crate::fake::FakeProvider`] in
+/// tests and the `claude` CLI provider in production. Routing (`minos_core::route`) picks which spec to pass.
+#[derive(Debug, Clone)]
+pub struct Proposer<P> {
+    provider: Option<P>,
+}
+
+impl<P> Proposer<P> {
+    /// A proposer whose model tiers call `provider`.
+    #[must_use]
+    pub const fn with_provider(provider: P) -> Self {
+        Self {
+            provider: Some(provider),
+        }
+    }
+
+    /// A proposer with no provider: only the sweep tier can propose, so a sweep-only project needs no model login.
+    #[must_use]
+    pub const fn without_provider() -> Self {
+        Self { provider: None }
+    }
+
+    /// The provider, when there is one.
+    #[must_use]
+    pub const fn provider(&self) -> Option<&P> {
+        self.provider.as_ref()
+    }
+}
+
+impl<P: ModelProvider> Proposer<P> {
+    /// The proposals of `spec`'s tier for `input`: a sweep through [`sweep::propose`], which calls no model, and a
+    /// single-shot proposer through [`single_shot::propose`] with this proposer's provider.
+    ///
+    /// # Errors
+    ///
+    /// [`ProposeError::NoProvider`] for a single-shot spec when there is no provider,
+    /// [`ProposeError::TierNotInThisRelease`] for a planned or agentic spec, and every error of the tier called.
+    pub fn propose(
+        &self,
+        spec: &ProposerSpec,
+        input: &ProposeInput<'_>,
+    ) -> Result<Proposals, ProposeError> {
+        match spec.tier() {
+            Tier::Sweep => sweep::propose(spec, input),
+            Tier::SingleShot => {
+                let provider = self.provider.as_ref().ok_or(ProposeError::NoProvider)?;
+                single_shot::propose(provider, spec, input)
+            }
+            tier @ (Tier::Planned | Tier::Agentic) => {
+                Err(ProposeError::TierNotInThisRelease { tier })
+            }
+        }
+    }
 }
