@@ -196,10 +196,7 @@ fn a_clean_subscription_login_passes() -> TestResult {
     assert_eq!(passed.home(), fixture.home());
     assert_eq!(passed.child_env().len(), 6);
     let debug = format!("{passed:?}");
-    assert!(
-        debug.contains("2.1.304") || debug.contains("304"),
-        "{debug}"
-    );
+    assert!(debug.contains("2.1.304"), "{debug}");
     assert!(!debug.contains("someone@example.com"), "{debug}");
     assert!(!debug.contains("org-123"), "{debug}");
     Ok(())

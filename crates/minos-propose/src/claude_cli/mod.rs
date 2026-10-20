@@ -16,9 +16,13 @@
 //!   forwards a credential: the parent snapshot keeps only the *names* of credential and redirect variables, so a
 //!   run can be refused naming one (D-03), and their values are dropped on construction.
 //!
-//! Every decision here is a pure function with a golden or table test; the process that runs the call is wired to
-//! them separately, so nothing in this module spawns a process or reads the process environment. Only
-//! [`locate::locate`] touches the filesystem, and only to inspect the native install's link and versions directory.
+//! Every decision is a pure function with a golden or table test: the argv, the child environment, the version
+//! parsing, the result classification, and the locator's rules. Nothing here reads the process environment.
+//!
+//! Two parts touch the host. [`locate::locate`] inspects the native install's link and versions directory. The
+//! crate-private `process` runner starts every `claude` subprocess, bounded by a deadline, output caps, and a
+//! process-group kill (D-16), and [`preflight::preflight`] runs `--version` and `auth status` through it once per
+//! run, minting the [`preflight::Preflighted`] proof a provider is built from (D-01 to D-04).
 
 pub mod classify;
 pub mod command;

@@ -298,8 +298,30 @@ impl fmt::Debug for Preflighted {
 ///
 /// The first refusal, as a [`PreflightError`], in the order the module documentation lists.
 pub fn preflight(parent: &ParentEnv) -> Result<Preflighted, PreflightError> {
-    let _ = parent;
-    Err(PreflightError::AuthStatusUnreadable)
+    if !parent.refused().is_empty() {
+        return Err(PreflightError::CredentialVariables {
+            names: parent.refused().iter().cloned().collect(),
+        });
+    }
+    let env = parent.child_env()?;
+    let (Some(home), Some(tmpdir)) = (parent.home(), parent.tmpdir()) else {
+        // `child_env` succeeded, so both are set; kept as a refusal rather than a panic.
+        let name = if parent.home().is_none() {
+            "HOME"
+        } else {
+            "TMPDIR"
+        };
+        return Err(PreflightError::Environment(EnvError::Missing { name }));
+    };
+    let located = locate(home)?;
+    let work_root = work_root(tmpdir, home)?;
+    reverify(&located, &env, &work_root)?;
+    Ok(Preflighted {
+        located,
+        env,
+        home: home.to_owned(),
+        work_root,
+    })
 }
 
 /// Runs the `--version` and `auth status` checks, steps 5 and 6, against `located`.
