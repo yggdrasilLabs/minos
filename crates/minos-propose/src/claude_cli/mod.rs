@@ -42,6 +42,7 @@ mod process;
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Mutex, TryLockError};
 
@@ -144,8 +145,11 @@ impl ModelProvider for ClaudeCli {
     /// classifier's causes.
     fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
         let call = self.prepare()?;
+        // Mode 0700 is set explicitly: `tempfile` otherwise creates the directory with the umask-derived default,
+        // which on a shared `TMPDIR` would let another user list the CLI's working directory.
         let dir = tempfile::Builder::new()
             .prefix(RUN_DIR_PREFIX)
+            .permissions(std::fs::Permissions::from_mode(0o700))
             .tempdir_in(&call.work_root)
             .map_err(|_| infra(InfraCause::WorkDir, None))?;
         let args = argv(request.model(), request.schema());

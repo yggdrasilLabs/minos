@@ -25,6 +25,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use minos_core::text::SafeText;
@@ -400,8 +401,10 @@ fn run_step(
     let unusable = || PreflightError::WorkRootUnusable {
         path: work_root.to_owned(),
     };
+    // Mode 0700 is set explicitly, as for each model call: `tempfile`'s default is the umask-derived mode.
     let dir = tempfile::Builder::new()
         .prefix(RUN_DIR_PREFIX)
+        .permissions(fs::Permissions::from_mode(0o700))
         .tempdir_in(work_root)
         .map_err(|_| unusable())?;
     let args = step.args();

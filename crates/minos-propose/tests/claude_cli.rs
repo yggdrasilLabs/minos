@@ -9,7 +9,8 @@
 //! `$HOME/fake/auth.code` or 0. On `-p` it records its arguments one per line in `$HOME/fake/model.argv`, copies
 //! its stdin to `$HOME/fake/stdin`, prints `$HOME/fake/envelope.json`, and exits with `$HOME/fake/model.code` or
 //! 0. Each step first appends to `$HOME/fake/<step>.count` and records its environment, its canonical working
-//! directory, and that directory's listing; it never writes into its working directory.
+//! directory, that directory's mode (`stat -f %Lp`, so the fake runs on macOS only), and that directory's listing;
+//! it never writes into its working directory.
 //!
 //! Tests cannot set process variables in edition 2024, so each builds its [`ParentEnv`] by hand (06-RESEARCH
 //! Pitfall 6).
@@ -55,6 +56,7 @@ esac
 echo ran >> "$fake/$step.count"
 /usr/bin/env > "$fake/$step.env"
 /bin/pwd -P > "$fake/$step.pwd"
+/usr/bin/stat -f %Lp . > "$fake/$step.mode"
 /bin/ls -A > "$fake/$step.ls"
 if [ "$step" = model ]; then
   printf '%s\n' "$@" > "$fake/model.argv"
@@ -261,8 +263,8 @@ fn six_variables(fixture: &Fixture) -> Vec<String> {
     ]
 }
 
-/// Checks that `step` ran in a directory named `minos-claude-*` directly under the canonical `TMPDIR`, empty when
-/// it started and gone now, and returns the directory.
+/// Checks that `step` ran in a directory named `minos-claude-*` directly under the canonical `TMPDIR`, mode 0700,
+/// empty when it started and gone now, and returns the directory.
 fn fresh_directory(fixture: &Fixture, step: &str) -> Result<PathBuf, Box<dyn Error>> {
     let root = fs::canonicalize(fixture.tmp())?;
     let pwd = fixture
@@ -281,6 +283,14 @@ fn fresh_directory(fixture: &Fixture, step: &str) -> Result<PathBuf, Box<dyn Err
         .ok_or("the directory has no name")?;
     assert!(name.starts_with("minos-claude-"), "{name}");
     assert!(!dir.exists(), "{} was not removed", dir.display());
+    assert_eq!(
+        fixture
+            .recorded(&format!("{step}.mode"))?
+            .as_deref()
+            .map(str::trim_end),
+        Some("700"),
+        "{step}: the directory is not mode 0700"
+    );
     assert_eq!(
         fixture.recorded(&format!("{step}.ls"))?.as_deref(),
         Some(""),
