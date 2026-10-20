@@ -326,7 +326,35 @@ Plans:
   4. `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types, and invalid diffs are dropped, not repaired. `sweep` produces proposals from declared params with no model call. Each call's token usage is returned for a `Spent` event and any CLI dollar figure is ignored. A rate-limit or usage-cap response surfaces as an infrastructure failure that stops the run with `StopRequested`, never as an `Outcome` (PROP-07, PROP-08, PROP-09, PROP-10)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
+**Plans**: 9 plans
+Plans:
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — `StopReason::ProviderAuth` in core: variant, key tag 7, Display, prop_keys coverage, one pinned golden line (wave 1)
+- [ ] 06-02-PLAN.md — `minos-propose` contracts: dependencies and clippy ban, limits, output schema golden, `ModelProvider` and its types, `Prompt`, the strict output parser with closed drop reasons (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 06-03-PLAN.md — Deterministic prompt assembly: history view, stable prefix, fenced untrusted suffix, golden, shuffle, and held-out non-interference tests (wave 2)
+- [ ] 06-04-PLAN.md — `ClaudeCli` pure parts: parent snapshot and six-variable env, golden argv, version parsing, the corrected result classifier, the native-install locator (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 06-05-PLAN.md — Tiers: sweep over core's sampler, single_shot over any provider, `FakeProvider`, `Proposer<P>` dispatch, PROP-07 rewording (D-11) (wave 3)
+- [ ] 06-06-PLAN.md — Capped subprocess runner with deadline and process-group kill; the per-run preflight against a fake `claude` (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 06-07-PLAN.md — `ClaudeCli` call path with re-resolution and re-preflight, end-to-end provider-agnostic proof, CLAUDE.md provider wording (wave 4)
+
+**Wave 5** *(blocked on 06-07)*
+
+- [ ] 06-08-PLAN.md — Ignored live suite: hostile fixture project, golden argv in the fixture, positive control; CLAUDE.md Testing and Commands (wave 5)
+
+**Wave 6** *(blocked on all prior plans)*
+
+- [ ] 06-09-PLAN.md — Live run recorded, verified facts, final gate, requirements, validation map, then `cargo clean` (wave 6)
+
 **Research**: Needs research-phase (`claude -p` flag interplay and subscription behavior, especially anything SPIKE-07 left open)
 
 ### Phase 7: Runner and Loop

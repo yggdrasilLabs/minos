@@ -39,7 +39,30 @@ created: 2026-10-19
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| (filled by the planner from PLAN.md tasks) | | | PROP-01 to PROP-10 | | | | | | ⬜ pending |
+| 06-01-01 | 01 | 1 | PROP-09 | T-06-01-02 | `StopReason::ProviderAuth` has tag 7, fixed Display, distinct keys | unit + proptest | `cargo test -p minos-core --test prop_keys` | ✅ extend | ⬜ pending |
+| 06-01-02 | 01 | 1 | PROP-09 | T-06-01-01 | One new golden line; no existing wire byte moves; pin recomputed | golden | `cargo test -p minos-core --test golden_wire` | ✅ extend | ⬜ pending |
+| 06-02-01 | 02 | 1 | PROP-01 | T-06-02-04, T-06-02-SC | Only existing pins added; HashMap/HashSet ban proven to fire; caps const-asserted | lint + supply chain | `cargo clippy -p minos-propose --all-targets -- -D warnings && cargo deny check` | ❌ W0 | ⬜ pending |
+| 06-02-02 | 02 | 1 | PROP-01, PROP-07 | T-06-02-02, T-06-02-04 | Schema golden + pin; `ModelOutput` has no Debug/Display/Clone/Deref (compile-time check) | golden + unit | `cargo test -p minos-propose --test schema --test provider` | ❌ W0 | ⬜ pending |
+| 06-02-03 | 02 | 1 | PROP-07 | T-06-02-01, T-06-02-03, T-06-02-05 | Strict per-item parse; every drop rule counted; arbitrary JSON never panics | unit + proptest | `cargo test -p minos-propose --test parse && cargo clippy -p minos-propose --all-targets -- -D warnings` | ❌ W0 | ⬜ pending |
+| 06-03-01 | 03 | 2 | PROP-06 | T-06-03-01, T-06-03-02 | History rows sanitized, capped, visible-objective deltas only | unit | `cargo test -p minos-propose --test history` | ❌ W0 | ⬜ pending |
+| 06-03-02 | 03 | 2 | PROP-05, PROP-06 | T-06-03-01, T-06-03-03, T-06-03-04 | Golden + pin; shuffle invariance; stable prefix; unforgeable fences; typed refusals | golden + proptest | `cargo test -p minos-propose --test prompt` | ❌ W0 | ⬜ pending |
+| 06-03-03 | 03 | 2 | PROP-06 | T-06-03-02 | Held-out values cannot change a prompt byte; names and values absent | proptest | `cargo test -p minos-propose --test held_out && cargo clippy -p minos-propose --all-targets -- -D warnings` | ❌ W0 | ⬜ pending |
+| 06-04-01 | 04 | 2 | PROP-02, PROP-04 | T-06-04-01, T-06-04-02, T-06-04-05 | Argv golden + pin; exactly six child variables; credential names scanned, values dropped | golden + unit | `cargo test -p minos-propose --test argv_golden` | ❌ W0 | ⬜ pending |
+| 06-04-02 | 04 | 2 | PROP-08, PROP-09 | T-06-04-03, T-06-04-04 | Pattern 7 table; usage from every variant; dollar fields never bound; stop mapping | unit (table) | `cargo test -p minos-propose --test classify` | ❌ W0 | ⬜ pending |
+| 06-04-03 | 04 | 2 | PROP-04 | T-06-04-06 | Only the native install is located; every refusal names the paths checked | unit (temp layouts) | `cargo test -p minos-propose --test locate && cargo clippy -p minos-propose --all-targets -- -D warnings` | ❌ W0 | ⬜ pending |
+| 06-05-01 | 05 | 3 | PROP-10 | T-06-05-05 | Sweep proposes from params with no provider; deterministic; cumulative from base | unit | `cargo test -p minos-propose --test sweep` | ❌ W0 | ⬜ pending |
+| 06-05-02 | 05 | 3 | PROP-01, PROP-07, PROP-08, PROP-09 | T-06-05-01, T-06-05-02, T-06-05-03, T-06-05-04 | One call; strict parse; empty call is Ok; usage, origin, typed stops | unit (FakeProvider) | `cargo test -p minos-propose --test single_shot` | ❌ W0 | ⬜ pending |
+| 06-05-03 | 05 | 3 | PROP-01, PROP-07, PROP-10 | T-06-05-02 | Generic dispatch; sweep makes no request; PROP-07 reworded (D-11) | unit + doc grep | `cargo test -p minos-propose --test proposer && cargo clippy -p minos-propose --all-targets -- -D warnings && grep -n 'PROP-07.*{rationale, files}' .planning/REQUIREMENTS.md` | ❌ W0 | ⬜ pending |
+| 06-06-01 | 06 | 3 | PROP-02 | T-06-06-01, T-06-06-02 | Deadline + process-group kill; caps; exact env; cwd; stdin | unit (real processes) | `cargo test -p minos-propose --lib claude_cli::process` | ❌ W0 | ⬜ pending |
+| 06-06-02 | 06 | 3 | PROP-02, PROP-04 | T-06-06-03, T-06-06-04, T-06-06-05, T-06-06-06 | Preflight refusals; auth status binds no PII; fresh empty dir per run | fake-binary integration | `cargo test -p minos-propose --test claude_cli && cargo clippy -p minos-propose --all-targets -- -D warnings` | ❌ W0 | ⬜ pending |
+| 06-07-01 | 07 | 4 | PROP-02, PROP-04, PROP-09 | T-06-07-01, T-06-07-02, T-06-07-04 | Call path: re-resolve, re-preflight on change, golden argv, six vars, stdin, dir removed | fake-binary integration | `cargo test -p minos-propose --test claude_cli` | ❌ W0 | ⬜ pending |
+| 06-07-02 | 07 | 4 | PROP-01, PROP-08 | T-06-07-03 | Same tier code over FakeProvider and ClaudeCli; origin prompt hash matches stdin | fake-binary integration | `cargo test -p minos-propose --test claude_cli && cargo clippy -p minos-propose --all-targets -- -D warnings` | ❌ W0 | ⬜ pending |
+| 06-07-03 | 07 | 4 | PROP-02, PROP-04, PROP-09 | T-06-07-05 | Design of record matches the provider as built | doc grep | `grep -n 'api_error_status' CLAUDE.md && grep -n 'apiKeySource' CLAUDE.md && grep -n 'Phase 6 corrections to the stack block' .claude/CLAUDE.md && grep -n 'Proposer<P>' CLAUDE.md` | ✅ | ⬜ pending |
+| 06-08-01 | 08 | 5 | PROP-02, PROP-03 | T-06-08-02, T-06-08-03 | Live suite ignored and gated; positive control present | compile + ignored | `cargo test -p minos-propose --test live 2>&1 \| grep -E '3 ignored' && cargo clippy -p minos-propose --all-targets -- -D warnings` | ❌ W0 | ⬜ pending |
+| 06-08-02 | 08 | 5 | PROP-03 | — | CLAUDE.md documents the live suite and its gate variable | doc grep | `grep -n 'MINOS_CLAUDE_LIVE=1 cargo test -p minos-propose --test live' CLAUDE.md` | ✅ | ⬜ pending |
+| 06-09-01 | 09 | 6 | PROP-02, PROP-03 | T-06-09-01, T-06-09-02 | Live run: no canary in (a)/(b), hook canary in (c); recorded and redacted | manual live | `MINOS_CLAUDE_LIVE=1 cargo test -p minos-propose --test live -- --ignored --nocapture --test-threads=1` | ❌ W0 | ⬜ pending |
+| 06-09-02 | 09 | 6 | PROP-01 to PROP-10 | T-06-09-01, T-06-09-03, T-06-09-04 | Full gate, C-01, C-02 green on final code | full gate | full suite command above | ✅ | ⬜ pending |
+| 06-09-03 | 09 | 6 | GATE-06 | — | cargo clean last | command | `test ! -d target/debug` | ✅ | ⬜ pending |
 
 Requirement to test mapping (from research):
 
@@ -63,7 +86,7 @@ Requirement to test mapping (from research):
 ## Wave 0 Requirements
 
 - [ ] `crates/minos-propose/Cargo.toml` — add `rustix` and `tempfile` (deps); `proptest` and `tempfile` (dev-deps) as workspace pins require
-- [ ] `crates/minos-propose/tests/support/` (shared module, every item used by each target that declares it) — fake-claude layout builder in a temp `HOME`, canned envelopes for each classifier row
+- [ ] Self-contained test targets in place of a shared `tests/support/` module (every item of a shared module must be used by each target that declares it): the fake-claude HOME layout lives in `tests/claude_cli.rs` (06-06, 06-07), the canned envelopes in `tests/classify.rs` (06-04)
 - [ ] `crates/minos-propose/tests/snapshots/` — argv, schema, prompt goldens (accepted deliberately with `INSTA_UPDATE=always`, then pinned by SHA-256)
 - [ ] `crates/minos-core/tests/snapshots/golden_wire__record_v1_stop_requested_provider_auth.snap` plus its pin
 
