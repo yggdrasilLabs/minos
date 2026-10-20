@@ -326,7 +326,7 @@ Plans:
   4. `single_shot` returns several `{rationale, diff}` candidates parsed into closed `deny_unknown_fields` types, and invalid diffs are dropped, not repaired. `sweep` produces proposals from declared params with no model call. Each call's token usage is returned for a `Spent` event and any CLI dollar figure is ignored. A rate-limit or usage-cap response surfaces as an infrastructure failure that stops the run with `StopRequested`, never as an `Outcome` (PROP-07, PROP-08, PROP-09, PROP-10)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 3/10 plans executed
+**Plans**: 4/10 plans executed
 Plans:
 **Wave 1**
 
@@ -336,7 +336,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 06-03-PLAN.md — Deterministic prompt assembly: history view, stable prefix, fenced untrusted suffix, golden, shuffle, and held-out non-interference tests (wave 2)
-- [ ] 06-04-PLAN.md — `ClaudeCli` pure parts: parent snapshot and six-variable env, golden argv, version parsing, the corrected result classifier, the native-install locator (wave 2)
+- [x] 06-04-PLAN.md — `ClaudeCli` pure parts: parent snapshot and six-variable env, golden argv, version parsing, the corrected result classifier, the native-install locator (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -409,6 +409,6 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 3. Core Types and Pure Logic | 13/13 | Complete    | 2026-10-14 |
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
-| 6. Proposers | 3/10 | In Progress|  |
+| 6. Proposers | 4/10 | In Progress|  |
 | 7. Runner and Loop | 0/TBD | Not started | - |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
