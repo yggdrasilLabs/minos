@@ -24,3 +24,4 @@ pub mod classify;
 pub mod command;
 pub mod env;
 pub mod locate;
+mod process;
