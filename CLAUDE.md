@@ -554,9 +554,9 @@ Unverified. Each needs a test or a doc check before code depends on it.
 - Whether EC2 GPU instance types support nested virtualization. The design assumes they do not.
 - Whether MicroVM and Bedrock rates are available from the AWS price list API. Until checked, `prices.toml` is edited by hand.
 
-## Verified facts, local (as of 2026-10-10)
+## Verified facts, local (as of 2026-10-20)
 
-Each fact cites `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md`.
+Each fact cites `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md` or `.planning/phases/06-proposers/06-EVIDENCE.md`.
 
 - libkrunfw 5.6.2 from `libkrun/krun`; guest kernel 6.12.109; `CONFIG_BLK_DEV_INITRD` unset (H-01, H-02, S01-CMDLINE).
 - msb_krun 0.1.41 boots it on macOS 27 arm64 from crates under `forbid(unsafe_code)`, from a raw read-only SquashFS root with no initramfs and no virtio-fs (S01-ROOTDISK); the initramfs form fails (S01-INITRAMFS).
@@ -567,6 +567,7 @@ Each fact cites `.planning/phases/02-platform-spikes/02-SPIKE-EVIDENCE.md`.
 - A digest-pinned Dockerfile becomes a bootable root image through Docker buildx and the Rust packer (RI-03, S06-BOOT).
 - The helper's exit code does not carry the guest's result (K7 table).
 - `claude` 2.1.296 under subscription login returns `structured_output` with all tools off, `--json-schema`, `--no-session-persistence`, an empty directory, and the six-variable environment; `num_turns` is 2 under `--max-turns 1` with a schema, because structured output goes through the `StructuredOutput` tool; `usage` carries `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, and `cache_read_input_tokens`, among other fields (SPIKE-07 contract).
+- `claude` 2.1.304 under subscription login, run by the user by hand on 2026-10-20: the production provider (the re-resolved native install, the six-variable environment, a fresh empty directory, the prompt on stdin, the SPIKE-07 argv) returned a `{rationale, files}` structured output that parsed into proposals (case a); its preflight's `auth status` check passed, so the CLI reported `loggedIn` true, `authMethod` `claude.ai`, `apiProvider` `firstParty`, and no `apiKeySource`; with the fixture project as the CLI's own working directory, its hooks, `.mcp.json` server, and CLAUDE.md did not run under `--safe-mode`, `--strict-mcp-config`, and the empty `--mcp-config` (case b), and both hook canaries and the MCP canary did fire without them (case c). This holds for that version and that fixture; a later CLI version needs a rerun (06-EVIDENCE.md Live provider tests).
 
 ## Verified facts, AWS (as of 2026-10-08)
 
