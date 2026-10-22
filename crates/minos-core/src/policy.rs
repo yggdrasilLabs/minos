@@ -242,6 +242,30 @@ fn valid_score(
     )
 }
 
+/// Whether the baseline has a usable score under `judge`: at least one recorded trial whose scorecard passes
+/// [`check_scorecard`] against the manifest's judge and carries the objective metric, reduced over its scored
+/// trials alone ([`TrialRule::ScoredOnly`]), exactly as [`conclude`] reduces the incumbent of generation 1.
+///
+/// The loop runs this pure check once every generation-0 trial is judged. When it is false (a broken judge, a
+/// missing metric, a baseline that never scores), the run stops with a driver error before any model call or
+/// candidate VM is paid for (07-RESEARCH Pitfall 12; 07-CONTEXT D-05, D-06). Whenever it is false, [`conclude`]
+/// for generation 1 returns [`PolicyError::IncumbentUnscored`]. No [`StopReason`] names this case: it is a
+/// configuration fault of the run, not a recorded stop.
+///
+/// `manifest` must be the manifest in effect at generation 0, and `judge` the [`JudgeVersion`] of its judge.
+#[must_use]
+pub fn baseline_ready(state: &RunState, manifest: &Manifest, judge: &JudgeVersion) -> bool {
+    valid_score(
+        state,
+        manifest.judge(),
+        judge,
+        state.baseline(),
+        TrialRule::ScoredOnly,
+    )
+    .and_then(|score| score.get(manifest.objective().metric()))
+    .is_some()
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Improvement and greedy selection
 // ---------------------------------------------------------------------------------------------------------------
