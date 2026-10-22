@@ -376,8 +376,48 @@ Plans:
   4. `minos judge push <dir>` stores judge data in the local blob store as a new judge version with its hash recorded, and that data never appears in the source tarball or the image build context (JUDGE-01, CLI-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
-**Research**: Standard patterns; skip research-phase
+**Plans**: 17 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 07-01-PLAN.md — Core ledger provenance: `Judged { logs }`, `RunStarted { root_image }`, `Proposed { batch }`, `JobResult` judge usage, the `RunState` accessors the loop reads, `baseline_ready`, four goldens with their pin (wave 1)
+- [ ] 07-02-PLAN.md — Core judge and price pieces: `[judge] trials`, the `[[judge]]` lock table with `check_judge` and the 4 MiB cap, `Prices::missing_models`, the shared caps (wave 1)
+- [ ] 07-03-PLAN.md — Wave 0 scaffolding: every new dependency edge from existing pins, the runner and loop clippy policies with ban proofs, 07-EVIDENCE.md (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 07-04-PLAN.md — First runner plan: the user approves the two `Untrusted` sink exits at a blocking checkpoint, then `store_judge_input` and `store_tail` with tests, a trybuild case, and CLAUDE.md (wave 2; checkpoint)
+- [ ] 07-05-PLAN.md — Store: a conflicting append becomes `StoreError::Conflict`; the `RunLock` trait with `driver.lock` and the memory lock (wave 2)
+- [ ] 07-06-PLAN.md — `BaseTree` and `CumulativeDiff` in core with compile-fail proofs; guest, krun, and minos-propose callers moved (wave 2)
+- [ ] 07-07-PLAN.md — Loop contracts: `JobRunner`, `DriverError`, the observer seam, and the pure `next_step` with its properties (wave 2)
+- [ ] 07-08-PLAN.md — `pack_judge_data` and the judge-overlap refusal in every snapshot, wired into `env build` (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 07-09-PLAN.md — Runner pure parts: blame-carrying errors, host-measured usage, the observation-to-outcome map with the gate short-circuit (wave 3)
+- [ ] 07-10-PLAN.md — Loop building blocks: run inputs with start and resume checks, the recorder, the batch blob and admission, the history and parent-tree readers (wave 3)
+- [ ] 07-11-PLAN.md — `minos judge push <dir> [--update]`, the shared lock helpers, and CLAUDE.md for judge data (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 07-12-PLAN.md — The candidate-then-judge pipeline `Runner<B, S>`, tested over a scripted fake backend (wave 4)
+- [ ] 07-13-PLAN.md — The generation driver: start, resume, calibrate, `run_to`, with flow tests on fakes (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 07-14-PLAN.md — CLI `RunnerJobs` adapter and the ignored real-VM test of the production runner, run and recorded (wave 5)
+- [ ] 07-15-PLAN.md — Safe points, caps, the breaker, retries, session-relative stops, and the backend pin (wave 5)
+
+**Wave 6** *(blocked on 07-14 and 07-15)*
+
+- [ ] 07-16-PLAN.md — Exhaustive crash-point resume equivalence, the second-driver refusal, and CLAUDE.md for the runner and loop (wave 6)
+
+**Wave 7** *(blocked on all prior plans)*
+
+- [ ] 07-17-PLAN.md — Final gate, requirements, the validation map checked against the real targets, then `cargo clean` (wave 7)
+
+**Research**: Standard patterns; skip research-phase (a research pass ran on 2026-10-22; its findings are D-17 to D-20)
 
 ### Phase 8: CLI, Sample Project, and Docs
 
