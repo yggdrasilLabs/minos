@@ -9,6 +9,10 @@
 //! `INSTA_UPDATE=always cargo test -p minos-core --test golden_wire` and reviewed before it is committed. insta
 //! trims trailing whitespace and normalizes line endings when it compares, so `all_golden_bytes_pinned` also pins
 //! the exact bytes of every golden line with one SHA-256 literal (03-RESEARCH Pitfall 4).
+//!
+//! The Phase 7 provenance fields (`RunStarted.root_image`, `Proposed.batch`, `Judged.logs`, and the job result's
+//! `judge_usage`) are optional and omitted when absent, so the 25 lines above stay byte-identical; their present
+//! forms are a second list, [`phase7_goldens`], with its own pin, `phase7_golden_bytes_pinned`.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -176,6 +180,19 @@ fn job_result() -> Result<JobResult, Box<dyn Error>> {
         &candidate_request()?,
         Outcome::TimedOut { stage: Stage::Run },
         Usage::compute(4_000, 2_048_000),
+        None,
+        backend(),
+        logs(),
+    )?)
+}
+
+/// A scored trial whose judge VM also ran, so it carries the judge's usage beside the candidate's.
+fn job_result_judge_usage() -> Result<JobResult, Box<dyn Error>> {
+    Ok(JobResult::new(
+        &candidate_request()?,
+        Outcome::Scored(scorecard()?),
+        Usage::compute(4_000, 2_048_000),
+        Some(Usage::compute(1_500, 768_000)),
         backend(),
         logs(),
     )?)
@@ -441,6 +458,7 @@ fn a_result_carries_no_tokens() -> TestResult {
             &candidate_request()?,
             Outcome::TimedOut { stage: Stage::Run },
             usage,
+            None,
             backend(),
             logs(),
         );
@@ -517,6 +535,7 @@ fn run_started() -> Event {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
+        root_image: None,
     }
 }
 
@@ -527,6 +546,7 @@ fn judged(trial: u32, outcome: Outcome) -> Result<Event, Box<dyn Error>> {
         trial,
         outcome,
         backend: backend(),
+        logs: None,
     })
 }
 
@@ -550,6 +570,7 @@ fn golden_records() -> Result<Vec<(&'static str, Record)>, Box<dyn Error>> {
             diff: diff_blob()?,
             rationale: BlobId::of(b"rationale"),
             origin,
+            batch: None,
         })
     };
     let selected = |generation: u32, kind: DecisionKind, dropped: u32| Event::Selected {
@@ -731,6 +752,85 @@ fn golden(name: &str) -> Result<String, Box<dyn Error>> {
         .ok_or_else(|| format!("no golden line {name}").into())
 }
 
+/// The Phase 7 provenance fields present, one record per field, each with the name of its snapshot, in the snapshot
+/// order of [`phase7_goldens`].
+fn phase7_records() -> Result<Vec<(&'static str, Record)>, Box<dyn Error>> {
+    let logs: BTreeMap<Stage, BlobId> = [
+        (Stage::Build, BlobId::of(b"build log")),
+        (Stage::Run, BlobId::of(b"run log")),
+    ]
+    .into_iter()
+    .collect();
+    let events = vec![
+        (
+            "record_v1_judged_logs",
+            Event::Judged {
+                exp: candidate()?.id(),
+                judge: judge()?,
+                trial: 4,
+                outcome: Outcome::Crashed { stage: Stage::Run },
+                backend: backend(),
+                logs: Some(logs),
+            },
+        ),
+        (
+            "record_v1_run_started_root_image",
+            Event::RunStarted {
+                run: run(),
+                manifest: ManifestId::of(b"m"),
+                base: base(),
+                baseline: baseline(),
+                started_at: STARTED_AT,
+                root_image: Some(ImageDigest::of(b"root")),
+            },
+        ),
+        (
+            "record_v1_proposed_batch",
+            Event::Proposed {
+                exp: candidate()?.id(),
+                parent: baseline(),
+                generation: 1,
+                tier: Tier::Sweep,
+                diff: diff_blob()?,
+                rationale: BlobId::of(b"rationale"),
+                origin: Origin::Sweep,
+                batch: Some(BlobId::of(b"batch")),
+            },
+        ),
+    ];
+    Ok(events
+        .into_iter()
+        .map(|(name, event)| (name, Record::v1(event)))
+        .collect())
+}
+
+/// Every Phase 7 golden line with its snapshot name, in the order `phase7_golden_bytes_pinned` hashes them.
+fn phase7_goldens() -> Result<Vec<(&'static str, String)>, Box<dyn Error>> {
+    let mut lines = Vec::new();
+    for (name, record) in phase7_records()? {
+        lines.push((name, serde_json::to_string(&record)?));
+    }
+    lines.push((
+        "job_result_judge_usage",
+        serde_json::to_string(&job_result_judge_usage()?)?,
+    ));
+    Ok(lines)
+}
+
+/// The Phase 7 golden line named `name`.
+fn phase7_golden(name: &str) -> Result<String, Box<dyn Error>> {
+    phase7_goldens()?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, line)| line)
+        .ok_or_else(|| format!("no phase 7 golden line {name}").into())
+}
+
+/// The event of the record `text` parses to.
+fn parsed_event(text: &str) -> Result<Event, Box<dyn Error>> {
+    Ok(serde_json::from_str::<Record>(text)?.event().clone())
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest: [u8; 32] = Sha256::digest(bytes).into();
     base16ct::lower::encode_string(&digest)
@@ -786,8 +886,37 @@ fn all_golden_bytes_pinned() -> TestResult {
 }
 
 #[test]
+fn phase7_golden_snapshots() -> TestResult {
+    let lines = phase7_goldens()?;
+    assert_eq!(lines.len(), 4);
+    for (name, line) in lines {
+        insta::assert_snapshot!(name, line);
+    }
+    Ok(())
+}
+
+#[test]
+fn phase7_golden_bytes_pinned() -> TestResult {
+    // The pin was computed outside the code under test, from the accepted snapshot bodies (the text after each
+    // file's second `---` line), in the order of `phase7_goldens`, each followed by one newline:
+    //
+    //   cd crates/minos-core/tests/snapshots
+    //   for n in record_v1_judged_logs record_v1_run_started_root_image record_v1_proposed_batch \
+    //            job_result_judge_usage; do
+    //     awk 'n >= 2 { print } /^---$/ { n++ }' "golden_wire__$n.snap"
+    //   done | shasum -a 256
+    let mut all = String::new();
+    for (_, line) in phase7_goldens()? {
+        all.push_str(&line);
+        all.push('\n');
+    }
+    assert_eq!(sha256_hex(all.as_bytes()), "PHASE7_PIN");
+    Ok(())
+}
+
+#[test]
 fn every_golden_line_is_one_json_line() -> TestResult {
-    for (name, line) in goldens()? {
+    for (name, line) in goldens()?.into_iter().chain(phase7_goldens()?) {
         assert!(!line.contains('\n'), "{name} spans lines");
         assert!(!line.contains('\r'), "{name} has a carriage return");
         assert!(line.starts_with('{') && line.ends_with('}'), "{name}");
@@ -852,6 +981,181 @@ fn golden_lines_parse_back_to_equal_values() -> TestResult {
         JobResult::parse_json(golden("job_result")?.as_bytes())?,
         job_result()?
     );
+    Ok(())
+}
+
+#[test]
+fn phase7_lines_parse_back_to_equal_values() -> TestResult {
+    for (name, record) in phase7_records()? {
+        let text = phase7_golden(name)?;
+        assert_eq!(serde_json::from_str::<Record>(&text)?, record, "{name}");
+        assert!(text.starts_with("{\"v\":\"1\","), "{name}");
+    }
+    let text = phase7_golden("job_result_judge_usage")?;
+    let result = JobResult::parse_json(text.as_bytes())?;
+    assert_eq!(result, job_result_judge_usage()?);
+    assert_eq!(result.judge_usage(), Some(Usage::compute(1_500, 768_000)));
+    assert_eq!(result.usage(), Usage::compute(4_000, 2_048_000));
+    Ok(())
+}
+
+#[test]
+fn present_fields_are_written_as_named() -> TestResult {
+    let text = phase7_golden("record_v1_judged_logs")?;
+    let logs = format!(
+        "\"logs\":{{\"build\":\"{}\",\"run\":\"{}\"}}",
+        BlobId::of(b"build log"),
+        BlobId::of(b"run log")
+    );
+    assert!(text.contains(&logs), "{text}");
+    let text = phase7_golden("record_v1_run_started_root_image")?;
+    let root = format!("\"root_image\":\"{}\"", ImageDigest::of(b"root"));
+    assert!(text.contains(&root), "{text}");
+    let text = phase7_golden("record_v1_proposed_batch")?;
+    let batch = format!("\"batch\":\"{}\"", BlobId::of(b"batch"));
+    assert!(text.contains(&batch), "{text}");
+    assert!(phase7_golden("job_result_judge_usage")?.contains("\"judge_usage\":{"));
+    Ok(())
+}
+
+#[test]
+fn absent_fields_are_omitted_and_old_lines_read_them_as_none() -> TestResult {
+    // The existing lines were written before Phase 7: they parse, and the new fields read as `None`.
+    for name in [
+        "record_v1_run_started",
+        "record_v1_proposed_sweep",
+        "record_v1_judged_scored",
+    ] {
+        let text = golden(name)?;
+        for word in ["root_image\":\"", "\"batch\"", "\"logs\"", "null"] {
+            // `BackendInfo` has its own `root_image`, so only the run-start line is checked for it.
+            if word.starts_with("root_image") && name != "record_v1_run_started" {
+                continue;
+            }
+            assert!(!text.contains(word), "{name} contains {word}");
+        }
+        match parsed_event(&text)? {
+            Event::RunStarted { root_image, .. } => assert_eq!(root_image, None),
+            Event::Proposed { batch, .. } => assert_eq!(batch, None),
+            Event::Judged { logs, .. } => assert_eq!(logs, None),
+            other => return Err(format!("{name} parsed as {other:?}").into()),
+        }
+    }
+    let text = golden("job_result")?;
+    assert!(!text.contains("judge_usage"));
+    assert_eq!(JobResult::parse_json(text.as_bytes())?.judge_usage(), None);
+    Ok(())
+}
+
+#[test]
+fn phase7_lines_refuse_unknown_and_bad_keys() -> TestResult {
+    for (name, _) in phase7_records()? {
+        record_rejected(&edit(&phase7_golden(name)?, "\":{", "\":{\"extra\":1,")?)?;
+    }
+    let text = phase7_golden("record_v1_judged_logs")?;
+    // `Stage` is a closed enum, so a log map key outside it is refused.
+    record_rejected(&edit(&text, "\"build\":", "\"bogus\":")?)?;
+    // A sibling of `logs` the event does not declare is still refused.
+    record_rejected(&edit(&text, "\"logs\":", "\"log_text\":\"x\",\"logs\":")?)?;
+    // A log entry is a blob ID, never inline text.
+    record_rejected(&edit(&text, "\"build\":\"", "\"build\":\"not hex ")?)?;
+    let text = phase7_golden("job_result_judge_usage")?;
+    let error = result_rejected(&edit(
+        &text,
+        "\"judge_usage\":{",
+        "\"judge_usage\":{\"gpu_ms\":1,",
+    )?)?;
+    assert!(matches!(error, JobError::Json(_)));
+    Ok(())
+}
+
+#[test]
+fn the_new_fields_are_not_part_of_any_key() -> TestResult {
+    let run = run();
+    for (name, record) in phase7_records()? {
+        let without = match record.event().clone() {
+            Event::Judged {
+                exp,
+                judge,
+                trial,
+                outcome,
+                backend,
+                ..
+            } => Event::Judged {
+                exp,
+                judge,
+                trial,
+                outcome,
+                backend,
+                logs: None,
+            },
+            Event::RunStarted {
+                run,
+                manifest,
+                base,
+                baseline,
+                started_at,
+                ..
+            } => Event::RunStarted {
+                run,
+                manifest,
+                base,
+                baseline,
+                started_at,
+                root_image: None,
+            },
+            Event::Proposed {
+                exp,
+                parent,
+                generation,
+                tier,
+                diff,
+                rationale,
+                origin,
+                ..
+            } => Event::Proposed {
+                exp,
+                parent,
+                generation,
+                tier,
+                diff,
+                rationale,
+                origin,
+                batch: None,
+            },
+            other => return Err(format!("{name} is {other:?}").into()),
+        };
+        assert_ne!(&without, record.event(), "{name}");
+        assert_eq!(without.key(&run), record.event().key(&run), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
+fn judge_usage_carries_no_tokens() -> TestResult {
+    for usage in [
+        Usage::tokens(1, 0, 0, 0),
+        Usage::tokens(0, 1, 0, 0),
+        Usage::tokens(0, 0, 1, 0),
+        Usage::tokens(0, 0, 0, 1),
+    ] {
+        let error = JobResult::new(
+            &candidate_request()?,
+            Outcome::Scored(scorecard()?),
+            Usage::compute(4_000, 2_048_000),
+            Some(usage),
+            backend(),
+            logs(),
+        );
+        assert!(matches!(error, Err(JobError::TokensInJob)));
+    }
+    let text = phase7_golden("job_result_judge_usage")?;
+    let error = result_rejected(&edit(
+        &text,
+        "\"judge_usage\":{\"input_tokens\":0",
+        "\"judge_usage\":{\"input_tokens\":9",
+    )?)?;
+    assert!(matches!(error, JobError::TokensInJob));
     Ok(())
 }
 
