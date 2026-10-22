@@ -11,13 +11,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::id::{BlobId, ExperimentId, ManifestId, ReportHash, RunId, TreeId};
+use crate::id::{BlobId, ExperimentId, ImageDigest, ManifestId, ReportHash, RunId, TreeId};
 use crate::ledger::{
-    BackendInfo, Decision, DecisionKind, Event, EventKey, Origin, Record, ReviewAnswer, ReviewId,
-    ReviewKind, SpendId, SpendSource, StopReason,
+    BackendInfo, BackendKind, Decision, DecisionKind, Event, EventKey, Origin, Record,
+    ReviewAnswer, ReviewId, ReviewKind, SpendId, SpendSource, StopReason,
 };
-use crate::manifest::{JudgeVersion, Tier};
-use crate::outcome::Outcome;
+use crate::manifest::{Arch, JudgeVersion, Tier};
+use crate::outcome::{Outcome, Stage};
 use crate::usage::Usage;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -147,6 +147,7 @@ pub struct Proposal {
     diff: BlobId,
     rationale: BlobId,
     origin: Origin,
+    batch: Option<BlobId>,
 }
 
 impl Proposal {
@@ -185,6 +186,14 @@ impl Proposal {
     pub const fn origin(&self) -> &Origin {
         &self.origin
     }
+
+    /// The batch blob of the propose step that admitted it, listing every admitted experiment and the drop count
+    /// (07-CONTEXT D-18). A resumed loop reads it to append the batch's missing proposals. `None` on proposals
+    /// recorded without a batch.
+    #[must_use]
+    pub const fn batch(&self) -> Option<&BlobId> {
+        self.batch.as_ref()
+    }
 }
 
 /// How one trial of an experiment under one judge version ended, and where it ran.
@@ -192,6 +201,7 @@ impl Proposal {
 pub struct Judgment {
     outcome: Outcome,
     backend: BackendInfo,
+    logs: Option<BTreeMap<Stage, BlobId>>,
 }
 
 impl Judgment {
@@ -205,6 +215,13 @@ impl Judgment {
     #[must_use]
     pub const fn backend(&self) -> &BackendInfo {
         &self.backend
+    }
+
+    /// The capped raw stage log blobs the runner stored, by stage (07-CONTEXT D-09). Every reader shows them only
+    /// through `LogExcerpt`. `None` on trials recorded without logs.
+    #[must_use]
+    pub const fn logs(&self) -> Option<&BTreeMap<Stage, BlobId>> {
+        self.logs.as_ref()
     }
 }
 
@@ -269,6 +286,7 @@ pub struct RunState {
     base: TreeId,
     baseline: ExperimentId,
     started_at: u64,
+    root_image: Option<ImageDigest>,
     proposals: BTreeMap<ExperimentId, Proposal>,
     judgments: BTreeMap<(ExperimentId, JudgeVersion), BTreeMap<u32, Judgment>>,
     decisions: BTreeMap<u32, Decision>,
@@ -313,7 +331,7 @@ pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunStat
         base,
         baseline,
         started_at,
-        ..
+        root_image,
     } = first
     else {
         return Err(FoldError::FirstNotRunStarted);
@@ -371,6 +389,7 @@ pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunStat
         base: *base,
         baseline: *baseline,
         started_at: *started_at,
+        root_image: *root_image,
         proposals: BTreeMap::new(),
         judgments: BTreeMap::new(),
         decisions: BTreeMap::new(),
@@ -430,7 +449,7 @@ impl RunState {
                 diff,
                 rationale,
                 origin,
-                ..
+                batch,
             } => {
                 self.proposals.insert(
                     *exp,
@@ -441,6 +460,7 @@ impl RunState {
                         diff: *diff,
                         rationale: *rationale,
                         origin: origin.clone(),
+                        batch: *batch,
                     },
                 );
             }
@@ -450,13 +470,14 @@ impl RunState {
                 trial,
                 outcome,
                 backend,
-                ..
+                logs,
             } => {
                 self.judgments.entry((*exp, *judge)).or_default().insert(
                     *trial,
                     Judgment {
                         outcome: outcome.clone(),
                         backend: backend.clone(),
+                        logs: logs.clone(),
                     },
                 );
             }
@@ -622,6 +643,14 @@ impl RunState {
         self.started_at
     }
 
+    /// The lock's root image digest recorded when the run started, or `None` for a run started before Phase 7.
+    /// The loop refuses to start or resume a session unless it equals the root image in `minos.lock`, so a run
+    /// never mixes images (07-CONTEXT D-10).
+    #[must_use]
+    pub const fn root_image(&self) -> Option<&ImageDigest> {
+        self.root_image.as_ref()
+    }
+
     /// The proposal of `exp`, or `None` for the baseline and for an unknown experiment.
     #[must_use]
     pub fn proposal(&self, exp: &ExperimentId) -> Option<&Proposal> {
@@ -648,6 +677,27 @@ impl RunState {
             .get(&(*exp, *judge))
             .into_iter()
             .flat_map(|trials| trials.iter().map(|(trial, judgment)| (*trial, judgment)))
+    }
+
+    /// Whether a `Judged` record for `trial` of `exp` under `judge` exists. The loop's stage function runs a trial
+    /// only while this is false, so a resumed run never launches a recorded trial again (07-CONTEXT D-07).
+    #[must_use]
+    pub fn judged(&self, exp: &ExperimentId, judge: &JudgeVersion, trial: u32) -> bool {
+        self.judgments
+            .get(&(*exp, *judge))
+            .is_some_and(|trials| trials.contains_key(&trial))
+    }
+
+    /// The backend classes, each a backend and an architecture, of every recorded trial, in order. The loop
+    /// refuses to append a `Judged` that would make this set hold two classes, so a run's speed numbers all come
+    /// from one class (07-CONTEXT D-11, JUDGE-04). Empty before the first trial is judged.
+    #[must_use]
+    pub fn backend_classes(&self) -> BTreeSet<(BackendKind, Arch)> {
+        self.judgments
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(|judgment| (judgment.backend.backend(), judgment.backend.arch()))
+            .collect()
     }
 
     /// The decision of `generation`, if it concluded.
@@ -704,14 +754,48 @@ impl RunState {
     }
 
     /// The earliest stop request, by generation and then reason, if any.
+    ///
+    /// A stop stays in the ledger forever, so this returns the first stop ever recorded. A resumed driver uses
+    /// [`RunState::stops`] instead, and honours only stops recorded after its session started (07-CONTEXT D-19).
     #[must_use]
     pub fn stop_requested(&self) -> Option<(u32, StopReason)> {
         self.stops.first().copied()
     }
 
+    /// Every recorded stop request, by generation and then reason. The driver snapshots this set when its session
+    /// starts and exits only on a stop outside it, so a stop from an earlier session does not block a resume
+    /// (07-CONTEXT D-19).
+    pub fn stops(&self) -> impl Iterator<Item = (u32, StopReason)> + '_ {
+        self.stops.iter().copied()
+    }
+
     /// Every metered step, in [`SpendId`] order.
     pub fn spends(&self) -> impl Iterator<Item = (&SpendId, &Spend)> {
         self.spends.iter()
+    }
+
+    /// Whether the spend `id` is recorded. The loop appends a `Spent` only when this is false, so a trial re-run
+    /// after a crash keeps its first measurement instead of conflicting with it (07-RESEARCH Pitfall 1).
+    #[must_use]
+    pub fn has_spend(&self, id: &SpendId) -> bool {
+        self.spends.contains_key(id)
+    }
+
+    /// The index for the next model call of `generation`: one past the highest
+    /// [`SpendSource::ModelCall`] index recorded in `generation`, or 0 when there is none, saturating at
+    /// `u32::MAX`. A resumed propose step calls under this index, so a call whose spend was recorded is never
+    /// keyed again (07-CONTEXT D-07, D-16).
+    #[must_use]
+    pub fn next_model_call(&self, generation: u32) -> u32 {
+        self.spends
+            .values()
+            .filter(|spend| spend.generation == generation)
+            .filter_map(|spend| match spend.source {
+                SpendSource::ModelCall { call, .. } => Some(call),
+                SpendSource::Candidate { .. } | SpendSource::Judge { .. } => None,
+            })
+            .max()
+            .map_or(0, |call| call.saturating_add(1))
     }
 
     /// The sum of every recorded usage.
