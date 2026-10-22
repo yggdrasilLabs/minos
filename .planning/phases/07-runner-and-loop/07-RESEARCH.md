@@ -752,27 +752,29 @@ Judged {
 | A8 | Retry pause 5 s; log blob cap 262,144 bytes (tail) | Patterns 4 and 9 | Tuning only |
 | A9 | `judge push` applies `.gitignore` and `.minosignore` inside the pushed directory, and refuses a push missing a judge argv path | Pattern 11 | A user's ignore file could silently exclude data; mitigated by listing drops and counts in the output |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Approve the new `Untrusted` exits (Finding 1)?**
+All seven were answered at the planning checkpoint on 2026-10-22 and recorded in 07-CONTEXT.md under "Research amendments" (D-17 to D-20 and the resolved-as-discretion list).
+
+1. **Approve the new `Untrusted` exits (Finding 1)?** RESOLVED: approved as recommended (07-CONTEXT D-17).
    - What we know: no current exit can produce the judge's `candidate_out` blob or a raw log blob. CLAUDE.md requires stopping to ask.
    - Recommendation: approve `store_judge_input` (an `out/`-only canonical repack) and `store_tail(max)`, both closure sinks returning only a `BlobId`. Make the first runner plan open with a `checkpoint:human-verify` task on the exact signatures.
-2. **How should LOOP-05 hold across the propose-to-select window (Finding 2)?**
+2. **How should LOOP-05 hold across the propose-to-select window (Finding 2)?** RESOLVED: `Proposed { batch: Option<BlobId> }` plus the batch blob (07-CONTEXT D-18).
    - Recommendation: add `Proposed { batch: Option<BlobId> }` (additive, `"v":"1"`) plus a batch blob. The fallback is sweep recompute plus a documented model-tier exception.
-3. **Lock size for per-file judge digests (Finding 4).**
+3. **Lock size for per-file judge digests (Finding 4).** RESOLVED: raise `MAX_LOCK_BYTES` with a const assertion and reword D-02 (07-CONTEXT resolved-as-discretion list).
    - Recommendation: raise `MAX_LOCK_BYTES` to about 4 MiB with a const assertion, and reword D-02's "reveals nothing" to say the per-file list exposes paths, and that the digests of low-entropy files are guessable. Alternatively keep the per-file list in `.minos/` and only the tree digest in the lock, which reverses part of D-02.
-4. **D-04 and empty or tiny files.**
+4. **D-04 and empty or tiny files.** RESOLVED: zero-length files only are exempt (07-CONTEXT D-20).
    - Recommendation: exempt zero-length files at least. Possibly also files under `LITERAL_MIN_BYTES`.
-5. **Model naming for spend.**
+5. **Model naming for spend.** RESOLVED: `Spent` stays under the resolved model ID; the price check is extended (07-CONTEXT resolved-as-discretion list).
    - Recommendation: keep `Spent` under the resolved ID (06 decision), require `prices.toml` to price it, and fail clearly after the first call if not (Pitfall 7). The alternative is recording under the manifest alias.
-6. **Stop semantics on resume (Finding 3).**
+6. **Stop semantics on resume (Finding 3).** RESOLVED: session-relative stops (07-CONTEXT D-19).
    - Recommendation: session-relative stops (Pattern 8). This refines D-14's "any `StopRequested`".
-7. **Phase 8 interface points to fix now:**
+7. **Phase 8 interface points to fix now:** RESOLVED: the first four bullets are fixed as listed (07-CONTEXT resolved-as-discretion list); the last bullet is DEFERRED to Phase 8.
    - The driver takes an absolute target generation.
    - The generation-0 step returns the noise floor for `check`.
    - `minos run` applies its `--allow-noisy` refusal after generation 0.
    - The observer events carry IDs, the tier, the `Outcome`, and the reduced delta; the CLI supplies elapsed time from its own clock.
-   - Whether the judge needs host-measured timing for speed objectives. Phase 8's sample says "harness measurements". If so, the repack could later add a host-written entry, which is a design question for Phase 8.
+   - DEFERRED to Phase 8: whether the judge needs host-measured timing for speed objectives. Phase 8's sample says "harness measurements". If so, the repack could later add a host-written entry, which is a design question for Phase 8.
 
 ## Environment Availability
 
