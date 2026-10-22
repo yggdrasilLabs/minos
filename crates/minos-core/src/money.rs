@@ -9,13 +9,14 @@
 //! in one scaled integer with a single deferred division, and [`ApproxCost`] is the only type that formats a
 //! dollar figure.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
 use crate::id::ModelId;
+use crate::manifest::Manifest;
 use crate::usage::Usage;
 
 /// Pico-dollars in one US dollar.
@@ -360,6 +361,25 @@ impl Prices {
     /// Every priced model with its rates, in model order.
     pub fn models(&self) -> impl Iterator<Item = (&ModelId, &TokenRates)> {
         self.models.iter()
+    }
+
+    /// Every model a `[[proposer]]` of `manifest` names that this table does not price, sorted and without
+    /// duplicates (07-CONTEXT D-13).
+    ///
+    /// The CLI turns a non-empty set into a refusal naming `prices.toml` and each model, before any VM launch or
+    /// model call, so a run is never priced at zero for a missing rate. Compute rates need no check here:
+    /// [`Prices::parse_toml`] already requires the whole `[compute]` table. The manifest names model aliases,
+    /// while `Spent` records the resolved model ID a call reports, so the loop checks again after each call
+    /// (07-RESEARCH Pitfall 7).
+    #[must_use]
+    pub fn missing_models(&self, manifest: &Manifest) -> BTreeSet<ModelId> {
+        manifest
+            .proposers()
+            .iter()
+            .filter_map(|proposer| proposer.model())
+            .filter(|model| self.model(model).is_none())
+            .cloned()
+            .collect()
     }
 }
 

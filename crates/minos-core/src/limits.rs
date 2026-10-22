@@ -152,6 +152,10 @@ pub const MAX_METRICS: usize = 64;
 pub const MAX_SCORECARD_BYTES: usize = 4096;
 /// Largest log excerpt kept from sandbox output, in bytes, after truncation and control stripping.
 pub const MAX_LOG_EXCERPT_BYTES: usize = 4096;
+/// Largest tail of one stage log the runner stores as a blob, in bytes (256 KiB). It is the guest's own log
+/// cap, enforced again on the host, because the guest is hostile once candidate code has run; the loop reads the
+/// blob back under the same cap (07-CONTEXT D-09).
+pub const MAX_STAGE_LOG_BYTES: usize = 262_144;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Trials
@@ -159,6 +163,25 @@ pub const MAX_LOG_EXCERPT_BYTES: usize = 4096;
 
 /// Most judge trials of one experiment. Noisy metrics are measured repeatedly, but each trial costs a VM run.
 pub const MAX_TRIALS: u32 = 32;
+/// Smallest `[judge] trials`: the baseline trials of generation 0. A single-trial setup is allowed; the noise
+/// check then warns that no spread could be measured (07-CONTEXT D-05, 07-RESEARCH A7).
+pub const TRIALS_MIN: u32 = 1;
+/// `[judge] trials` when the manifest names none: enough baseline trials for a noise floor with one to spare
+/// (07-CONTEXT D-05, 07-RESEARCH A7).
+pub const TRIALS_DEFAULT: u32 = 3;
+
+const _: () = assert!(
+    TRIALS_MIN <= TRIALS_DEFAULT && TRIALS_DEFAULT <= MAX_TRIALS,
+    "the trials bounds are ordered and hold the default"
+);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Judge data (07-CONTEXT D-02, D-03)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Most files in one pushed judge data tree: the source snapshot's own file cap. It bounds the per-file list
+/// `minos.lock` records for each judge label (07-CONTEXT D-02, D-03).
+pub const MAX_JUDGE_FILES: u64 = 10_000;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Noise and report (03-CONTEXT D-12, D-16)

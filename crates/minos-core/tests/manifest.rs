@@ -10,8 +10,8 @@ use minos_core::id::{MetricName, ModelId, TreeId};
 use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::limits::{
     DEFAULT_JUDGE_MS, DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB, EMPTY_GENERATIONS_DEFAULT,
-    GUEST_RESERVE_MIB, INFRA_FAILURES_DEFAULT, MAX_MEMORY_MIB, MAX_SCRATCH_MIB,
-    MAX_TRIALS, MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, STALL_STEP_DEFAULT,
+    GUEST_RESERVE_MIB, INFRA_FAILURES_DEFAULT, MAX_MEMORY_MIB, MAX_SCRATCH_MIB, MAX_TRIALS,
+    MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, STALL_STEP_DEFAULT,
     TOKEN_CAP_DEFAULT, TRIALS_DEFAULT, TRIALS_MIN, candidate_allowance_mib,
 };
 use minos_core::manifest::{
@@ -1233,10 +1233,15 @@ fn rejects_a_judge_label_of_zero() -> TestResult {
 
 /// The example with `trials = {value}` added to `[judge]`.
 fn with_trials(value: u32) -> Result<String, Box<dyn Error>> {
-    example("version = 1
-", &format!("version = 1
+    example(
+        "version = 1
+",
+        &format!(
+            "version = 1
 trials = {value}
-"))
+"
+        ),
+    )
 }
 
 #[test]

@@ -7,6 +7,8 @@
 //! 1. Leaf validation, with dotted field paths: commands are argv arrays, budgets lie within `limits`, counts are
 //!    capped, and absent optional fields take their defaults (`stall_step`, `max_empty_generations`, and
 //!    `max_infra_failures` have minimums of 1, so the circuit breaker cannot be disabled; 03-CONTEXT D-13, D-14).
+//!    `[judge] trials`, the baseline trials of generation 0, defaults to 3 and lies within 1 to 32 (07-CONTEXT
+//!    D-05).
 //!    `[environment] memory_mib` and `scratch_mib` lie within the machine bounds in [`crate::limits`], and the
 //!    VM's memory holds the guest reserve, the scratch cap, and the least candidate allowance (05-CONTEXT D-05,
 //!    D-06; [`ManifestError::MemoryBudget`]).
@@ -61,9 +63,10 @@ use crate::limits::{
     MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_CHOICE_BYTES, MAX_CHOICES, MAX_EXCLUDES, MAX_GATES,
     MAX_JUDGE_LABEL, MAX_MEMORY_MIB, MAX_MIN_IMPROVEMENT_PERCENT, MAX_NAME_BYTES, MAX_OBJECTIVES,
     MAX_PARAM_POINTS, MAX_PARAMS, MAX_PROPOSERS, MAX_READABLE, MAX_SCRATCH_MIB, MAX_SPEND_USD,
-    MAX_STAGE_MS, MAX_WRITABLE, MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB,
-    MIN_STAGE_MS, STALL_STEP_DEFAULT, STALL_STEP_MAX, STALL_STEP_MIN, TOKEN_CAP_DEFAULT,
-    TOKEN_CAP_MAX, TOKEN_CAP_MIN, WIDTH_MAX, WIDTH_MIN, candidate_allowance_mib,
+    MAX_STAGE_MS, MAX_TRIALS, MAX_WRITABLE, MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB,
+    MIN_SCRATCH_MIB, MIN_STAGE_MS, STALL_STEP_DEFAULT, STALL_STEP_MAX, STALL_STEP_MIN,
+    TOKEN_CAP_DEFAULT, TOKEN_CAP_MAX, TOKEN_CAP_MIN, TRIALS_DEFAULT, TRIALS_MIN, WIDTH_MAX,
+    WIDTH_MIN, candidate_allowance_mib,
 };
 use crate::path::RelPath;
 
@@ -1004,6 +1007,7 @@ pub struct RawBudget {
 #[serde(deny_unknown_fields)]
 pub struct RawJudge {
     version: u32,
+    trials: Option<u32>,
     command: Vec<String>,
     gate: Option<Vec<RawGate>>,
     objective: Vec<RawObjective>,
@@ -1191,10 +1195,12 @@ impl Objective {
     }
 }
 
-/// The judge: its local label, its argv, the project paths that argv names, its gates, and its objectives.
+/// The judge: its local label, its baseline trials, its argv, the project paths that argv names, its gates, and its
+/// objectives.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JudgeSpec {
     label: u32,
+    trials: u32,
     command: CommandArgv,
     paths: BTreeSet<RelPath>,
     gates: BTreeSet<MetricName>,
@@ -1206,6 +1212,13 @@ impl JudgeSpec {
     #[must_use]
     pub const fn label(&self) -> u32 {
         self.label
+    }
+
+    /// The `[judge] trials` value: how many times generation 0 judges the baseline (07-CONTEXT D-05). Not part of
+    /// [`JudgeVersion`].
+    #[must_use]
+    pub const fn trials(&self) -> u32 {
+        self.trials
     }
 
     /// The judge's argv.
@@ -1838,6 +1851,12 @@ impl TryFrom<RawManifest> for Manifest {
         if !(1..=MAX_JUDGE_LABEL).contains(&judge.version) {
             return Err(InvalidField::new("judge.version", "1 to 1000000").into());
         }
+        let trials = bounded(
+            "judge.trials",
+            judge.trials,
+            (TRIALS_MIN, MAX_TRIALS, TRIALS_DEFAULT),
+            "1 to 32",
+        )?;
         let command = argv_at("judge.command", judge.command)?;
         let gates = judge.gate.unwrap_or_default();
         count("judge.gate", gates.len(), 0, MAX_GATES, "at most 16 gates")?;
@@ -2049,6 +2068,7 @@ impl TryFrom<RawManifest> for Manifest {
         objectives.sort_by(|left, right| left.metric.cmp(&right.metric));
         let judge = JudgeSpec {
             label: judge.version,
+            trials,
             command,
             paths,
             gates: gates.into_iter().map(|gate| gate.metric).collect(),
@@ -2088,8 +2108,8 @@ crate::id::digest_id! {
     /// `minos/judge/v1` (CORE-01; 03-CONTEXT D-10 amendment, user decision 2026-10-14).
     ///
     /// The spec is the command argv, the gates in sorted order, and the objectives in metric order with each
-    /// goal and held-out pairing. The `[judge] version` label and `min_improvement` are excluded: they do not
-    /// change what the judge measures. `Judged` events are keyed by it, so re-scoring under another judge
+    /// goal and held-out pairing. The `[judge] version` label, `[judge] trials`, and `min_improvement` are
+    /// excluded: they do not change what the judge measures. `Judged` events are keyed by it, so re-scoring under another judge
     /// appends records and never rewrites history.
     JudgeVersion
 }
