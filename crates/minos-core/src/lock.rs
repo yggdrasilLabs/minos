@@ -19,21 +19,53 @@
 //! types deserialize through the same checks as [`Lock::parse_toml`]: a duplicate (backend, arch) pair and a
 //! `base_images` list that is not strictly ascending are refused, so each lock has exactly one wire form. The
 //! golden file `tests/snapshots/lock__minos_lock_v1.snap` and its SHA-256 pin guard it.
+//!
+//! **Judge data** (07-CONTEXT D-01 to D-04). `minos judge push` records each pushed judge data tree as one
+//! `[[judge]]` table, keyed by the manifest's `[judge] version` label: the label, the data tree's digest (the
+//! [`TreeId`] that [`crate::manifest::JudgeVersion::of`] hashes), the file count, the total bytes, the version of
+//! `minos` that pushed it, and one `[[judge.file]]` table per file with its path and SHA-256, strictly ascending by
+//! path. A run refuses to start when its label has no entry ([`Lock::check_judge`]), and the source pack refuses
+//! a file whose digest equals any judge file's ([`Lock::judge_file_digests`], D-04). The lock holds paths and
+//! digests only, never judge data, which stays in `.minos/blobs`; a fresh clone must push the data again. It is
+//! not secret-free, though: committing the lock exposes every judge file's path, and the digest of a low-entropy
+//! file (a short expected answer, a small integer) can be guessed by hashing candidates. A lock with no `judge`
+//! key parses as having no judge data and writes no `judge` key, so a lock written before Phase 7 keeps its bytes.
+//! [`MAX_LOCK_BYTES`] fits one label at [`MAX_JUDGE_FILES`] files, a const assertion checks it, and every label's
+//! file list shares that cap. The golden file `tests/snapshots/lock__minos_lock_v1_judge.snap` and its own pin
+//! guard the judge table.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{BlobId, ImageDigest};
+use crate::id::{BlobId, ImageDigest, TreeId};
 use crate::image::ImageRef;
 use crate::ledger::BackendKind;
+use crate::limits::MAX_JUDGE_FILES;
 use crate::manifest::Arch;
+use crate::path::RelPath;
 
 /// The lock wire version this code reads and writes.
 pub const LOCK_VERSION: u32 = 1;
 
-/// Most bytes in a `minos.lock`: longer text is refused before it is parsed.
-pub const MAX_LOCK_BYTES: usize = 65_536;
+/// Most bytes in a `minos.lock` (4 MiB): longer text is refused before it is parsed. One judge label at
+/// [`MAX_JUDGE_FILES`] per-file entries of at most [`JUDGE_FILE_ENTRY_MAX_BYTES`] fits, with room left for the
+/// images (07-RESEARCH Finding 4, Pitfall 5).
+pub const MAX_LOCK_BYTES: usize = 4_194_304;
+
+/// Longest path in a `[[judge.file]]` table, in bytes: the ustar header limit the packer that produced the judge
+/// tarball enforces, so no pushed file has a longer path.
+pub const JUDGE_FILE_PATH_MAX_BYTES: usize = 255;
+
+/// Most bytes one `[[judge.file]]` table takes in the TOML text: a blank line, the table header, a
+/// [`JUDGE_FILE_PATH_MAX_BYTES`] path (a [`RelPath`] is ASCII with nothing TOML escapes), and the 64-hex digest
+/// with their keys and quotes, 357 bytes, rounded up.
+pub const JUDGE_FILE_ENTRY_MAX_BYTES: usize = 400;
+
+const _: () = assert!(
+    MAX_JUDGE_FILES * (JUDGE_FILE_ENTRY_MAX_BYTES as u64) <= MAX_LOCK_BYTES as u64,
+    "one judge label at MAX_JUDGE_FILES entries fits in MAX_LOCK_BYTES"
+);
 
 /// Most bytes in a builder name or version.
 pub const MAX_BUILDER_TEXT_BYTES: usize = 128;
@@ -83,6 +115,33 @@ pub enum LockError {
         "a minos.lock builder name or version is 1 to {MAX_BUILDER_TEXT_BYTES} bytes of ASCII ! to ~ (no spaces or control characters)"
     )]
     BuilderText,
+    /// Two `[[judge]]` tables name the same label.
+    #[error("minos.lock has two judge entries for label {label}")]
+    DuplicateJudge {
+        /// The repeated label.
+        label: u32,
+    },
+    /// A judge entry's file list is repeated or not in ascending path order.
+    #[error("minos.lock judge label {label} must list each file once, in ascending path order")]
+    JudgeFilesNotCanonical {
+        /// The entry's label.
+        label: u32,
+    },
+    /// A judge entry's `files` count differs from its file list's length, or the list is over
+    /// [`MAX_JUDGE_FILES`].
+    #[error(
+        "minos.lock judge label {label} must have a files count equal to its file list, at most {MAX_JUDGE_FILES}"
+    )]
+    JudgeFileCount {
+        /// The entry's label.
+        label: u32,
+    },
+    /// A judge entry lists a path over [`JUDGE_FILE_PATH_MAX_BYTES`], which no pushed tarball can hold.
+    #[error("minos.lock judge label {label} lists a path over {JUDGE_FILE_PATH_MAX_BYTES} bytes")]
+    JudgeFilePath {
+        /// The entry's label.
+        label: u32,
+    },
     /// The lock could not be written as TOML.
     #[error("minos.lock could not be serialized")]
     Serialize(#[source] toml::ser::Error),
@@ -123,6 +182,12 @@ pub enum LockMismatch {
         locked: BlobId,
         /// The SHA-256 of the binary on disk.
         found: BlobId,
+    },
+    /// The lock has no judge data for the manifest's `[judge] version` label (07-CONTEXT D-02).
+    #[error("minos.lock has no judge data for label {label}: run `minos judge push`")]
+    NoJudge {
+        /// The label asked for.
+        label: u32,
     },
 }
 
@@ -361,22 +426,231 @@ impl From<LockedImage> for RawLockedImage {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// LockedJudge
+// ---------------------------------------------------------------------------------------------------------------
+
+/// One file of a pushed judge data tree: its path in the tree and the SHA-256 of its bytes, the same digest
+/// [`BlobId::of`] computes. Ordered by path first.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(from = "RawJudgeFile", into = "RawJudgeFile")]
+pub struct JudgeFile {
+    path: RelPath,
+    sha256: BlobId,
+}
+
+impl JudgeFile {
+    /// One file entry.
+    #[must_use]
+    pub const fn new(path: RelPath, sha256: BlobId) -> Self {
+        Self { path, sha256 }
+    }
+
+    /// The file's path in the judge data tree.
+    #[must_use]
+    pub const fn path(&self) -> &RelPath {
+        &self.path
+    }
+
+    /// The SHA-256 of the file's bytes.
+    #[must_use]
+    pub const fn sha256(&self) -> &BlobId {
+        &self.sha256
+    }
+}
+
+/// [`JudgeFile`] as written: one `[[judge.file]]` table. Both fields are validated by their own types.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawJudgeFile {
+    path: RelPath,
+    sha256: BlobId,
+}
+
+impl From<RawJudgeFile> for JudgeFile {
+    fn from(raw: RawJudgeFile) -> Self {
+        Self::new(raw.path, raw.sha256)
+    }
+}
+
+impl From<JudgeFile> for RawJudgeFile {
+    fn from(file: JudgeFile) -> Self {
+        Self {
+            path: file.path,
+            sha256: file.sha256,
+        }
+    }
+}
+
+/// What one `minos judge push` recorded for one `[judge] version` label (07-CONTEXT D-02, D-04).
+///
+/// `tree` is the digest of the deterministic judge data tarball, equal to its blob ID in `.minos/blobs`. The file
+/// list is strictly ascending by path, holds at most [`MAX_JUDGE_FILES`] entries, and its length is the recorded
+/// file count, so each entry has one wire form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawLockedJudge", into = "RawLockedJudge")]
+pub struct LockedJudge {
+    label: u32,
+    tree: TreeId,
+    files: u64,
+    bytes: u64,
+    minos: BuilderText,
+    file: Vec<JudgeFile>,
+}
+
+/// The file count of `file` for `label`, refused over [`MAX_JUDGE_FILES`] or with a path over
+/// [`JUDGE_FILE_PATH_MAX_BYTES`].
+fn judge_file_count(label: u32, file: &[JudgeFile]) -> Result<u64, LockError> {
+    let count = u64::try_from(file.len())
+        .ok()
+        .filter(|count| *count <= MAX_JUDGE_FILES)
+        .ok_or(LockError::JudgeFileCount { label })?;
+    if file
+        .iter()
+        .any(|entry| entry.path.as_str().len() > JUDGE_FILE_PATH_MAX_BYTES)
+    {
+        return Err(LockError::JudgeFilePath { label });
+    }
+    Ok(count)
+}
+
+impl LockedJudge {
+    /// One judge entry. The file count is the map's length, and the map's order is the canonical path order.
+    ///
+    /// # Errors
+    ///
+    /// [`LockError::JudgeFileCount`] when `files` holds more than [`MAX_JUDGE_FILES`] entries, and
+    /// [`LockError::JudgeFilePath`] when a path is over [`JUDGE_FILE_PATH_MAX_BYTES`].
+    pub fn new(
+        label: u32,
+        tree: TreeId,
+        bytes: u64,
+        minos: BuilderText,
+        files: BTreeMap<RelPath, BlobId>,
+    ) -> Result<Self, LockError> {
+        let file: Vec<JudgeFile> = files
+            .into_iter()
+            .map(|(path, sha256)| JudgeFile::new(path, sha256))
+            .collect();
+        let files = judge_file_count(label, &file)?;
+        Ok(Self {
+            label,
+            tree,
+            files,
+            bytes,
+            minos,
+            file,
+        })
+    }
+
+    /// The `[judge] version` label the data was pushed under.
+    #[must_use]
+    pub const fn label(&self) -> u32 {
+        self.label
+    }
+
+    /// The digest of the judge data tarball, the data half of [`crate::manifest::JudgeVersion`].
+    #[must_use]
+    pub const fn tree(&self) -> &TreeId {
+        &self.tree
+    }
+
+    /// How many files the tree holds.
+    #[must_use]
+    pub const fn file_count(&self) -> u64 {
+        self.files
+    }
+
+    /// The total size of the tree's files, in bytes.
+    #[must_use]
+    pub const fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// The version of `minos` that pushed the data.
+    #[must_use]
+    pub const fn minos(&self) -> &BuilderText {
+        &self.minos
+    }
+
+    /// Every file with its SHA-256, ascending by path.
+    #[must_use]
+    pub fn files(&self) -> &[JudgeFile] {
+        &self.file
+    }
+}
+
+/// [`LockedJudge`] as written: one `[[judge]]` table with its `[[judge.file]]` tables.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawLockedJudge {
+    label: u32,
+    tree: TreeId,
+    files: u64,
+    bytes: u64,
+    minos: String,
+    file: Vec<RawJudgeFile>,
+}
+
+impl TryFrom<RawLockedJudge> for LockedJudge {
+    type Error = LockError;
+
+    fn try_from(raw: RawLockedJudge) -> Result<Self, Self::Error> {
+        let label = raw.label;
+        let file: Vec<JudgeFile> = raw.file.into_iter().map(JudgeFile::from).collect();
+        let canonical = file
+            .windows(2)
+            .all(|pair| matches!(pair, [earlier, later] if earlier.path < later.path));
+        if !canonical {
+            return Err(LockError::JudgeFilesNotCanonical { label });
+        }
+        let files = judge_file_count(label, &file)?;
+        if files != raw.files {
+            return Err(LockError::JudgeFileCount { label });
+        }
+        Ok(Self {
+            label,
+            tree: raw.tree,
+            files,
+            bytes: raw.bytes,
+            minos: BuilderText::try_from(raw.minos)?,
+            file,
+        })
+    }
+}
+
+impl From<LockedJudge> for RawLockedJudge {
+    fn from(judge: LockedJudge) -> Self {
+        Self {
+            label: judge.label,
+            tree: judge.tree,
+            files: judge.files,
+            bytes: judge.bytes,
+            minos: judge.minos.into(),
+            file: judge.file.into_iter().map(RawJudgeFile::from).collect(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Lock
 // ---------------------------------------------------------------------------------------------------------------
 
-/// The parsed `minos.lock`: at most one [`LockedImage`] per (backend, arch) pair, written in that order.
+/// The parsed `minos.lock`: at most one [`LockedImage`] per (backend, arch) pair and at most one [`LockedJudge`]
+/// per label, each written in key order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawLock", into = "RawLock")]
 pub struct Lock {
     images: BTreeMap<(BackendKind, Arch), LockedImage>,
+    judges: BTreeMap<u32, LockedJudge>,
 }
 
 impl Lock {
-    /// A lock with no images, before the first `env build`.
+    /// A lock with no images and no judge data, before the first `env build` or `judge push`.
     #[must_use]
     pub const fn empty() -> Self {
         Self {
             images: BTreeMap::new(),
+            judges: BTreeMap::new(),
         }
     }
 
@@ -386,8 +660,9 @@ impl Lock {
     ///
     /// [`LockError::TooLarge`] for text over [`MAX_LOCK_BYTES`]; [`LockError::Toml`] for a syntax error, a missing
     /// or unknown key, or a malformed value; and [`LockError::Version`], [`LockError::DuplicateImage`],
-    /// [`LockError::BaseImagesNotCanonical`], or [`LockError::BuilderText`] for a rule in the
-    /// [module docs](self).
+    /// [`LockError::BaseImagesNotCanonical`], [`LockError::BuilderText`], [`LockError::DuplicateJudge`],
+    /// [`LockError::JudgeFilesNotCanonical`], [`LockError::JudgeFileCount`], or [`LockError::JudgeFilePath`] for a
+    /// rule in the [module docs](self).
     pub fn parse_toml(text: &str) -> Result<Self, LockError> {
         if text.len() > MAX_LOCK_BYTES {
             return Err(LockError::TooLarge);
@@ -450,15 +725,51 @@ impl Lock {
         }
         Ok(image)
     }
+
+    /// The judge data pushed under `label`, if the lock has an entry for it.
+    #[must_use]
+    pub fn judge(&self, label: u32) -> Option<&LockedJudge> {
+        self.judges.get(&label)
+    }
+
+    /// The lock with `judge` as the entry for its label, replacing any earlier entry for that label and leaving
+    /// the others (`judge push --update`, 07-CONTEXT D-01).
+    #[must_use]
+    pub fn with_judge(mut self, judge: LockedJudge) -> Self {
+        self.judges.insert(judge.label, judge);
+        self
+    }
+
+    /// The judge data for the manifest's `label`, which a run requires before it starts (07-CONTEXT D-02).
+    ///
+    /// # Errors
+    ///
+    /// [`LockMismatch::NoJudge`] when the lock has no entry for `label`.
+    pub fn check_judge(&self, label: u32) -> Result<&LockedJudge, LockMismatch> {
+        self.judge(label).ok_or(LockMismatch::NoJudge { label })
+    }
+
+    /// The SHA-256 of every file of every pushed judge data tree, the set the source pack refuses to share a
+    /// digest with (07-CONTEXT D-04).
+    #[must_use]
+    pub fn judge_file_digests(&self) -> BTreeSet<BlobId> {
+        self.judges
+            .values()
+            .flat_map(|judge| judge.file.iter().map(|file| file.sha256))
+            .collect()
+    }
 }
 
-/// [`Lock`] as written: `v = 1`, then one `[[image]]` table per entry. An empty lock writes no `image` key.
+/// [`Lock`] as written: `v = 1`, then one `[[image]]` table per image and one `[[judge]]` table per label. A
+/// lock with no images writes no `image` key, and one with no judge data writes no `judge` key.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawLock {
     v: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     image: Vec<RawLockedImage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    judge: Vec<RawLockedJudge>,
 }
 
 impl TryFrom<RawLock> for Lock {
@@ -479,7 +790,15 @@ impl TryFrom<RawLock> for Lock {
                 });
             }
         }
-        Ok(Self { images })
+        let mut judges = BTreeMap::new();
+        for raw_judge in raw.judge {
+            let judge = LockedJudge::try_from(raw_judge)?;
+            let label = judge.label;
+            if judges.insert(label, judge).is_some() {
+                return Err(LockError::DuplicateJudge { label });
+            }
+        }
+        Ok(Self { images, judges })
     }
 }
 
@@ -491,6 +810,11 @@ impl From<Lock> for RawLock {
                 .images
                 .into_values()
                 .map(RawLockedImage::from)
+                .collect(),
+            judge: lock
+                .judges
+                .into_values()
+                .map(RawLockedJudge::from)
                 .collect(),
         }
     }
