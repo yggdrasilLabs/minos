@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-10-22T23:49:35.864Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-10-22T23:58:54.656Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 71
+  completed_plans: 72
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 2 of 17
+Plan: 3 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -131,6 +131,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 06 P09 | 10min | 2 tasks | 2 files |
 | Phase 06 P10 | 10min | 2 tasks | 3 files |
 | Phase 07 P01 | 9min | 3 tasks | 16 files |
+| Phase 07 P02 | 10min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -306,6 +307,8 @@ Recent decisions affecting current work:
 - [Phase 06]: Phase 6 closed: final gate green on HEAD a114940 (1357 passed, 0 failed, 23 ignored; live target 3 ignored, no model call); PROP-01 to PROP-10 complete with 06-09's live run; VM suites not rerun because Phase 6 touched only minos-core and minos-propose
 - [Phase 07]: 07-01: baseline_ready mirrors conclude's incumbent check (ScoredOnly reduction plus the objective metric), so it is false exactly when conclude for generation 1 returns IncumbentUnscored
 - [Phase 07]: 07-01: phase-7 golden cases live in a second list with their own SHA-256 pin (2da862bd...); the 25-case pin dedebd15... never moves
+- [Phase 07]: 07-02: a [[judge.file]] path over 255 bytes is refused (LockError::JudgeFilePath), so MAX_LOCK_BYTES (4 MiB) provably fits one label at MAX_JUDGE_FILES entries; all labels share the cap
+- [Phase 07]: 07-02: [judge] trials defaults to 3 (1 to 32) and is excluded from JudgeVersion
 
 ### Pending Todos
 
@@ -336,6 +339,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-22T23:49:35.859Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-10-22T23:58:50.526Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None

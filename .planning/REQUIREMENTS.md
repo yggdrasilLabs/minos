@@ -105,16 +105,16 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **LOOP-01**: `minos-runner` runs the candidate VM then the judge VM for a `JobRequest`, converts `Untrusted` output to an `Outcome` via the validating exits, and is the only crate where that conversion happens
 - [ ] **LOOP-02**: The judge VM mounts judge data read-only; the candidate VM never does; judge and candidate never share a process or a disk
 - [ ] **LOOP-03**: Time and resource usage are measured by the host, never read from candidate output
-- [ ] **LOOP-04**: `minos-loop` drives generations as: route tier, propose, validate diffs, run jobs, fold `Judged`, `select_greedy`, append `Selected`; it depends only on core, store, and propose
+- [x] **LOOP-04**: `minos-loop` drives generations as: route tier, propose, validate diffs, run jobs, fold `Judged`, `select_greedy`, append `Selected`; it depends only on core, store, and propose
 - [ ] **LOOP-05**: The loop records before acting and keys every effect by content ID, so `minos run` on an interrupted run resumes from the ledger and produces the same result as an uninterrupted run (tested with fakes)
 - [ ] **LOOP-06**: A run holds an exclusive lock so two drivers cannot act on the same run
-- [ ] **LOOP-07**: Spend cap and model-call or token cap are checked before each generation and each model call; exceeding either stops the run with a recorded reason
+- [x] **LOOP-07**: Spend cap and model-call or token cap are checked before each generation and each model call; exceeding either stops the run with a recorded reason
 - [ ] **LOOP-08**: The circuit breaker stops the run after K generations with no valid candidate or K consecutive infrastructure failures and records `StopRequested` with the reason
 - [ ] **LOOP-09**: The loop is fully testable against the in-memory store, a fake provider, and a fake job runner with no VM
 
 ### Judge (JUDGE)
 
-- [ ] **JUDGE-01**: `minos judge push <dir>` uploads judge data into the local blob store as a new judge version and records its hash; judge data is never in the source tarball or the image build context
+- [x] **JUDGE-01**: `minos judge push <dir>` uploads judge data into the local blob store as a new judge version and records its hash; judge data is never in the source tarball or the image build context
 - [ ] **JUDGE-02**: `minos check` judges the baseline several times with the trial index on `Judged` and reports a noise floor the user can compare against `min_improvement`
 - [ ] **JUDGE-03**: Gates run before objectives and short-circuit: a failed gate yields `Rejected` without scoring objectives
 - [ ] **JUDGE-04**: Every `Judged` event records backend and architecture, and a run with a speed objective is pinned to one backend class
@@ -263,13 +263,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOOP-01 | Phase 7 | Pending |
 | LOOP-02 | Phase 7 | Pending |
 | LOOP-03 | Phase 7 | Pending |
-| LOOP-04 | Phase 7 | Pending |
+| LOOP-04 | Phase 7 | Complete |
 | LOOP-05 | Phase 7 | Pending |
 | LOOP-06 | Phase 7 | Pending |
-| LOOP-07 | Phase 7 | Pending |
+| LOOP-07 | Phase 7 | Complete |
 | LOOP-08 | Phase 7 | Pending |
 | LOOP-09 | Phase 7 | Pending |
-| JUDGE-01 | Phase 7 | Pending |
+| JUDGE-01 | Phase 7 | Complete |
 | JUDGE-02 | Phase 8 | Pending |
 | JUDGE-03 | Phase 7 | Pending |
 | JUDGE-04 | Phase 7 | Pending |
