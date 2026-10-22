@@ -19,8 +19,8 @@ use minos_core::manifest::{Arch, JudgeVersion, Manifest, Objective, Tier};
 use minos_core::metric::{Metric, Scorecard};
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::policy::{
-    NoiseVerdict, PolicyError, Selection, TrialRule, check_scorecard, conclude, improves,
-    lower_median, noise_check, noise_floor, reduce_trials, select_greedy,
+    NoiseVerdict, PolicyError, Selection, TrialRule, baseline_ready, check_scorecard, conclude,
+    improves, lower_median, noise_check, noise_floor, reduce_trials, select_greedy,
 };
 use minos_core::state::{RunState, fold};
 use proptest::prelude::*;
@@ -970,6 +970,147 @@ proptest! {
         prop_assert_eq!(expected, actual);
         let count = u32::try_from(original.len()).map_err(fail)?;
         prop_assert_eq!(expected.proposed(), count);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// baseline_ready
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Whether the baseline of `records` is ready under the `maximize`, 5% manifest and the fixture judge.
+fn ready(records: &[Record]) -> Result<bool, Box<dyn Error>> {
+    Ok(baseline_ready(
+        &state(records)?,
+        &manifest("maximize", "5%")?,
+        &judge()?,
+    ))
+}
+
+#[test]
+fn baseline_ready_is_false_with_no_baseline_trial() -> TestResult {
+    assert!(!ready(&[run_started()])?);
+    // A candidate's scored trial does not make the baseline ready.
+    let e1 = exp(1)?;
+    let records = vec![
+        run_started(),
+        proposed(e1, baseline(), 1)?,
+        judged(e1, 0, scored(120.0)?)?,
+    ];
+    assert!(!ready(&records)?);
+    Ok(())
+}
+
+#[test]
+fn baseline_ready_is_false_when_every_trial_is_rejected_or_crashed() -> TestResult {
+    let records = vec![
+        run_started(),
+        judged(baseline(), 0, Outcome::Rejected(Reason::BuildFailed))?,
+        judged(
+            baseline(),
+            1,
+            Outcome::Crashed {
+                stage: Stage::Judge,
+            },
+        )?,
+        judged(baseline(), 2, Outcome::TimedOut { stage: Stage::Run })?,
+    ];
+    assert!(!ready(&records)?);
+    Ok(())
+}
+
+#[test]
+fn baseline_ready_is_false_when_no_scorecard_passes_the_judge() -> TestResult {
+    let records = vec![
+        run_started(),
+        judged(
+            baseline(),
+            0,
+            Outcome::Scored(card(&[(GATE, 0.0, false), (OBJECTIVE, 100.0, false)])?),
+        )?,
+        judged(baseline(), 1, Outcome::Scored(card(&[(GATE, 1.0, false)])?))?,
+    ];
+    assert!(!ready(&records)?);
+    Ok(())
+}
+
+#[test]
+fn baseline_ready_is_true_with_one_scored_trial_among_failures() -> TestResult {
+    let records = vec![
+        run_started(),
+        judged(baseline(), 0, Outcome::Crashed { stage: Stage::Run })?,
+        judged(baseline(), 1, scored(100.0)?)?,
+        judged(baseline(), 2, Outcome::Rejected(Reason::BuildFailed))?,
+    ];
+    assert!(ready(&records)?);
+    assert!(ready(&calibrated()?)?);
+    Ok(())
+}
+
+#[test]
+fn baseline_ready_reads_only_the_named_judge() -> TestResult {
+    let records = vec![
+        run_started(),
+        judged_by(other_judge()?, baseline(), 0, scored(100.0)?),
+        judged_by(other_judge()?, baseline(), 1, scored(101.0)?),
+        judged(baseline(), 0, Outcome::Crashed { stage: Stage::Run })?,
+    ];
+    assert!(!ready(&records)?);
+    let state = state(&records)?;
+    let manifest = manifest("maximize", "5%")?;
+    assert!(baseline_ready(&state, &manifest, &other_judge()?));
+    Ok(())
+}
+
+/// One generated baseline trial: an outcome choice and whether the fixture judge (rather than another) scored it.
+fn arb_baseline_trial() -> impl Strategy<Value = (u8, bool)> {
+    (0_u8..6, any::<bool>())
+}
+
+/// The outcome a generated baseline trial choice names: a passing score, a failed gate, a missing objective, a
+/// rejection, a crash, or a timeout.
+fn baseline_outcome(choice: u8) -> Result<Outcome, Box<dyn Error>> {
+    Ok(match choice {
+        0 => scored(100.0)?,
+        1 => Outcome::Scored(card(&[(GATE, 0.0, false), (OBJECTIVE, 100.0, false)])?),
+        2 => Outcome::Scored(card(&[(GATE, 1.0, false)])?),
+        3 => Outcome::Rejected(Reason::BuildFailed),
+        4 => Outcome::Crashed { stage: Stage::Run },
+        _ => Outcome::TimedOut {
+            stage: Stage::Judge,
+        },
+    })
+}
+
+proptest! {
+    #[test]
+    fn baseline_ready_agrees_with_conclude(
+        trials in proptest::collection::vec(arb_baseline_trial(), 0..5),
+        candidate in proptest::option::of(80_i32..130),
+    ) {
+        let judge = judge().map_err(fail)?;
+        let other = other_judge().map_err(fail)?;
+        let mut records = vec![run_started()];
+        for (trial, (choice, named)) in (0_u32..).zip(&trials) {
+            let version = if *named { judge } else { other };
+            records.push(judged_by(version, baseline(), trial, baseline_outcome(*choice).map_err(fail)?));
+        }
+        if let Some(value) = candidate {
+            let e1 = exp(1).map_err(fail)?;
+            records.push(proposed(e1, baseline(), 1).map_err(fail)?);
+            records.push(judged(e1, 0, scored(f64::from(value)).map_err(fail)?).map_err(fail)?);
+        }
+        let state = fold(&records).map_err(fail)?;
+        let manifest = manifest("maximize", "5%").map_err(fail)?;
+        let is_ready = baseline_ready(&state, &manifest, &judge);
+        // Ready exactly when one trial under the named judge passed the gate with the objective present.
+        let expected = trials.iter().any(|(choice, named)| *named && *choice == 0);
+        prop_assert_eq!(is_ready, expected);
+        let concluded = conclude(&state, &manifest, &judge, 1, 0);
+        if is_ready {
+            prop_assert!(concluded.is_ok(), "ready, but conclude gave {:?}", concluded);
+        } else {
+            prop_assert_eq!(concluded, Err(PolicyError::IncumbentUnscored { exp: baseline() }));
+        }
     }
 }
 
