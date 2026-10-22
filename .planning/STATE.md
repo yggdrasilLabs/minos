@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 7
-current_phase_name: Runner and Loop
+current_phase: 07
+current_phase_name: runner-and-loop
 status: executing
-stopped_at: Phase 7 context gathered
-last_updated: "2026-10-22T23:34:05.935Z"
-last_activity: 2026-10-20
-last_activity_desc: Phase 06 complete, transitioned to Phase 7
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-10-22T23:49:35.864Z"
+last_activity: 2026-10-22
+last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
-  total_plans: 70
-  completed_plans: 70
+  total_plans: 87
+  completed_plans: 71
   percent: 75
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 06 — proposers
+**Current focus:** Phase 07 — runner-and-loop
 
 ## Current Position
 
-Phase: 7 — Runner and Loop
-Plan: Not started
+Phase: 07 (runner-and-loop) — EXECUTING
+Plan: 2 of 17
 Status: Ready to execute
-Last activity: 2026-10-20 — Phase 06 complete, transitioned to Phase 7
+Last activity: 2026-10-22 — Phase 07 execution started
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -130,6 +130,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 06 P08 | 15min | 2 tasks | 2 files |
 | Phase 06 P09 | 10min | 2 tasks | 2 files |
 | Phase 06 P10 | 10min | 2 tasks | 3 files |
+| Phase 07 P01 | 9min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -303,6 +304,8 @@ Recent decisions affecting current work:
 - [Phase 06]: claude 2.1.304 live run by the user's hand (2026-10-20): all three cases passed, no variable unset; (b) clean and (c) fired all three canaries, so PROP-03 holds on 2.1.304 for the fixture; a later CLI version needs a rerun
 - [Phase 06]: 06-09: the --nocapture run splits each 'test <name> ... ok' across lines, so 06-EVIDENCE.md keeps the verbatim output unaltered and lists the three results separately
 - [Phase 06]: Phase 6 closed: final gate green on HEAD a114940 (1357 passed, 0 failed, 23 ignored; live target 3 ignored, no model call); PROP-01 to PROP-10 complete with 06-09's live run; VM suites not rerun because Phase 6 touched only minos-core and minos-propose
+- [Phase 07]: 07-01: baseline_ready mirrors conclude's incumbent check (ScoredOnly reduction plus the objective metric), so it is false exactly when conclude for generation 1 returns IncumbentUnscored
+- [Phase 07]: 07-01: phase-7 golden cases live in a second list with their own SHA-256 pin (2da862bd...); the 25-case pin dedebd15... never moves
 
 ### Pending Todos
 
@@ -333,6 +336,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-22T22:07:50.612Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-runner-and-loop/07-CONTEXT.md
+Last session: 2026-10-22T23:49:35.859Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None

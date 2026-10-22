@@ -376,12 +376,12 @@ Plans:
   4. `minos judge push <dir>` stores judge data in the local blob store as a new judge version with its hash recorded, and that data never appears in the source tarball or the image build context (JUDGE-01, CLI-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 17 plans
+**Plans**: 1/17 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — Core ledger provenance: `Judged { logs }`, `RunStarted { root_image }`, `Proposed { batch }`, `JobResult` judge usage, the `RunState` accessors the loop reads, `baseline_ready`, four goldens with their pin (wave 1)
+- [x] 07-01-PLAN.md — Core ledger provenance: `Judged { logs }`, `RunStarted { root_image }`, `Proposed { batch }`, `JobResult` judge usage, the `RunState` accessors the loop reads, `baseline_ready`, four goldens with their pin (wave 1)
 - [ ] 07-02-PLAN.md — Core judge and price pieces: `[judge] trials`, the `[[judge]]` lock table with `check_judge` and the 4 MiB cap, `Prices::missing_models`, the shared caps (wave 1)
 - [ ] 07-03-PLAN.md — Wave 0 scaffolding: every new dependency edge from existing pins, the runner and loop clippy policies with ban proofs, 07-EVIDENCE.md (wave 1)
 
@@ -450,5 +450,5 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
-| 7. Runner and Loop | 0/TBD | Not started | - |
+| 7. Runner and Loop | 1/17 | In Progress|  |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
