@@ -11,8 +11,8 @@ use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::limits::{
     DEFAULT_JUDGE_MS, DEFAULT_MEMORY_MIB, DEFAULT_SCRATCH_MIB, EMPTY_GENERATIONS_DEFAULT,
     GUEST_RESERVE_MIB, INFRA_FAILURES_DEFAULT, MAX_MEMORY_MIB, MAX_SCRATCH_MIB,
-    MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, STALL_STEP_DEFAULT,
-    TOKEN_CAP_DEFAULT, candidate_allowance_mib,
+    MAX_TRIALS, MIN_CANDIDATE_ALLOWANCE_MIB, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, STALL_STEP_DEFAULT,
+    TOKEN_CAP_DEFAULT, TRIALS_DEFAULT, TRIALS_MIN, candidate_allowance_mib,
 };
 use minos_core::manifest::{
     Arch, ChoiceList, CommandArgv, DurationMs, Eligibility, Goal, IneligibleReason, IntRange,
@@ -1225,6 +1225,52 @@ fn rejects_width_out_of_range() -> TestResult {
 #[test]
 fn rejects_a_judge_label_of_zero() -> TestResult {
     assert_field(&example("version = 1", "version = 0")?, "judge.version")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// [judge] trials (07-CONTEXT D-05)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The example with `trials = {value}` added to `[judge]`.
+fn with_trials(value: u32) -> Result<String, Box<dyn Error>> {
+    example("version = 1
+", &format!("version = 1
+trials = {value}
+"))
+}
+
+#[test]
+fn judge_trials_default_to_three() -> TestResult {
+    let manifest = Manifest::parse_toml(CLAUDE_EXAMPLE)?;
+    assert_eq!(manifest.judge().trials(), TRIALS_DEFAULT);
+    assert_eq!(manifest.judge().trials(), 3);
+    Ok(())
+}
+
+#[test]
+fn judge_trials_accept_the_bounds() -> TestResult {
+    for value in [TRIALS_MIN, MAX_TRIALS] {
+        let manifest = Manifest::parse_toml(&with_trials(value)?)?;
+        assert_eq!(manifest.judge().trials(), value);
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_judge_trials_out_of_range() -> TestResult {
+    for value in [0, MAX_TRIALS + 1] {
+        assert_field(&with_trials(value)?, "judge.trials")?;
+    }
+    Ok(())
+}
+
+#[test]
+fn judge_version_ignores_trials() -> TestResult {
+    let base = judge_version(CLAUDE_EXAMPLE)?;
+    for value in [TRIALS_MIN, 7, MAX_TRIALS] {
+        assert_eq!(judge_version(&with_trials(value)?)?, base);
+    }
+    Ok(())
 }
 
 #[test]

@@ -7,6 +7,7 @@ use std::error::Error;
 use std::str::FromStr;
 
 use minos_core::id::ModelId;
+use minos_core::manifest::Manifest;
 use minos_core::money::{ApproxCost, Cost, CostError, Prices, PricesError, Rate, RateError};
 use minos_core::usage::Usage;
 use proptest::prelude::*;
@@ -546,4 +547,109 @@ proptest! {
         prop_assert!(!dollars.is_empty() && dollars.bytes().all(|byte| byte.is_ascii_digit()), "{}", shown);
         prop_assert!(cents.len() == 2 && cents.bytes().all(|byte| byte.is_ascii_digit()), "{}", shown);
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Price completeness against a manifest (07-CONTEXT D-13)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A valid manifest whose `[[proposer]]` tables are `proposers`, appended after one sweep param.
+fn manifest_with(proposers: &str) -> Result<Manifest, Box<dyn Error>> {
+    let text = format!(
+        r#"[project]
+name = "logparse"
+kind = "optimize"
+program = "program.md"
+
+[surface]
+writable = ["src/parse.rs"]
+
+[source]
+exclude = ["judge/"]
+
+[environment]
+dockerfile = "minos.Dockerfile"
+requires = {{ arch = "arm64" }}
+
+[commands]
+build = ["cargo", "build"]
+run = ["./bench"]
+
+[budget]
+build = "2m"
+run = "5m"
+spend_usd = 40
+
+[judge]
+version = 1
+command = ["./judge"]
+
+[[judge.objective]]
+metric = "throughput"
+goal = "maximize"
+min_improvement = "5%"
+
+[policy]
+kind = "greedy"
+width = 4
+
+[[param]]
+name = "chunk"
+file = "src/parse.rs"
+anchor = "const CHUNK: usize = "
+min = 1
+max = 64
+step = 1
+{proposers}"#
+    );
+    Ok(Manifest::parse_toml(&text)?)
+}
+
+const SWEEP: &str = "\n[[proposer]]\nkind = \"sweep\"\nbatch = 4\n";
+
+#[test]
+fn missing_models_is_empty_for_a_sweep_only_manifest() -> TestResult {
+    let manifest = manifest_with(SWEEP)?;
+    assert!(prices(PRICES)?.missing_models(&manifest).is_empty());
+    Ok(())
+}
+
+#[test]
+fn missing_models_is_empty_when_every_model_is_priced() -> TestResult {
+    let manifest = manifest_with(&format!(
+        "{SWEEP}\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"haiku\"\nbatch = 2\n"
+    ))?;
+    assert!(prices(PRICES)?.missing_models(&manifest).is_empty());
+    Ok(())
+}
+
+#[test]
+fn missing_models_names_an_unpriced_model() -> TestResult {
+    let manifest = manifest_with(&format!(
+        "{SWEEP}\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"haiku\"\nbatch = 2\n"
+    ))?;
+    // The table prices only `m`, so `haiku` is missing.
+    let missing = table("0.1", "0.1", "0.1")?.missing_models(&manifest);
+    assert_eq!(missing.into_iter().collect::<Vec<_>>(), [model("haiku")?]);
+    Ok(())
+}
+
+#[test]
+fn missing_models_is_sorted_and_duplicate_free() -> TestResult {
+    let manifest = manifest_with(&format!(
+        "{SWEEP}\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"sonnet\"\nbatch = 2\n\
+         \n[[proposer]]\nkind = \"planned\"\nmodel = \"sonnet\"\nbatch = 2\n\
+         \n[[proposer]]\nkind = \"agentic\"\nmodel = \"haiku\"\nbatch = 1\n"
+    ))?;
+    let missing = table("0.1", "0.1", "0.1")?.missing_models(&manifest);
+    assert_eq!(
+        missing.into_iter().collect::<Vec<_>>(),
+        [model("haiku")?, model("sonnet")?]
+    );
+    let priced_haiku = prices(PRICES)?.missing_models(&manifest);
+    assert_eq!(
+        priced_haiku.into_iter().collect::<Vec<_>>(),
+        [model("sonnet")?]
+    );
+    Ok(())
 }
