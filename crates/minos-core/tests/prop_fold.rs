@@ -91,6 +91,7 @@ fn run_started() -> Event {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
+        root_image: None,
     }
 }
 
@@ -120,6 +121,7 @@ fn proposed_with(
         diff: BlobId::of(exp.as_bytes()),
         rationale: BlobId::of(b"rationale"),
         origin,
+        batch: None,
     }
 }
 
@@ -145,6 +147,7 @@ fn judged(exp: ExperimentId, trial: u32, outcome: Outcome) -> Result<Event, Box<
         trial,
         outcome,
         backend: backend(),
+        logs: None,
     })
 }
 
@@ -468,6 +471,7 @@ fn a_second_different_run_started_is_refused() -> TestResult {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT + 1,
+        root_image: None,
     })?;
     let error = fold_err(&records)?;
     assert!(matches!(error, FoldError::DuplicateRunStarted));
@@ -487,6 +491,7 @@ fn a_wrong_run_id_is_refused() -> TestResult {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
+        root_image: None,
     })];
     let error = fold_err(&records)?;
     assert!(matches!(
@@ -505,6 +510,7 @@ fn a_wrong_baseline_is_refused() -> TestResult {
         base: base(),
         baseline: ExperimentId::baseline(&TreeId::of(b"other")),
         started_at: STARTED_AT,
+        root_image: None,
     })];
     assert!(matches!(
         fold_err(&records)?,
@@ -1088,12 +1094,12 @@ proptest! {
             .filter(|record| matches!(record.event(), Event::Judged { .. }))
             .collect();
         let target = pick(&judged_records, choice).map_err(|e| TestCaseError::fail(e.to_string()))?;
-        let Event::Judged { exp, judge, trial, outcome, backend } = target.event().clone() else {
+        let Event::Judged { exp, judge, trial, outcome, backend, logs } = target.event().clone() else {
             return Err(TestCaseError::fail("the filter keeps Judged records only"));
         };
         let replacement = Outcome::Crashed { stage: Stage::Build };
         prop_assert_ne!(&outcome, &replacement);
-        let tampered = rec(Event::Judged { exp, judge, trial, outcome: replacement, backend });
+        let tampered = rec(Event::Judged { exp, judge, trial, outcome: replacement, backend, logs });
 
         let result = fold(records.iter().chain(std::iter::once(&tampered)));
         let conflicts = matches!(result, Err(FoldError::KeyConflict { .. }));

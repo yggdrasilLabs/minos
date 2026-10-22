@@ -180,6 +180,7 @@ fn run_started() -> Record {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
+        root_image: None,
     })
 }
 
@@ -199,6 +200,7 @@ fn proposed(
             model: ModelId::from_str("mid")?,
             prompt: PromptHash::of(b"prompt"),
         },
+        batch: None,
     }))
 }
 
@@ -209,6 +211,7 @@ fn judged_by(judge: JudgeVersion, exp: ExperimentId, trial: u32, outcome: Outcom
         trial,
         outcome,
         backend: backend(),
+        logs: None,
     })
 }
 

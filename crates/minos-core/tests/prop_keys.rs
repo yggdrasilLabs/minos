@@ -89,6 +89,7 @@ fn one_of_each() -> Result<Vec<Event>, Box<dyn Error>> {
             base,
             baseline: ExperimentId::baseline(&base),
             started_at: STARTED_AT,
+            root_image: None,
         },
         Event::ManifestChanged {
             manifest: ManifestId::of(b"m2"),
@@ -105,6 +106,7 @@ fn one_of_each() -> Result<Vec<Event>, Box<dyn Error>> {
                 model: haiku()?,
                 prompt: PromptHash::of(b"prompt"),
             },
+            batch: None,
         },
         Event::Judged {
             exp: exp(1),
@@ -112,6 +114,7 @@ fn one_of_each() -> Result<Vec<Event>, Box<dyn Error>> {
             trial: 0,
             outcome: scored(12.25)?,
             backend: backend(Isolation::Hardware, &EXPECTED_KRUN_LAYERS),
+            logs: None,
         },
         Event::Selected {
             generation: 1,
@@ -215,6 +218,7 @@ fn non_key_fields_do_not_change_key() -> TestResult {
             trial: 2,
             outcome,
             backend,
+            logs: None,
         })
     };
     let a = judged(
@@ -242,6 +246,7 @@ fn non_key_fields_do_not_change_key() -> TestResult {
             diff: BlobId::of(b"diff"),
             rationale: BlobId::of(rationale),
             origin,
+            batch: None,
         };
     let p1 = proposed(b"one", Origin::Sweep, Tier::Sweep, exp(0));
     let p2 = proposed(
@@ -277,6 +282,7 @@ fn non_key_fields_do_not_change_key() -> TestResult {
         base: TreeId::of(b"t"),
         baseline: ExperimentId::baseline(&TreeId::of(b"t")),
         started_at,
+        root_image: None,
     };
     assert_eq!(start(b"m", 1).key(&run), start(b"n", 2).key(&run));
     Ok(())
@@ -630,6 +636,7 @@ fn event_of(spec: &Spec) -> Result<Event, Box<dyn Error>> {
             base,
             baseline: ExperimentId::baseline(&base),
             started_at,
+            root_image: None,
         },
         Spec::ManifestChanged {
             manifest,
@@ -651,6 +658,7 @@ fn event_of(spec: &Spec) -> Result<Event, Box<dyn Error>> {
             diff: BlobId::of(&[b'd', e]),
             rationale: BlobId::of(&[rationale]),
             origin: Origin::Sweep,
+            batch: None,
         },
         Spec::Judged {
             exp: e,
@@ -671,6 +679,7 @@ fn event_of(spec: &Spec) -> Result<Event, Box<dyn Error>> {
                 }
             },
             backend: backend(Isolation::Hardware, &EXPECTED_KRUN_LAYERS),
+            logs: None,
         },
         Spec::Selected {
             generation,
@@ -1130,6 +1139,7 @@ fn judged_key_golden_vector() -> TestResult {
         trial: 2,
         outcome: Outcome::TimedOut { stage: Stage::Run },
         backend: backend(Isolation::Hardware, &EXPECTED_KRUN_LAYERS),
+        logs: None,
     };
     assert_eq!(
         event.key(&run()).to_hex(),

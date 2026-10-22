@@ -25,6 +25,10 @@
 //! | `Reviewed` | 10 | `digest(request)` | Its own tag, distinct from `ReviewRequested` |
 //! | `ReportAcknowledged` | 11 | `digest(exp)`, `digest(report)` | One acknowledgement per experiment and report |
 //!
+//! Optional provenance fields are never part of a key: `RunStarted.root_image`, `Proposed.batch`, and
+//! `Judged.logs` (Phase 7, 07-CONTEXT D-09, D-10, D-18) are absent from every hash above, so two records that
+//! differ only in them share a key, and the first one appended wins.
+//!
 //! [`SpendId`] is `IdHasher::new("minos/spend/v1").digest(run).u64(generation)`, then for
 //! [`SpendSource::ModelCall`] `u64(1).u64(call).bytes(model)`, for [`SpendSource::Candidate`]
 //! `u64(2).digest(exp).u64(trial)`, and for [`SpendSource::Judge`] `u64(3).digest(exp).u64(trial)`.
@@ -51,7 +55,7 @@
 //! internally tagged enum, and dollars are derived from [`Usage`] and the user's price table, never stored
 //! (COST-01).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -61,7 +65,7 @@ use crate::id::{
     RunId, TreeId,
 };
 use crate::manifest::{Arch, JudgeVersion, Tier};
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, Stage};
 use crate::usage::Usage;
 
 /// Domain of [`EventKey`].
@@ -531,6 +535,9 @@ pub enum Event {
         baseline: ExperimentId,
         /// The start time in Unix seconds, read by the shell.
         started_at: u64,
+        /// The lock's root image digest at start (07-CONTEXT D-10); absent on lines written before Phase 7.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        root_image: Option<ImageDigest>,
     },
     /// The run uses a new manifest from `from_generation` on.
     ManifestChanged {
@@ -555,6 +562,11 @@ pub enum Event {
         rationale: BlobId,
         /// The sweep or the model call that produced it.
         origin: Origin,
+        /// The batch blob listing the whole propose step's admitted experiments and drop count, written before the
+        /// batch's first `Proposed` (07-CONTEXT D-18); absent on lines written before Phase 7 and on proposals
+        /// recorded without a batch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        batch: Option<BlobId>,
     },
     /// One trial of an experiment under a judge version ended.
     Judged {
@@ -568,6 +580,10 @@ pub enum Event {
         outcome: Outcome,
         /// Where and how the VMs ran.
         backend: BackendInfo,
+        /// The capped raw stage log blobs the runner stored (07-CONTEXT D-09); every reader goes through
+        /// `LogExcerpt`. Absent on lines written before Phase 7.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        logs: Option<BTreeMap<Stage, BlobId>>,
     },
     /// A generation concluded.
     Selected {

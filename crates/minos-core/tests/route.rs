@@ -123,6 +123,7 @@ fn run_started() -> Record {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
+        root_image: None,
     })
 }
 
@@ -142,6 +143,7 @@ fn sweep_proposal(exp: ExperimentId, generation: u32) -> Record {
         diff: BlobId::of(exp.as_bytes()),
         rationale: BlobId::of(b"rationale"),
         origin: Origin::Sweep,
+        batch: None,
     })
 }
 

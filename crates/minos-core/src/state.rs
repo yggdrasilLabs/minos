@@ -313,6 +313,7 @@ pub fn fold<'a>(records: impl IntoIterator<Item = &'a Record>) -> Result<RunStat
         base,
         baseline,
         started_at,
+        ..
     } = first
     else {
         return Err(FoldError::FirstNotRunStarted);
@@ -429,6 +430,7 @@ impl RunState {
                 diff,
                 rationale,
                 origin,
+                ..
             } => {
                 self.proposals.insert(
                     *exp,
@@ -448,6 +450,7 @@ impl RunState {
                 trial,
                 outcome,
                 backend,
+                ..
             } => {
                 self.judgments.entry((*exp, *judge)).or_default().insert(
                     *trial,

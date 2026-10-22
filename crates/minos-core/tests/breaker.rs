@@ -136,6 +136,7 @@ fn run_started() -> Record {
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
+        root_image: None,
     })
 }
 
@@ -245,6 +246,7 @@ fn an_improvement_resets_the_empty_streak() -> TestResult {
                 model: model("mid")?,
                 prompt: minos_core::id::PromptHash::of(b"prompt"),
             },
+            batch: None,
         }),
         selected(2, DecisionKind::Improved { winner }),
         empty(3),

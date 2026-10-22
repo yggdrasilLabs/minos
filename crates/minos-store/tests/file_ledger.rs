@@ -48,6 +48,7 @@ fn run_started() -> Record {
         base: TreeId::of(b"t"),
         baseline: ExperimentId::baseline(&TreeId::of(b"t")),
         started_at: STARTED_AT,
+        root_image: None,
     })
 }
 

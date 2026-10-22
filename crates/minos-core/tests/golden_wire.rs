@@ -910,7 +910,10 @@ fn phase7_golden_bytes_pinned() -> TestResult {
         all.push_str(&line);
         all.push('\n');
     }
-    assert_eq!(sha256_hex(all.as_bytes()), "PHASE7_PIN");
+    assert_eq!(
+        sha256_hex(all.as_bytes()),
+        "2da862bd29fbb884f745cc962d8bb9bec57f94b53f0d08b213d6e3b003e4c476"
+    );
     Ok(())
 }
 

@@ -365,6 +365,9 @@ impl From<JobRequest> for RawJobRequest {
 /// How one requested trial ended: the outcome, the metered usage, where the VMs ran, and the log blob of each stage
 /// that produced one.
 ///
+/// `usage` is the candidate VM's host-measured compute, and `judge_usage` the judge VM's, `None` when the judge never
+/// ran, so the loop can append both a `Spent { Candidate }` and a `Spent { Judge }`. Neither carries tokens.
+///
 /// A trial that ended in an infrastructure failure has no `JobResult`; that is an error on the runner's own path,
 /// and it is retried.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -375,31 +378,36 @@ pub struct JobResult {
     trial: u32,
     outcome: Outcome,
     usage: Usage,
+    judge_usage: Option<Usage>,
     backend: BackendInfo,
     logs: BTreeMap<Stage, BlobId>,
 }
 
 impl JobResult {
     /// The result of `request`: the experiment, judge, and trial are copied from it, so a result always names the
-    /// trial it answers. `usage` is the VMs' compute time.
+    /// trial it answers. `usage` is the candidate VM's host-measured compute time, and `judge_usage` the judge VM's,
+    /// `None` when the judge never ran.
     ///
     /// # Errors
     ///
-    /// [`JobError::TokensInJob`] if `usage` carries any tokens: a job makes no model call.
+    /// [`JobError::TokensInJob`] if `usage` or `judge_usage` carries any tokens: a job makes no model call.
     pub fn new(
         request: &JobRequest,
         outcome: Outcome,
         usage: Usage,
+        judge_usage: Option<Usage>,
         backend: BackendInfo,
         logs: BTreeMap<Stage, BlobId>,
     ) -> Result<Self, JobError> {
         let usage = check_usage(usage)?;
+        let judge_usage = judge_usage.map(check_usage).transpose()?;
         Ok(Self {
             exp: request.exp,
             judge: request.judge,
             trial: request.trial,
             outcome,
             usage,
+            judge_usage,
             backend,
             logs,
         })
@@ -440,10 +448,16 @@ impl JobResult {
         &self.outcome
     }
 
-    /// The metered usage of the trial's VM runs.
+    /// The metered usage of the trial's candidate VM run.
     #[must_use]
     pub const fn usage(&self) -> Usage {
         self.usage
+    }
+
+    /// The metered usage of the trial's judge VM run, `None` when the judge never ran.
+    #[must_use]
+    pub const fn judge_usage(&self) -> Option<Usage> {
+        self.judge_usage
     }
 
     /// Where and how the VMs ran.
@@ -469,6 +483,8 @@ pub struct RawJobResult {
     trial: u32,
     outcome: Outcome,
     usage: Usage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    judge_usage: Option<Usage>,
     backend: BackendInfo,
     logs: BTreeMap<Stage, BlobId>,
 }
@@ -486,6 +502,7 @@ impl TryFrom<RawJobResult> for JobResult {
             trial: check_trial(raw.trial)?,
             outcome: raw.outcome,
             usage: check_usage(raw.usage)?,
+            judge_usage: raw.judge_usage.map(check_usage).transpose()?,
             backend: raw.backend,
             logs: raw.logs,
         })
@@ -501,6 +518,7 @@ impl From<JobResult> for RawJobResult {
             trial: result.trial,
             outcome: result.outcome,
             usage: result.usage,
+            judge_usage: result.judge_usage,
             backend: result.backend,
             logs: result.logs,
         }

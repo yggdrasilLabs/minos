@@ -259,6 +259,7 @@ impl Fixture {
             base: base(),
             baseline: baseline(),
             started_at: STARTED_AT,
+            root_image: None,
         })];
         for (trial, (value, held)) in (0_u32..).zip(spec.baseline) {
             records.push(rec(Event::Judged {
@@ -267,6 +268,7 @@ impl Fixture {
                 trial,
                 outcome: scored(*value, *held)?,
                 backend: spec.baseline_backend.clone(),
+                logs: None,
             }));
         }
         let scored_trials = u32::try_from(spec.baseline.len())?;
@@ -277,6 +279,7 @@ impl Fixture {
                 trial,
                 outcome: Outcome::Crashed { stage: Stage::Run },
                 backend: spec.baseline_backend.clone(),
+                logs: None,
             }));
         }
         let mut parent = baseline();
@@ -298,6 +301,7 @@ impl Fixture {
                     model: ModelId::from_str("mid")?,
                     prompt: PromptHash::of(format!("prompt {generation}").as_bytes()),
                 },
+                batch: None,
             }));
             for (trial, (value, held)) in (0_u32..).zip(&step.trials) {
                 records.push(rec(Event::Judged {
@@ -306,6 +310,7 @@ impl Fixture {
                     trial,
                     outcome: scored(*value, *held)?,
                     backend: step.backend.clone(),
+                    logs: None,
                 }));
             }
             parent = exp;
