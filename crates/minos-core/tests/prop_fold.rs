@@ -4,6 +4,7 @@
 //! Ledgers are built from public constructors only. Candidate experiment IDs are parsed from 64-character hex
 //! strings: any 32 bytes form an ID, and the fold never recomputes a candidate's ID from its diff.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::str::FromStr;
 
@@ -13,7 +14,7 @@ use minos_core::id::{
 };
 use minos_core::ledger::{
     BackendInfo, BackendKind, Decision, DecisionKind, EXPECTED_KRUN_LAYERS, Event, Isolation,
-    Origin, Record, ReviewAnswer, ReviewId, ReviewKind, SpendSource, StopReason,
+    Origin, Record, ReviewAnswer, ReviewId, ReviewKind, SpendId, SpendSource, StopReason,
 };
 use minos_core::manifest::{Arch, JudgeVersion, Tier};
 use minos_core::metric::{Metric, Scorecard};
@@ -85,14 +86,35 @@ fn rec(event: Event) -> Record {
 }
 
 fn run_started() -> Event {
+    run_started_with(None)
+}
+
+/// The run's `RunStarted`, with the lock's root image digest when `root_image` is `Some`.
+fn run_started_with(root_image: Option<ImageDigest>) -> Event {
     Event::RunStarted {
         run: run(),
         manifest: manifest(),
         base: base(),
         baseline: baseline(),
         started_at: STARTED_AT,
-        root_image: None,
+        root_image,
     }
+}
+
+/// A build and a run log blob for `exp`'s `trial`.
+fn stage_logs(exp: ExperimentId, trial: u32) -> BTreeMap<Stage, BlobId> {
+    [
+        (
+            Stage::Build,
+            BlobId::of(format!("build {exp} {trial}").as_bytes()),
+        ),
+        (
+            Stage::Run,
+            BlobId::of(format!("run {exp} {trial}").as_bytes()),
+        ),
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// The origin that agrees with `tier`: sweep for the sweep tier, a model call otherwise.
@@ -440,6 +462,266 @@ fn lineage_runs_from_the_baseline_to_the_experiment() -> TestResult {
     assert_eq!(state.lineage(&e2), Some(vec![baseline(), e2]));
     assert_eq!(state.lineage(&baseline()), Some(vec![baseline()]));
     assert_eq!(state.lineage(&exp(9)?), None);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Phase 7 accessors
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The valid ledger with its `RunStarted` replaced by `first` and `extra` appended.
+fn starting_with(first: Event, extra: Vec<Event>) -> Result<Vec<Record>, Box<dyn Error>> {
+    let mut records = vec![rec(first)];
+    records.extend(valid_ledger()?.into_iter().skip(1));
+    records.extend(extra.into_iter().map(rec));
+    Ok(records)
+}
+
+#[test]
+fn root_image_is_absent_on_a_ledger_that_records_none() -> TestResult {
+    assert_eq!(folded()?.root_image(), None);
+    Ok(())
+}
+
+#[test]
+fn root_image_is_the_recorded_digest() -> TestResult {
+    let digest = ImageDigest::of(b"locked root");
+    let state = fold(&starting_with(run_started_with(Some(digest)), Vec::new())?)?;
+    assert_eq!(state.root_image(), Some(&digest));
+    Ok(())
+}
+
+#[test]
+fn backend_classes_is_empty_with_no_judgment() -> TestResult {
+    let state = fold(&[rec(run_started())])?;
+    assert!(state.backend_classes().is_empty());
+    Ok(())
+}
+
+#[test]
+fn backend_classes_holds_one_class_for_one_backend() -> TestResult {
+    let expected: BTreeSet<(BackendKind, Arch)> = [(BackendKind::Krun, Arch::Arm64)].into();
+    assert_eq!(folded()?.backend_classes(), expected);
+    Ok(())
+}
+
+#[test]
+fn backend_classes_holds_two_classes_for_a_mixed_ledger() -> TestResult {
+    let other = BackendInfo::new(
+        BackendKind::Krun,
+        Arch::X86_64,
+        Isolation::Hardware,
+        EXPECTED_KRUN_LAYERS.iter().copied().collect(),
+        ImageDigest::of(b"root"),
+        None,
+    );
+    let records = with(Event::Judged {
+        exp: baseline(),
+        judge: judge()?,
+        trial: 3,
+        outcome: scored(100.0)?,
+        backend: other,
+        logs: None,
+    })?;
+    let expected: BTreeSet<(BackendKind, Arch)> = [
+        (BackendKind::Krun, Arch::Arm64),
+        (BackendKind::Krun, Arch::X86_64),
+    ]
+    .into();
+    assert_eq!(fold(&records)?.backend_classes(), expected);
+    Ok(())
+}
+
+#[test]
+fn has_spend_is_true_exactly_for_recorded_spends() -> TestResult {
+    let state = folded()?;
+    let (e1, e2) = (exp(1)?, exp(2)?);
+    let recorded = [
+        (
+            0,
+            SpendSource::Judge {
+                exp: baseline(),
+                trial: 0,
+            },
+        ),
+        (
+            1,
+            SpendSource::ModelCall {
+                call: 0,
+                model: haiku()?,
+            },
+        ),
+        (1, SpendSource::Candidate { exp: e1, trial: 0 }),
+    ];
+    for (generation, source) in &recorded {
+        assert!(state.has_spend(&SpendId::of(&run(), *generation, source)));
+    }
+    let absent = [
+        (1, SpendSource::Candidate { exp: e2, trial: 0 }),
+        (2, SpendSource::Candidate { exp: e1, trial: 0 }),
+        (
+            1,
+            SpendSource::ModelCall {
+                call: 1,
+                model: haiku()?,
+            },
+        ),
+        (
+            0,
+            SpendSource::Candidate {
+                exp: baseline(),
+                trial: 0,
+            },
+        ),
+    ];
+    for (generation, source) in &absent {
+        assert!(!state.has_spend(&SpendId::of(&run(), *generation, source)));
+    }
+    Ok(())
+}
+
+#[test]
+fn next_model_call_is_zero_without_a_model_call() -> TestResult {
+    let state = folded()?;
+    // Generation 0 has a judge spend only, generation 2 none.
+    assert_eq!(state.next_model_call(0), 0);
+    assert_eq!(state.next_model_call(2), 0);
+    assert_eq!(state.next_model_call(9), 0);
+    Ok(())
+}
+
+#[test]
+fn next_model_call_is_one_past_the_highest_call_of_its_generation() -> TestResult {
+    let model_call = |generation: u32, call: u32| -> Result<Event, Box<dyn Error>> {
+        Ok(Event::Spent {
+            generation,
+            source: SpendSource::ModelCall {
+                call,
+                model: haiku()?,
+            },
+            usage: Usage::tokens(1, 1, 0, 0),
+        })
+    };
+    let records = starting_with(
+        run_started(),
+        vec![
+            model_call(2, 5)?,
+            model_call(2, 3)?,
+            model_call(3, 9)?,
+            Event::Spent {
+                generation: 2,
+                source: SpendSource::Candidate {
+                    exp: exp(3)?,
+                    trial: 7,
+                },
+                usage: Usage::compute(1, 1),
+            },
+        ],
+    )?;
+    let state = fold(&records)?;
+    assert_eq!(state.next_model_call(1), 1);
+    assert_eq!(state.next_model_call(2), 6);
+    assert_eq!(state.next_model_call(3), 10);
+    assert_eq!(state.next_model_call(4), 0);
+    Ok(())
+}
+
+#[test]
+fn next_model_call_saturates_at_the_last_index() -> TestResult {
+    let records = with(Event::Spent {
+        generation: 4,
+        source: SpendSource::ModelCall {
+            call: u32::MAX,
+            model: haiku()?,
+        },
+        usage: Usage::tokens(1, 1, 0, 0),
+    })?;
+    assert_eq!(fold(&records)?.next_model_call(4), u32::MAX);
+    Ok(())
+}
+
+#[test]
+fn judged_is_true_exactly_for_recorded_trials() -> TestResult {
+    let state = folded()?;
+    let judge = judge()?;
+    for trial in 0..3 {
+        assert!(state.judged(&baseline(), &judge, trial));
+    }
+    assert!(!state.judged(&baseline(), &judge, 3));
+    assert!(state.judged(&exp(2)?, &judge, 0));
+    assert!(!state.judged(&exp(2)?, &judge, 1));
+    assert!(!state.judged(&exp(9)?, &judge, 0));
+    let other = JudgeVersion::from_str(&"cd".repeat(32))?;
+    assert!(!state.judged(&baseline(), &other, 0));
+    Ok(())
+}
+
+#[test]
+fn stops_yields_every_recorded_stop_in_key_order() -> TestResult {
+    let records = starting_with(
+        run_started(),
+        vec![
+            Event::StopRequested {
+                generation: 7,
+                reason: StopReason::SpendCap,
+            },
+            Event::StopRequested {
+                generation: 3,
+                reason: StopReason::ProviderAuth,
+            },
+        ],
+    )?;
+    let state = fold(&records)?;
+    assert_eq!(
+        state.stops().collect::<Vec<_>>(),
+        vec![
+            (3, StopReason::UserStop),
+            (3, StopReason::ProviderAuth),
+            (7, StopReason::SpendCap),
+        ]
+    );
+    assert_eq!(state.stop_requested(), Some((3, StopReason::UserStop)));
+    assert_eq!(fold(&[rec(run_started())])?.stops().count(), 0);
+    Ok(())
+}
+
+#[test]
+fn judgment_logs_and_proposal_batch_are_the_recorded_values() -> TestResult {
+    let e1 = exp(1)?;
+    let logs = stage_logs(baseline(), 3);
+    let records = with(Event::Judged {
+        exp: baseline(),
+        judge: judge()?,
+        trial: 3,
+        outcome: scored(100.0)?,
+        backend: backend(),
+        logs: Some(logs.clone()),
+    })?;
+    let state = fold(&records)?;
+    let judgments: BTreeMap<u32, Option<BTreeMap<Stage, BlobId>>> = state
+        .trials(&baseline(), &judge()?)
+        .map(|(trial, judgment)| (trial, judgment.logs().cloned()))
+        .collect();
+    assert_eq!(judgments.get(&3), Some(&Some(logs)));
+    assert_eq!(judgments.get(&0), Some(&None));
+    assert_eq!(state.proposal(&e1).and_then(|p| p.batch()), None);
+
+    let batch = BlobId::of(b"batch");
+    let records = with(Event::Proposed {
+        exp: exp(10)?,
+        parent: e1,
+        generation: 3,
+        tier: Tier::Sweep,
+        diff: BlobId::of(b"diff"),
+        rationale: BlobId::of(b"rationale"),
+        origin: Origin::Sweep,
+        batch: Some(batch),
+    })?;
+    let state = fold(&records)?;
+    assert_eq!(
+        state.proposal(&exp(10)?).and_then(|p| p.batch()),
+        Some(&batch)
+    );
     Ok(())
 }
 
@@ -806,6 +1088,8 @@ struct GenerationPlan {
     winner: usize,
     model_calls: u32,
     notes: u32,
+    /// Whether the generation's proposals carry a batch blob.
+    batch: bool,
 }
 
 /// One generated ledger.
@@ -817,8 +1101,11 @@ struct LedgerPlan {
     ids: Vec<u64>,
     manifest_change: bool,
     review: Option<bool>,
-    stop: bool,
+    /// Stop requests, each a generation index and a reason choice.
+    stops: Vec<(u8, u8)>,
     acknowledge: bool,
+    /// Whether `RunStarted` records a root image.
+    root_image: bool,
 }
 
 /// Every generated ledger has at most 4 generations of at most 4 proposals.
@@ -838,14 +1125,16 @@ fn generation_plan() -> impl Strategy<Value = GenerationPlan> {
         any::<usize>(),
         0_u32..=2,
         0_u32..=2,
+        any::<bool>(),
     )
         .prop_map(
-            |(proposals, decision, winner, model_calls, notes)| GenerationPlan {
+            |(proposals, decision, winner, model_calls, notes, batch)| GenerationPlan {
                 proposals,
                 decision,
                 winner,
                 model_calls,
                 notes,
+                batch,
             },
         )
 }
@@ -859,19 +1148,30 @@ fn ledger_plan() -> impl Strategy<Value = LedgerPlan> {
             .prop_shuffle(),
         any::<bool>(),
         proptest::option::of(any::<bool>()),
+        prop::collection::vec((any::<u8>(), any::<u8>()), 0..=3),
         any::<bool>(),
         any::<bool>(),
     )
         .prop_map(
-            |(baseline_trials, generations, ids, manifest_change, review, stop, acknowledge)| {
+            |(
+                baseline_trials,
+                generations,
+                ids,
+                manifest_change,
+                review,
+                stops,
+                acknowledge,
+                root_image,
+            )| {
                 LedgerPlan {
                     baseline_trials,
                     generations,
                     ids,
                     manifest_change,
                     review,
-                    stop,
+                    stops,
                     acknowledge,
+                    root_image,
                 }
             },
         )
@@ -900,7 +1200,18 @@ fn pick<T: Copy>(items: &[T], choice: usize) -> Result<T, Box<dyn Error>> {
         .ok_or_else(|| "nothing to pick from".into())
 }
 
-/// Appends the Judged and Spent records of `exp`'s trials.
+/// The stop reason a generated choice names.
+const fn reason_of(choice: u8) -> StopReason {
+    match choice % 4 {
+        0 => StopReason::UserStop,
+        1 => StopReason::SpendCap,
+        2 => StopReason::ProviderLimit,
+        _ => StopReason::ProviderAuth,
+    }
+}
+
+/// Appends the Judged and Spent records of `exp`'s trials. A trial whose outcome choice has an even sixth carries
+/// stage log blobs, so generated ledgers mix `Judged` records with and without `logs`.
 fn push_trials(
     records: &mut Vec<Record>,
     exp: ExperimentId,
@@ -908,7 +1219,15 @@ fn push_trials(
     outcomes: &[u8],
 ) -> Result<(), Box<dyn Error>> {
     for (trial, choice) in (0_u32..).zip(outcomes) {
-        records.push(rec(judged(exp, trial, outcome_of(*choice)?)?));
+        let logs = (choice / 6 % 2 == 0).then(|| stage_logs(exp, trial));
+        records.push(rec(Event::Judged {
+            exp,
+            judge: judge()?,
+            trial,
+            outcome: outcome_of(*choice)?,
+            backend: backend(),
+            logs,
+        }));
         let source = if exp == baseline() {
             SpendSource::Judge { exp, trial }
         } else {
@@ -926,7 +1245,8 @@ fn push_trials(
 /// Builds a valid ledger from `plan`, in append order: parents are always from an earlier generation, tiers
 /// and origins agree, and every decision is consistent with the generation's proposals and incumbent.
 fn build(plan: &LedgerPlan) -> Result<Vec<Record>, Box<dyn Error>> {
-    let mut records = vec![rec(run_started())];
+    let root_image = plan.root_image.then(|| ImageDigest::of(b"locked root"));
+    let mut records = vec![rec(run_started_with(root_image))];
     push_trials(&mut records, baseline(), 0, &plan.baseline_trials)?;
 
     let mut ids = plan.ids.iter();
@@ -942,7 +1262,19 @@ fn build(plan: &LedgerPlan) -> Result<Vec<Record>, Box<dyn Error>> {
             } else {
                 Tier::SingleShot
             };
-            records.push(rec(proposed(id, parent, generation, tier)?));
+            let batch = gen_plan
+                .batch
+                .then(|| BlobId::of(format!("batch {generation}").as_bytes()));
+            records.push(rec(Event::Proposed {
+                exp: id,
+                parent,
+                generation,
+                tier,
+                diff: BlobId::of(id.as_bytes()),
+                rationale: BlobId::of(b"rationale"),
+                origin: origin_for(tier)?,
+                batch,
+            }));
             push_trials(&mut records, id, generation, outcomes)?;
             this_generation.push(id);
         }
@@ -1000,10 +1332,10 @@ fn build(plan: &LedgerPlan) -> Result<Vec<Record>, Box<dyn Error>> {
             }));
         }
     }
-    if plan.stop {
+    for (generation, reason) in &plan.stops {
         records.push(rec(Event::StopRequested {
-            generation: u32::try_from(plan.generations.len())?,
-            reason: StopReason::UserStop,
+            generation: u32::from(*generation % 6),
+            reason: reason_of(*reason),
         }));
     }
     if plan.acknowledge {
@@ -1056,6 +1388,29 @@ proptest! {
         let records = built.map_err(TestCaseError::fail)?;
         let expected = fold(&records)?;
         let shuffled = fold(std::iter::once(head(&records)?).chain(&rest))?;
+        prop_assert_eq!(shuffled.root_image(), expected.root_image());
+        prop_assert_eq!(shuffled.backend_classes(), expected.backend_classes());
+        prop_assert_eq!(shuffled.stops().collect::<Vec<_>>(), expected.stops().collect::<Vec<_>>());
+        prop_assert_eq!(shuffled.stop_requested(), expected.stop_requested());
+        for generation in 0..=6 {
+            prop_assert_eq!(shuffled.next_model_call(generation), expected.next_model_call(generation));
+        }
+        for (id, spend) in expected.spends() {
+            prop_assert!(shuffled.has_spend(id), "spend {} of generation {}", id, spend.generation());
+        }
+        let judge = judge().map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let exps: Vec<ExperimentId> = std::iter::once(baseline())
+            .chain((1..=4).flat_map(|generation| expected.proposals_in(generation).map(|(id, _)| *id)))
+            .collect();
+        for exp in exps {
+            for (trial, judgment) in expected.trials(&exp, &judge) {
+                prop_assert!(shuffled.judged(&exp, &judge, trial));
+                let other = shuffled.trials(&exp, &judge).find(|(t, _)| *t == trial).map(|(_, j)| j.logs().cloned());
+                prop_assert_eq!(other, Some(judgment.logs().cloned()));
+            }
+            let batch = expected.proposal(&exp).map(|p| p.batch().copied());
+            prop_assert_eq!(shuffled.proposal(&exp).map(|p| p.batch().copied()), batch);
+        }
         prop_assert_eq!(shuffled, expected);
     }
 
