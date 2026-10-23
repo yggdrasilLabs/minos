@@ -376,7 +376,7 @@ Plans:
   4. `minos judge push <dir>` stores judge data in the local blob store as a new judge version with its hash recorded, and that data never appears in the source tarball or the image build context (JUDGE-01, CLI-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 7/17 plans executed
+**Plans**: 8/17 plans executed
 
 Plans:
 **Wave 1**
@@ -391,7 +391,7 @@ Plans:
 - [x] 07-05-PLAN.md — Store: a conflicting append becomes `StoreError::Conflict`; the `RunLock` trait with `driver.lock` and the memory lock (wave 2)
 - [x] 07-06-PLAN.md — `BaseTree` and `CumulativeDiff` in core with compile-fail proofs; guest, krun, and minos-propose callers moved (wave 2)
 - [x] 07-07-PLAN.md — Loop contracts: `JobRunner`, `DriverError`, the observer seam, and the pure `next_step` with its properties (wave 2)
-- [ ] 07-08-PLAN.md — `pack_judge_data` and the judge-overlap refusal in every snapshot, wired into `env build` (wave 2)
+- [x] 07-08-PLAN.md — `pack_judge_data` and the judge-overlap refusal in every snapshot, wired into `env build` (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -450,5 +450,5 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
-| 7. Runner and Loop | 7/17 | In Progress|  |
+| 7. Runner and Loop | 8/17 | In Progress|  |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
