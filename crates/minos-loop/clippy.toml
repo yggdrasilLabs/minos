@@ -1,0 +1,18 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every path below is proven to fire once (07-EVIDENCE.md "Clippy bans fire (07-03)").
+# A mistyped path only warns, so re-prove any entry you change.
+# std::thread::sleep is deliberately not banned: D-16's infrastructure retry pauses with it (07-RESEARCH Pattern 9).
+disallowed-methods = [
+  { path = "std::time::SystemTime::now",       reason = "the loop reads no clock: started_at and elapsed time come from the CLI" },
+  { path = "std::time::Instant::now",          reason = "the loop reads no clock: started_at and elapsed time come from the CLI" },
+  { path = "std::env::var",                    reason = "the loop reads no environment; its inputs arrive validated" },
+  { path = "std::env::var_os",                 reason = "the loop reads no environment; its inputs arrive validated" },
+  { path = "minos_core::id::ExperimentId::of", reason = "D-12: name an experiment through Experiment::candidate(CumulativeDiff) or a recorded ID, never by hashing a bare Diff" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap or BTreeSet" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeMap or BTreeSet" },
+  { path = "std::process::Command",      reason = "the loop proposes through ModelProvider and runs jobs through JobRunner; it spawns no process" },
+  { path = "std::fs::File",              reason = "the loop touches storage only through the Ledger, Blobs, and RunLock traits" },
+]

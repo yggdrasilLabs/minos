@@ -1,0 +1,16 @@
+# Replaces (does not merge with) any ancestor clippy.toml. Clippy uses the first file found
+# walking up from CARGO_MANIFEST_DIR.
+# Every path below is proven to fire once (07-EVIDENCE.md "Clippy bans fire (07-03)").
+# A mistyped path only warns, so re-prove any entry you change.
+disallowed-methods = [
+  { path = "std::time::SystemTime::now", reason = "LOOP-03: the runner reads no clock; a VM's time is Finished::elapsed, measured by the backend" },
+  { path = "std::time::Instant::now",    reason = "LOOP-03: the runner reads no clock; a VM's time is Finished::elapsed, measured by the backend" },
+  { path = "std::env::var",              reason = "the runner reads no environment; its inputs arrive validated" },
+  { path = "std::env::var_os",           reason = "the runner reads no environment; its inputs arrive validated" },
+]
+disallowed-types = [
+  { path = "std::collections::HashMap",  reason = "order must be stable: use BTreeMap or BTreeSet" },
+  { path = "std::collections::HashSet",  reason = "order must be stable: use BTreeMap or BTreeSet" },
+  { path = "std::process::Command",      reason = "the runner starts VMs only through Backend::launch and spawns no process" },
+  { path = "std::fs::File",              reason = "the runner stores through Blobs and launches through Backend; it opens no file" },
+]
