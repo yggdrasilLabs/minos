@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail/experiment_from_bare_diff.rs:6:27
+  |
+6 |     Experiment::candidate(diff)
+  |     --------------------- ^^^^ expected `CumulativeDiff`, found `Diff`
+  |     |
+  |     arguments to this function are incorrect
+  |
+note: associated function defined here
+ --> src/experiment.rs
+  |
+  |     pub fn candidate(diff: CumulativeDiff) -> Self {
+  |            ^^^^^^^^^

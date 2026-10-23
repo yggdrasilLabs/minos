@@ -38,6 +38,8 @@ pub mod apply;
 
 pub mod compose;
 
+pub mod cumulative;
+
 /// The exact marker that strips the newline from the body line before it.
 const NO_NEWLINE_MARKER: &str = "\\ No newline at end of file";
 

@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/cumulative_from_parent_tree.rs:15:16
+   |
+15 |     cumulative(parent, candidate, writable, limits)
+   |     ---------- ^^^^^^ expected `&BaseTree`, found `&Tree`
+   |     |
+   |     arguments to this function are incorrect
+   |
+   = note: expected reference `&BaseTree`
+              found reference `&Tree`
+note: function defined here
+  --> src/diff/cumulative.rs
+   |
+   | pub fn cumulative(
+   |        ^^^^^^^^^^

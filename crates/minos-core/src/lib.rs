@@ -90,9 +90,10 @@ pub use image::ImageRef;
 // manifest: the validated project manifest
 pub use manifest::{Goal, JudgeSpec, JudgeVersion, Manifest, Objective, Tier};
 
-// diff: the parsed canonical diff and the tree it applies to
+// diff: the parsed canonical diff, the tree it applies to, and the diff cumulative from the run's base
 pub use diff::Diff;
 pub use diff::apply::Tree;
+pub use diff::cumulative::{BaseTree, CumulativeDiff};
 
 // experiment: a base tree plus an optional diff
 pub use experiment::Experiment;

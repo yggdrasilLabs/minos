@@ -18,6 +18,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use super::apply::{ApplyError, Tree, apply};
+use super::cumulative::{BaseTree, CumulativeDiff, cumulative};
 use super::{Diff, DiffError, NO_NEWLINE_MARKER};
 use crate::limits::Limits;
 use crate::path::RelPath;
@@ -49,6 +50,9 @@ pub enum ComposeError {
     /// The re-derived diff failed validation, for example a cap or a non-writable path.
     #[error(transparent)]
     Invalid(#[from] DiffError),
+    /// The parent's diff is cumulative from a base tree other than the run's (07-CONTEXT D-12).
+    #[error("the parent's diff is cumulative from another base tree")]
+    BaseMismatch,
 }
 
 /// The canonical diff that turns `base` into `candidate`, cumulative from `base`.
@@ -56,6 +60,10 @@ pub enum ComposeError {
 /// Both trees must have the same paths. Each file whose bytes differ, in path order, must be UTF-8 on both sides
 /// and becomes one section with diffy's default context; the text then goes through [`Diff::parse`] with
 /// `writable` and `limits`, so the result is a validated, canonical [`Diff`].
+///
+/// The result is cumulative only when `base` is the run's base tree, which is what
+/// [`cumulative`](super::cumulative::cumulative) guarantees by taking a [`BaseTree`]; a diff against any other tree,
+/// the sweep's render against the parent included, stays a plain [`Diff`] (07-CONTEXT D-12).
 ///
 /// # Errors
 ///
@@ -87,27 +95,30 @@ pub fn diff_trees(
     Ok(Diff::parse(&text, writable, limits)?)
 }
 
-/// The cumulative diff for `proposal`, written against the state `parent` produces from `base` (or against
-/// `base` itself when there is no parent).
+/// The cumulative diff for `proposal`, written against the state `parent` produces from the run's base (or
+/// against the base itself when there is no parent).
 ///
-/// `parent` must be the parent experiment's cumulative diff, the output of an earlier `compose` or [`diff_trees`].
+/// `parent` is the parent experiment's [`CumulativeDiff`], minted against the same [`BaseTree`]. The result's bytes
+/// are [`diff_trees`] of the base and the applied candidate, so they equal what the untyped composition gave.
 ///
 /// # Errors
 ///
-/// Returns [`ComposeError::Apply`] if the parent's diff or the proposal does not apply, and any error of
-/// [`diff_trees`], including [`ComposeError::NoChange`] when the result equals the base.
+/// Returns [`ComposeError::BaseMismatch`] if `parent` is cumulative from another base tree,
+/// [`ComposeError::Apply`] if the parent's diff or the proposal does not apply, and any error of [`diff_trees`],
+/// including [`ComposeError::NoChange`] when the result equals the base.
 pub fn compose(
-    base: &Tree,
-    parent: Option<&Diff>,
+    base: &BaseTree,
+    parent: Option<&CumulativeDiff>,
     proposal: &Diff,
     writable: &BTreeSet<RelPath>,
     limits: &Limits,
-) -> Result<Diff, ComposeError> {
+) -> Result<CumulativeDiff, ComposeError> {
     let candidate = match parent {
-        Some(parent) => apply(&apply(base, parent)?, proposal)?,
-        None => apply(base, proposal)?,
+        Some(parent) if parent.base() != base.id() => return Err(ComposeError::BaseMismatch),
+        Some(parent) => apply(&apply(base.tree(), parent.as_diff())?, proposal)?,
+        None => apply(base.tree(), proposal)?,
     };
-    diff_trees(base, &candidate, writable, limits)
+    cumulative(base, &candidate, writable, limits)
 }
 
 /// The first path, in path order, that is in only one of the two trees.

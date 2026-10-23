@@ -155,8 +155,7 @@ fn recorded_refuses_a_diff_under_another_id() -> TestResult {
     let under_other_base = ExperimentId::of(&TreeId::of(b"another tarball"), &diff);
     for wrong in [baseline, under_other_base] {
         let refused = CumulativeDiff::recorded(base.id(), diff.clone(), &wrong);
-        assert_eq!(refused, Err(NotRecorded::new(wrong)));
-        let error = refused.err().ok_or("recorded accepted a wrong ID")?;
+        let error: NotRecorded = refused.err().ok_or("recorded accepted a wrong ID")?;
         assert_eq!(error.exp(), wrong);
         assert!(error.to_string().contains(&wrong.to_hex()));
     }

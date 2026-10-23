@@ -1,14 +1,16 @@
-//! `Experiment`: a base tree plus a parsed cumulative `Diff`, or the baseline itself (03-CONTEXT D-04).
+//! `Experiment`: a base tree plus a cumulative diff, or the baseline itself (03-CONTEXT D-04).
 //!
 //! An experiment can only be built from a parsed diff, so it can never touch a non-writable path. A parsed
 //! [`Diff`] is never empty, so the baseline is the only experiment without a diff, and it has its own constructor
-//! and its own ID, [`ExperimentId::baseline`]. A candidate's diff must be cumulative from the run's base tree: the
-//! output of [`compose`](crate::diff::compose::compose) or [`diff_trees`](crate::diff::compose::diff_trees), which
-//! is what [`ExperimentId::of`] hashes.
+//! and its own ID, [`ExperimentId::baseline`]. A candidate takes a [`CumulativeDiff`], which exists only when the
+//! diff was minted against the run's base tree or re-read under its recorded ID, so a diff relative to the parent
+//! tree, or a bare [`Diff::parse`] result, cannot become an [`ExperimentId`] by mistake (07-CONTEXT D-12, 03-REVIEW
+//! WR-03).
 
 use std::fmt;
 
 use crate::diff::Diff;
+use crate::diff::cumulative::CumulativeDiff;
 use crate::id::{ExperimentId, TreeId};
 
 /// One experiment: the run's base tree and, for a candidate, its cumulative diff.
@@ -33,15 +35,13 @@ impl Experiment {
         }
     }
 
-    /// A candidate: the base tree and its cumulative diff, under [`ExperimentId::of`].
-    ///
-    /// `diff` must be cumulative from `base` (see the [module docs](self)).
+    /// A candidate: the base tree and the cumulative diff, both taken from `diff`, under [`ExperimentId::of`].
     #[must_use]
-    pub fn candidate(base: TreeId, diff: Diff) -> Self {
+    pub fn candidate(diff: CumulativeDiff) -> Self {
         Self {
-            id: ExperimentId::of(&base, &diff),
-            base,
-            diff: Some(diff),
+            id: diff.exp(),
+            base: diff.base(),
+            diff: Some(diff.into_diff()),
         }
     }
 
