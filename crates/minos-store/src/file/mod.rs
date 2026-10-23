@@ -7,13 +7,14 @@
 //!
 //! ```text
 //! runs/<run hex>/ledger.jsonl    one append-only JSON Lines ledger per run
-//! runs/<run hex>/ledger.lock     the per-run lock file; it holds no data
+//! runs/<run hex>/ledger.lock     the per-append lock file; it holds no data
+//! runs/<run hex>/driver.lock     the whole-run driver lock file (LOOP-06), created 0600; it holds no data
 //! blobs/sha256/<2 hex>/<62 hex>  one file per blob, shared by every run
 //! blobs/staging/                 temporary files of streamed puts, created 0700, never read
 //! ```
 //!
 //! Every directory the store creates has mode 0700. The root, every directory under it, and every ledger, lock,
-//! and blob file is checked with `symlink_metadata` before use: a symlink or an unexpected file type is
+//! driver lock, and blob file is checked with `symlink_metadata` before use: a symlink or an unexpected file type is
 //! [`StoreError::Unsafe`]. A file is opened only after that check, and the opened handle's device and inode
 //! must match what the check saw, so a path swapped for a symlink between the check and the open is refused too.
 //!
@@ -28,8 +29,10 @@
 
 mod blobs;
 mod ledger;
+mod run_lock;
 
 pub use ledger::{MAX_LEDGER_BYTES, MAX_LEDGER_LINE_BYTES};
+pub use run_lock::FileRunGuard;
 
 use std::fs::{self, DirBuilder, File, Metadata, OpenOptions};
 use std::io;
@@ -47,8 +50,12 @@ pub const STORE_DIR: &str = ".minos";
 /// The ledger file's name inside a run directory.
 const LEDGER_FILE: &str = "ledger.jsonl";
 
-/// The lock file's name inside a run directory.
+/// The per-append lock file's name inside a run directory.
 const LOCK_FILE: &str = "ledger.lock";
+
+/// The whole-run lock file's name inside a run directory (LOOP-06). A separate file from [`LOCK_FILE`], so holding
+/// the run never blocks an append.
+const DRIVER_LOCK_FILE: &str = "driver.lock";
 
 /// A ledger and blob store in a directory on the local filesystem.
 ///
@@ -105,6 +112,11 @@ impl FileStore {
     /// `root/runs/<run hex>/ledger.lock`.
     fn lock_path(&self, run: &RunId) -> PathBuf {
         self.run_dir(run).join(LOCK_FILE)
+    }
+
+    /// `root/runs/<run hex>/`[`DRIVER_LOCK_FILE`].
+    fn driver_lock_path(&self, run: &RunId) -> PathBuf {
+        self.run_dir(run).join(DRIVER_LOCK_FILE)
     }
 
     /// `root/blobs`.

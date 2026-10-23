@@ -463,7 +463,10 @@ fn a_symlink_at_driver_lock_is_refused() -> TestResult {
     let run_dir = dir.path().join("runs").join(run().to_hex());
     fs::create_dir_all(&run_dir)?;
     let target = dir.path().join("elsewhere");
-    fs::write(&target, b"")?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)?;
     symlink(&target, run_dir.join("driver.lock"))?;
 
     let result = store.lock_run(&run());

@@ -1,8 +1,8 @@
 //! The store: an append-only event ledger per run and a content-addressed blob store (STORE-01).
 //!
-//! Two traits, [`Ledger`] and [`Blobs`], are the whole contract. They are synchronous, with `&self` methods and
-//! no supertraits, because the local milestone has no async runtime. Every implementation keeps the same
-//! contract, and one test file (`tests/contract.rs`) runs every case against each of them:
+//! Three traits, [`Ledger`], [`Blobs`], and [`RunLock`], are the whole contract. They are synchronous, with
+//! `&self` methods and no supertraits, because the local milestone has no async runtime. Every implementation
+//! keeps the same contract, and one test file (`tests/contract.rs`) runs every case against each of them:
 //!
 //! - [`MemoryStore`] holds everything in memory, for every test above the store.
 //! - [`FileStore`] keeps one append-only JSON Lines ledger per run and a content-addressed blob tree under a
@@ -24,6 +24,9 @@
 //! - An append is durable before it returns. For the memory store that is a no-op.
 //! - A blob is addressed by the plain SHA-256 of its bytes ([`BlobId::of`]) and is rehashed on every read.
 //!   [`Blobs::put_reader`] streams a blob in under a cap and names it exactly as [`Blobs::put`] would.
+//! - [`RunLock::lock_run`] hands out at most one guard per run at a time (LOOP-06); a second request while it
+//!   lives is [`StoreError::RunLocked`], and the run is free again once the guard drops. The run lock is not the
+//!   append lock: appends and reads on a locked run still succeed, so `minos stop` works while a driver runs.
 //!
 //! # Errors
 //!
@@ -38,8 +41,8 @@ pub mod memory;
 use minos_core::id::{BlobId, RunId};
 use minos_core::ledger::{Line, Record};
 
-pub use file::{FileStore, STORE_DIR};
-pub use memory::MemoryStore;
+pub use file::{FileRunGuard, FileStore, STORE_DIR};
+pub use memory::{MemoryRunGuard, MemoryStore};
 
 /// What a successful [`Ledger::append`] did. Every variant carries the `seq` of the line that holds the key. A
 /// same-key append with a different record is not a success: it is [`StoreError::Conflict`] (07-CONTEXT D-08).
@@ -230,6 +233,15 @@ pub enum StoreError {
         /// The existing line's position.
         seq: u64,
     },
+    /// Another driver holds the run's lock (LOOP-06). Never retried: the holder runs until it finishes or is
+    /// stopped, and the caller tells the user rather than waiting.
+    #[error(
+        "run {run} is being driven by another minos process; wait for it to finish or stop it with minos stop"
+    )]
+    RunLocked {
+        /// The run.
+        run: RunId,
+    },
 }
 
 impl StoreError {
@@ -266,6 +278,33 @@ pub trait Ledger {
     /// [`StoreError::LedgerTooLarge`] when it is refused, [`StoreError::Unsafe`] when a store path is not the
     /// expected file, and [`StoreError::Poisoned`] when an in-memory lock was poisoned.
     fn read(&self, run: &RunId) -> Result<LedgerRead, StoreError>;
+}
+
+/// A whole-run exclusive lock (LOOP-06): at most one driver acts on a run at a time.
+///
+/// The lock is synchronous and takes `&self`. [`RunLock::lock_run`] returns a guard that holds the run until it
+/// drops (RAII), so a driver that returns, fails, or panics releases it. The driver takes the guard before its
+/// first ledger read of a session, before appending `RunStarted` for a new run, and holds it for the whole
+/// session. It is separate from the per-append lock: [`Ledger::append`] and [`Ledger::read`] on a locked run still
+/// succeed, from any handle, so `minos stop` and `minos steer` can record while a driver runs (07-RESEARCH
+/// Pitfall 11).
+///
+/// The guard's type is generic over the borrow of the store, so the memory guard can point back into it; it is
+/// used as a bound (`S: RunLock`), never as a trait object.
+pub trait RunLock {
+    /// Holds the run locked until it drops.
+    type Guard<'a>: Sized
+    where
+        Self: 'a;
+
+    /// Locks `run` for the caller, or refuses at once when anyone else holds it. It never waits.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::RunLocked`] when another guard holds `run` (never retried), [`StoreError::Io`] when the lock
+    /// file cannot be created, opened, or locked, [`StoreError::Unsafe`] when a store path is not the expected
+    /// file, and [`StoreError::Poisoned`] when an in-memory lock was poisoned.
+    fn lock_run(&self, run: &RunId) -> Result<Self::Guard<'_>, StoreError>;
 }
 
 /// A content-addressed blob store. A blob goes in whole ([`Blobs::put`]) or streamed from a reader
@@ -375,6 +414,7 @@ mod tests {
             StoreError::Unsafe { what: "blob file" },
             StoreError::Poisoned,
             StoreError::Conflict { seq: 0 },
+            StoreError::RunLocked { run: run() },
         ];
         for error in &others {
             assert!(!error.is_retryable(), "{error} must not be retryable");
@@ -423,6 +463,13 @@ mod tests {
         let text = StoreError::Conflict { seq: 4 }.to_string();
         assert!(text.contains("seq 4"), "{text}");
         assert!(text.contains("first write wins"), "{text}");
+    }
+
+    #[test]
+    fn run_locked_display_names_the_run_and_the_way_out() {
+        let text = StoreError::RunLocked { run: run() }.to_string();
+        assert!(text.contains(&run().to_hex()), "{text}");
+        assert!(text.contains("minos stop"), "{text}");
     }
 
     #[test]
