@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
 stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-10-23T00:31:59.908Z"
+last_updated: "2026-10-23T00:39:56.876Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 76
+  completed_plans: 77
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 7 of 17
+Plan: 8 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -136,6 +136,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P05 | 9 min | 2 tasks | 7 files |
 | Phase 07 P04 | 6min | 3 tasks | 7 files |
 | Phase 07 P06 | 10min | 3 tasks | 25 files |
+| Phase 07 P07 | 7 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -321,6 +322,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-04: BlobSink is not sealed because minos-sandbox does not link minos-store; the runner's adapter over Blobs::put is its production implementor
 - [Phase 07]: 07-06: CumulativeDiff is minted only by cumulative(&BaseTree), compose(&BaseTree), or CumulativeDiff::recorded under its own ExperimentId; diff_trees keeps its plain Diff so a parent-relative sweep render is never labelled cumulative (D-12)
 - [Phase 07]: 07-06: Proposal carries a CumulativeDiff (cumulative(), into_parts -> (CumulativeDiff, String)) and ProposeInput.base is &BaseTree, so the loop admits proposals without re-deriving a diff
+- [Phase 07]: 07-07: next_step is a pure function of the fold with five steps (Calibrate, Propose, RunTrial, Conclude, Done) against an absolute target; no BaselineReady step, the driver checks an unscored baseline itself
+- [Phase 07]: 07-07: JobFailure carries fixed text in both Infra and Config; CANDIDATE_TRIALS = 1 in v1 (07-RESEARCH A4)
 
 ### Pending Todos
 
@@ -351,6 +354,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-23T00:31:51.148Z
+Last session: 2026-10-23T00:39:43.421Z
 Stopped at: Completed 07-04-PLAN.md
 Resume file: None
