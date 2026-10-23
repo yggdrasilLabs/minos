@@ -663,8 +663,8 @@ enum Projected {
     Other,
 }
 
-fn project(result: Result<Appended, StoreError>) -> Projected {
-    match result {
+fn project(result: &Result<Appended, StoreError>) -> Projected {
+    match *result {
         Ok(Appended::New { seq }) => Projected::New(seq),
         Ok(Appended::Duplicate { seq }) => Projected::Duplicate(seq),
         Err(StoreError::Conflict { seq }) => Projected::Conflict(seq),
@@ -708,9 +708,9 @@ proptest! {
         for (first, generation, ordinal, note) in ops {
             let id = if first { run() } else { other_run() };
             let record = steered(generation, ordinal, &[note]);
-            let from_file = project(file.append(&id, record.clone()));
+            let from_file = project(&file.append(&id, record.clone()));
             prop_assert_ne!(&from_file, &Projected::Other, "a file append failed");
-            prop_assert_eq!(from_file, project(memory.append(&id, record)));
+            prop_assert_eq!(from_file, project(&memory.append(&id, record)));
         }
         for id in [run(), other_run()] {
             prop_assert_eq!(file.read(&id)?, memory.read(&id)?);

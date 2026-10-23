@@ -46,11 +46,11 @@ impl Ledger for MemoryStore {
         let lines = runs.entry(*run).or_default();
         if let Some(existing) = lines.iter().find(|line| line.key() == &key) {
             let seq = existing.seq();
-            return Ok(if existing.record() == &record {
-                Appended::Duplicate { seq }
+            return if existing.record() == &record {
+                Ok(Appended::Duplicate { seq })
             } else {
-                Appended::Conflict { seq }
-            });
+                Err(StoreError::Conflict { seq })
+            };
         }
         let seq = len_u64(lines.len());
         lines.push(Line::new(seq, run, record));

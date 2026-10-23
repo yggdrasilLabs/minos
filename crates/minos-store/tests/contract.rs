@@ -97,7 +97,9 @@ fn conflicting_append_is_not_written<L: Ledger>(ledger: &L) -> TestResult {
 
     match result {
         Err(error @ StoreError::Conflict { seq: 0 }) => assert!(!error.is_retryable()),
-        Err(other) => return Err(format!("a conflicting append must be Conflict, got {other}").into()),
+        Err(other) => {
+            return Err(format!("a conflicting append must be Conflict, got {other}").into());
+        }
         Ok(appended) => return Err(format!("a conflicting append returned {appended:?}").into()),
     }
 
@@ -373,8 +375,12 @@ fn keeps_first_write<L: Ledger>(ledger: &L, ops: &[(u32, u32, u8)]) -> Result<()
                 prop_assert_eq!(result?, Appended::Duplicate { seq: *seq });
             }
             Some((seq, _)) => {
-                let conflict = matches!(result, Err(StoreError::Conflict { seq: at }) if at == *seq);
-                prop_assert!(conflict, "a different record under a stored key must be Conflict at the first seq");
+                let conflict =
+                    matches!(result, Err(StoreError::Conflict { seq: at }) if at == *seq);
+                prop_assert!(
+                    conflict,
+                    "a different record under a stored key must be Conflict at the first seq"
+                );
             }
             None => {
                 let seq = u64::try_from(order.len())?;

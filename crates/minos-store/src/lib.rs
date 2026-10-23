@@ -18,8 +18,9 @@
 //! - [`Ledger::read`] returns a run's lines in `seq` order, starting at 0 with no gap, and every line passes
 //!   [`Line::verify`] for its run.
 //! - An append whose [`EventKey`](minos_core::ledger::EventKey) already exists in the run writes nothing
-//!   (STORE-03): [`Appended::Duplicate`] when the stored record is equal, [`Appended::Conflict`] when it is not.
-//!   The first write wins.
+//!   (STORE-03): [`Appended::Duplicate`] when the stored record is equal, and the error
+//!   [`StoreError::Conflict`] when it is not (07-CONTEXT D-08). The first write wins, and a caller cannot carry
+//!   on past a conflict with `?` as if it were a success.
 //! - An append is durable before it returns. For the memory store that is a no-op.
 //! - A blob is addressed by the plain SHA-256 of its bytes ([`BlobId::of`]) and is rehashed on every read.
 //!   [`Blobs::put_reader`] streams a blob in under a cap and names it exactly as [`Blobs::put`] would.
@@ -40,7 +41,8 @@ use minos_core::ledger::{Line, Record};
 pub use file::{FileStore, STORE_DIR};
 pub use memory::MemoryStore;
 
-/// What an [`Ledger::append`] did. Every variant carries the `seq` of the line that holds the key.
+/// What a successful [`Ledger::append`] did. Every variant carries the `seq` of the line that holds the key. A
+/// same-key append with a different record is not a success: it is [`StoreError::Conflict`] (07-CONTEXT D-08).
 #[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Appended {
@@ -55,13 +57,6 @@ pub enum Appended {
         /// The existing line's position.
         seq: u64,
     },
-    /// A line with the same key and a different record already sits at `seq`. Nothing was written: the first
-    /// write wins, and the caller has a bug, such as a re-run trial that produced different metrics
-    /// (04-RESEARCH Pitfall 4).
-    Conflict {
-        /// The existing line's position.
-        seq: u64,
-    },
 }
 
 impl Appended {
@@ -69,7 +64,7 @@ impl Appended {
     #[must_use]
     pub const fn seq(&self) -> u64 {
         match *self {
-            Self::New { seq } | Self::Duplicate { seq } | Self::Conflict { seq } => seq,
+            Self::New { seq } | Self::Duplicate { seq } => seq,
         }
     }
 }
@@ -224,6 +219,17 @@ pub enum StoreError {
     /// An in-memory lock was poisoned by a panic in another thread. The store fails closed.
     #[error("an in-memory store lock was poisoned by a panic")]
     Poisoned,
+    /// A line with the same key and a different record already sits at `seq`, so nothing was written and the
+    /// first write wins (07-CONTEXT D-08). The caller has a bug, such as a re-run trial that produced different
+    /// metrics (04-RESEARCH Pitfall 4). Never retried, because the same append conflicts again, and never a
+    /// candidate's fault: the ledger needs a human.
+    #[error(
+        "a different record already holds this key at seq {seq}; the first write wins and the ledger needs a human"
+    )]
+    Conflict {
+        /// The existing line's position.
+        seq: u64,
+    },
 }
 
 impl StoreError {
@@ -238,12 +244,13 @@ impl StoreError {
 /// An append-only event ledger per run.
 pub trait Ledger {
     /// Appends `record` to `run` unless a line with the same key exists, and says which happened. A same-key
-    /// append writes nothing: [`Appended::Duplicate`] for an equal record, [`Appended::Conflict`] for a
+    /// append writes nothing: [`Appended::Duplicate`] for an equal record, [`StoreError::Conflict`] for a
     /// different one. A [`Appended::New`] line is durable before this returns.
     ///
     /// # Errors
     ///
-    /// [`StoreError::Io`] when the ledger cannot be read or written, [`StoreError::Corrupt`] or
+    /// [`StoreError::Conflict`] when a line with the same key holds a different record (nothing is written; never
+    /// retried), [`StoreError::Io`] when the ledger cannot be read or written, [`StoreError::Corrupt`] or
     /// [`StoreError::LedgerTooLarge`] when the existing ledger is refused, [`StoreError::Encode`] when the line
     /// cannot be serialized, [`StoreError::LineTooLong`] when it is over the store's line cap,
     /// [`StoreError::Unsafe`] when a store path is not the expected file, and
@@ -333,7 +340,7 @@ mod tests {
     fn appended_seq_returns_the_carried_seq() {
         assert_eq!(Appended::New { seq: 0 }.seq(), 0);
         assert_eq!(Appended::Duplicate { seq: 7 }.seq(), 7);
-        assert_eq!(Appended::Conflict { seq: u64::MAX }.seq(), u64::MAX);
+        assert_eq!(Appended::Duplicate { seq: u64::MAX }.seq(), u64::MAX);
     }
 
     #[test]
@@ -367,6 +374,7 @@ mod tests {
             StoreError::BlobTampered { id },
             StoreError::Unsafe { what: "blob file" },
             StoreError::Poisoned,
+            StoreError::Conflict { seq: 0 },
         ];
         for error in &others {
             assert!(!error.is_retryable(), "{error} must not be retryable");
@@ -408,6 +416,13 @@ mod tests {
     fn put_too_large_display_names_the_cap() {
         let text = StoreError::PutTooLarge { max: 1024 }.to_string();
         assert_eq!(text, "the streamed blob is over its 1024-byte cap");
+    }
+
+    #[test]
+    fn conflict_display_names_the_seq() {
+        let text = StoreError::Conflict { seq: 4 }.to_string();
+        assert!(text.contains("seq 4"), "{text}");
+        assert!(text.contains("first write wins"), "{text}");
     }
 
     #[test]

@@ -209,11 +209,11 @@ impl Ledger for FileStore {
         let key = record.event().key(run);
         if let Some(existing) = parsed.lines.iter().find(|line| line.key() == &key) {
             let seq = existing.seq();
-            return Ok(if existing.record() == &record {
-                Appended::Duplicate { seq }
+            return if existing.record() == &record {
+                Ok(Appended::Duplicate { seq })
             } else {
-                Appended::Conflict { seq }
-            });
+                Err(StoreError::Conflict { seq })
+            };
         }
 
         let seq = len_u64(parsed.lines.len());
