@@ -437,7 +437,7 @@ fn scan_files(files: &BTreeMap<RelPath, walk::FileEntry>) -> Result<(), Snapshot
     Ok(())
 }
 
-/// Refuses `files` if any non-empty file's SHA-256 is in `judge_files`, naming the first offenders in path order
+/// Refuses `files` if any non-empty file's SHA-256 is in `judge`, naming the first offenders in path order
 /// and counting all of them (07-CONTEXT D-04, D-20).
 ///
 /// # Errors
@@ -445,16 +445,16 @@ fn scan_files(files: &BTreeMap<RelPath, walk::FileEntry>) -> Result<(), Snapshot
 /// [`SnapshotError::JudgeOverlap`] when at least one non-empty file equals a judge file byte for byte.
 fn check_judge_overlap(
     files: &BTreeMap<RelPath, walk::FileEntry>,
-    judge_files: &BTreeSet<BlobId>,
+    judge: &BTreeSet<BlobId>,
 ) -> Result<(), SnapshotError> {
-    if judge_files.is_empty() {
+    if judge.is_empty() {
         return Ok(());
     }
     let mut paths = Vec::new();
     let mut total: u64 = 0;
     for (path, file) in files {
         // D-20: an empty file reveals nothing, and every empty file shares one digest.
-        if file.bytes.is_empty() || !judge_files.contains(&BlobId::of(&file.bytes)) {
+        if file.bytes.is_empty() || !judge.contains(&BlobId::of(&file.bytes)) {
             continue;
         }
         total = total.saturating_add(1);
