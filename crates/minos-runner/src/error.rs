@@ -3,7 +3,7 @@
 //! A run step can end three ways, and only two of them are errors:
 //!
 //! - **The candidate did something wrong.** That is never an error. It is an [`Outcome`](minos_core::Outcome),
-//!   recorded in a `Judged` event and never retried; the `map` module decides which.
+//!   recorded in a `Judged` event and never retried; [`crate::map`] decides which.
 //! - **Infrastructure failed** ([`RunnerError::Infra`]): a launch, a wait, a store write, or a guest setup step
 //!   that has nothing to do with the candidate's code. The loop retries the same step after its pause and counts
 //!   the failure toward `[budget] max_infra_failures`; nothing is recorded for the failed attempt.

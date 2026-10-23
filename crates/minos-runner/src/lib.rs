@@ -7,7 +7,7 @@
 //! Three guarantees hold here:
 //!
 //! - **The runner is the only crate that opens sandbox output** (LOOP-01). Every byte a VM returns stays inside
-//!   `Untrusted` until one of its validating exits takes it, and the `map` module turns what the host observed into an
+//!   `Untrusted` until one of its validating exits takes it, and [`map`] turns what the host observed into an
 //!   `Outcome`, an infrastructure failure, or a configuration error, by one pure, exhaustively tested table.
 //! - **Usage is measured by the host** (LOOP-03). [`usage::host_usage`] multiplies the backend's measured
 //!   elapsed time by the plan's machine. The runner reads no clock and no number the guest reported.
@@ -18,7 +18,9 @@
 //! Errors carry blame by type ([`error`]): a candidate fault is an `Outcome`, never an error.
 
 pub mod error;
+pub mod map;
 pub mod usage;
 
 pub use error::{ConfigCause, InfraCause, RunnerError};
+pub use map::{Seen, Verdict, candidate_verdict, judge_verdict, judged_outcome};
 pub use usage::{RUNNER_VCPUS, host_usage};
