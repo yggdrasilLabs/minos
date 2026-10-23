@@ -372,6 +372,10 @@ fn notes_come_back_in_ordinal_order() -> TestResult {
         state.notes(2),
         vec![BlobId::of(b"note zero"), BlobId::of(b"note one")]
     );
+    assert_eq!(
+        state.notes_by_ordinal(2),
+        vec![(0, BlobId::of(b"note zero")), (1, BlobId::of(b"note one"))]
+    );
     assert_eq!(state.next_note_ordinal(2), Some(2));
     assert!(state.notes(1).is_empty());
     assert_eq!(state.next_note_ordinal(1), Some(0));
@@ -387,6 +391,10 @@ fn the_last_note_ordinal_has_no_successor() -> TestResult {
     })?;
     let state = fold(&records)?;
     assert_eq!(state.notes(5), vec![BlobId::of(b"last")]);
+    assert_eq!(
+        state.notes_by_ordinal(5),
+        vec![(u32::MAX, BlobId::of(b"last"))]
+    );
     assert_eq!(state.next_note_ordinal(5), None);
     Ok(())
 }

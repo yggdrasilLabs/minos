@@ -1,6 +1,7 @@
 //! The loop's building blocks, each tested on `MemoryStore` without a VM (LOOP-09): the run inputs and their start
 //! and resume checks (07-CONTEXT D-10, D-13, D-19), the recorder that classifies append errors and dedupes spends
-//! (D-08; 07-RESEARCH Pitfall 1), and the batch blob and admission (D-12, D-18).
+//! (D-08; 07-RESEARCH Pitfall 1), the batch blob and admission (D-12, D-18), and the parent tree, history, and
+//! steer notes read back from the ledger (06-CONTEXT D-05, D-08, D-09; 07-CONTEXT D-09).
 //!
 //! Fixtures are built from TOML text and fixed bytes through public constructors only. A candidate experiment's ID
 //! comes from `Experiment::candidate` over a minted `CumulativeDiff`, because the loop's clippy policy bans hashing
@@ -13,6 +14,7 @@
 //! it compares, so `batch_v1_bytes_pinned` also pins the exact bytes with one SHA-256 literal.
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::str::FromStr;
 
@@ -20,16 +22,18 @@ use minos_core::diff::apply::Tree;
 use minos_core::diff::cumulative::{BaseTree, cumulative};
 use minos_core::experiment::Experiment;
 use minos_core::id::{
-    BlobId, ExperimentId, ImageDigest, ManifestId, ModelId, PromptHash, ReportHash, RunId, TreeId,
+    BlobId, ExperimentId, ImageDigest, ManifestId, MetricName, ModelId, PromptHash, ReportHash,
+    RunId, TreeId,
 };
 use minos_core::ledger::{
     BackendInfo, BackendKind, Decision, DecisionKind, EXPECTED_KRUN_LAYERS, Event, Isolation,
     Origin, Record, ReviewAnswer, ReviewId, ReviewKind, SpendSource, StopReason,
 };
-use minos_core::limits::{BATCH_MAX, Limits};
+use minos_core::limits::{BATCH_MAX, Limits, MAX_STEER_NOTE_BYTES};
 use minos_core::manifest::{Arch, JudgeVersion, Manifest, Tier};
+use minos_core::metric::{Metric, Scorecard};
 use minos_core::money::Prices;
-use minos_core::outcome::{Outcome, Reason};
+use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::path::RelPath;
 use minos_core::state::{RunState, fold};
 use minos_core::usage::Usage;
@@ -37,11 +41,12 @@ use minos_loop::admit::{
     AdmitStep, Batch, BatchError, BatchItem, MAX_BATCH_BYTES, admit, load_batch, missing_proposed,
 };
 use minos_loop::error::DriverError;
+use minos_loop::history::{excerpt_stage, history, notes, parent_tree, recorded_diff};
 use minos_loop::inputs::{Resume, RunInputs, check_resume, check_start, same_frame};
 use minos_loop::record::{append, event_kind, spend_once};
-use minos_propose::Proposal;
 use minos_propose::proposal::parse_output;
 use minos_propose::provider::ModelOutput;
+use minos_propose::{Proposal, SteerNote};
 use minos_store::{Appended, Blobs, Ledger, LedgerRead, MemoryStore, StoreError};
 use serde_json::{Map, Value};
 
@@ -1294,5 +1299,330 @@ fn load_batch_refuses_a_batch_that_does_not_parse() -> TestResult {
         matches!(result, Err(DriverError::Batch { generation: 2, .. })),
         "{result:?}"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The parent tree, the history, and the notes
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A scored outcome that passes the gate with `throughput`.
+fn scored(throughput: f64) -> Result<Outcome, Box<dyn Error>> {
+    Ok(Outcome::Scored(Scorecard::from_entries([
+        (
+            MetricName::from_str("identical_output")?,
+            Metric::new(1.0)?,
+            false,
+        ),
+        (
+            MetricName::from_str("throughput_mb_s")?,
+            Metric::new(throughput)?,
+            false,
+        ),
+    ])?))
+}
+
+/// A trial of `exp` under `judge` with `outcome` and `logs`.
+fn judged(
+    exp: ExperimentId,
+    judge: JudgeVersion,
+    outcome: Outcome,
+    logs: Option<BTreeMap<Stage, BlobId>>,
+) -> Event {
+    Event::Judged {
+        exp,
+        judge,
+        trial: 0,
+        outcome,
+        backend: backend(),
+        logs,
+    }
+}
+
+/// The candidate of `file` set to `content`, with its diff and `rationale` stored, proposed in `generation` from
+/// `parent`.
+fn stored_proposal(
+    fixture: &Fixture,
+    store: &MemoryStore,
+    (file, content, rationale): (&str, &str, &str),
+    generation: u32,
+    parent: ExperimentId,
+) -> Result<(ExperimentId, Event), Box<dyn Error>> {
+    let (exp, diff) = candidate(fixture, file, content)?;
+    let event = Event::Proposed {
+        exp,
+        parent,
+        generation,
+        tier: Tier::SingleShot,
+        diff: store.put(&diff)?,
+        rationale: store.put(rationale.as_bytes())?,
+        origin: model_origin()?,
+        batch: None,
+    };
+    Ok((exp, event))
+}
+
+fn improved(generation: u32, winner: ExperimentId) -> Event {
+    Event::Selected {
+        generation,
+        decision: Decision::new(DecisionKind::Improved { winner }, 1, 0),
+    }
+}
+
+#[test]
+fn parent_tree_of_the_first_generation_is_the_base() -> TestResult {
+    let fixture = Fixture::standard()?;
+    let store = MemoryStore::new();
+    let state = state_of(vec![fixture.run_started(Some(root()))])?;
+
+    let (parent, tree) = parent_tree(&store, &state, &fixture.manifest, &fixture.base, 1)?;
+
+    assert_eq!(parent, fixture.baseline());
+    assert_eq!(tree, base_tree()?);
+    Ok(())
+}
+
+#[test]
+fn parent_tree_after_an_improvement_applies_the_winners_diff() -> TestResult {
+    // Arrange
+    let fixture = Fixture::standard()?;
+    let store = MemoryStore::new();
+    let (winner, proposed) = stored_proposal(
+        &fixture,
+        &store,
+        ("src/parse.rs", PARSE_ONE, "count bytes"),
+        1,
+        fixture.baseline(),
+    )?;
+    let state = state_of(vec![
+        fixture.run_started(Some(root())),
+        proposed,
+        improved(1, winner),
+    ])?;
+
+    // Act
+    let (parent, tree) = parent_tree(&store, &state, &fixture.manifest, &fixture.base, 2)?;
+
+    // Assert
+    let mut expected = base_tree()?;
+    expected.insert(path("src/parse.rs")?, PARSE_ONE.as_bytes().to_vec());
+    assert_eq!(parent, winner);
+    assert_eq!(tree, expected);
+    Ok(())
+}
+
+#[test]
+fn a_recorded_diff_that_is_not_its_experiments_is_refused() -> TestResult {
+    // Arrange: one proposal names another experiment's diff, another names bytes that are not a diff.
+    let fixture = Fixture::standard()?;
+    let store = MemoryStore::new();
+    let (bytes_exp, _) = candidate(&fixture, "src/parse.rs", PARSE_ONE)?;
+    let (fmt_exp, _) = candidate(&fixture, "src/fmt.rs", FMT_ONE)?;
+    let (_, chars_diff) = candidate(&fixture, "src/parse.rs", PARSE_TWO)?;
+    let state = state_of(vec![
+        fixture.run_started(Some(root())),
+        proposed(&fixture, bytes_exp, 1, store.put(&chars_diff)?, None)?,
+        proposed(&fixture, fmt_exp, 1, store.put(b"not a diff\n")?, None)?,
+        improved(1, bytes_exp),
+    ])?;
+
+    // Act
+    let substituted = recorded_diff(&store, &state, &fixture.manifest, &fixture.base, &bytes_exp);
+    let garbage = recorded_diff(&store, &state, &fixture.manifest, &fixture.base, &fmt_exp);
+    let parent = parent_tree(&store, &state, &fixture.manifest, &fixture.base, 2);
+
+    // Assert
+    assert!(
+        matches!(substituted, Err(DriverError::DiffRecord { exp }) if exp == bytes_exp),
+        "{substituted:?}"
+    );
+    assert!(
+        matches!(garbage, Err(DriverError::DiffRecord { exp }) if exp == fmt_exp),
+        "{garbage:?}"
+    );
+    assert!(
+        matches!(parent, Err(DriverError::DiffRecord { exp }) if exp == bytes_exp),
+        "{parent:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn history_lists_earlier_experiments_with_sanitized_failure_excerpts() -> TestResult {
+    // Arrange: generation 1's winner scored; generation 2 has a build failure with a hostile log and one
+    // without logs.
+    let fixture = Fixture::standard()?;
+    let judge = fixture.judge();
+    let store = MemoryStore::new();
+    let (winner, winner_proposed) = stored_proposal(
+        &fixture,
+        &store,
+        ("src/parse.rs", PARSE_ONE, "count bytes"),
+        1,
+        fixture.baseline(),
+    )?;
+    let (logged, logged_proposed) = stored_proposal(
+        &fixture,
+        &store,
+        ("src/parse.rs", PARSE_TWO, "count chars"),
+        2,
+        winner,
+    )?;
+    let (silent, silent_proposed) = stored_proposal(
+        &fixture,
+        &store,
+        ("src/fmt.rs", FMT_ONE, "format it"),
+        2,
+        winner,
+    )?;
+    let log = store.put(b"compiling\n\x1b[31merror: boom\x00\x1b[0m\n")?;
+    let state = state_of(vec![
+        fixture.run_started(Some(root())),
+        judged(fixture.baseline(), judge, scored(100.0)?, None),
+        winner_proposed,
+        judged(winner, judge, scored(120.0)?, None),
+        improved(1, winner),
+        logged_proposed,
+        judged(
+            logged,
+            judge,
+            Outcome::Rejected(Reason::BuildFailed),
+            Some([(Stage::Build, log)].into()),
+        ),
+        silent_proposed,
+        judged(silent, judge, Outcome::Rejected(Reason::BuildFailed), None),
+        Event::Selected {
+            generation: 2,
+            decision: Decision::new(DecisionKind::Kept { incumbent: winner }, 2, 0),
+        },
+    ])?;
+
+    // Act
+    let history = history(&store, &state, &fixture.manifest, &judge, 3)?;
+
+    // Assert
+    let short = |exp: ExperimentId| exp.to_string().chars().take(12).collect::<String>();
+    let table = history.table();
+    assert_eq!(history.row_count(), 3);
+    assert!(
+        table.contains(&format!("gen 1 | exp {} | winner", short(winner))),
+        "{table}"
+    );
+    assert!(
+        table.contains(&format!("gen 2 | exp {} | candidate", short(logged))),
+        "{table}"
+    );
+    assert!(
+        table.contains(&format!("gen 2 | exp {} | candidate", short(silent))),
+        "{table}"
+    );
+    let [(label, text)] = history.excerpts() else {
+        return Err(format!("expected one excerpt, got {:?}", history.excerpts()).into());
+    };
+    assert!(label.contains(&short(logged)), "{label}");
+    assert!(text.contains("error: boom"), "{text}");
+    // The excerpt keeps line structure and nothing else a terminal or a model could act on.
+    assert!(
+        text.chars()
+            .all(|c| c == '\n' || c == '\t' || !c.is_control()),
+        "{text:?}"
+    );
+    assert!(!text.contains('\u{1b}') && !text.contains('\0'), "{text:?}");
+    Ok(())
+}
+
+#[test]
+fn excerpt_stage_maps_each_outcome_to_the_stage_whose_log_explains_it() -> TestResult {
+    let path = path("src/parse.rs")?;
+    let gate = MetricName::from_str("identical_output")?;
+    let cases = [
+        (Outcome::Rejected(Reason::BuildFailed), Some(Stage::Build)),
+        (Outcome::Rejected(Reason::RunFailed), Some(Stage::Run)),
+        (Outcome::Rejected(Reason::OutputInvalid), Some(Stage::Run)),
+        (Outcome::Rejected(Reason::OutputTooLarge), Some(Stage::Run)),
+        (Outcome::Rejected(Reason::ChunkProtocol), Some(Stage::Run)),
+        (
+            Outcome::Rejected(Reason::GateFailed { gate: gate.clone() }),
+            Some(Stage::Judge),
+        ),
+        (
+            Outcome::Rejected(Reason::MissingMetric {
+                metric: gate.clone(),
+            }),
+            Some(Stage::Judge),
+        ),
+        (
+            Outcome::Rejected(Reason::UndeclaredMetric {
+                metric: gate.clone(),
+            }),
+            Some(Stage::Judge),
+        ),
+        (
+            Outcome::Rejected(Reason::HeldOutMismatch { metric: gate }),
+            Some(Stage::Judge),
+        ),
+        (
+            Outcome::Rejected(Reason::ScorecardInvalid),
+            Some(Stage::Judge),
+        ),
+        (
+            Outcome::Crashed {
+                stage: Stage::Build,
+            },
+            Some(Stage::Build),
+        ),
+        (
+            Outcome::TimedOut {
+                stage: Stage::Judge,
+            },
+            Some(Stage::Judge),
+        ),
+        (
+            Outcome::Rejected(Reason::ApplyFailed { path, hunk: 1 }),
+            None,
+        ),
+        (scored(100.0)?, None),
+    ];
+    for (outcome, expected) in cases {
+        assert_eq!(excerpt_stage(&outcome), expected, "{outcome:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn notes_come_back_in_ordinal_order_each_within_the_cap() -> TestResult {
+    // Arrange: the second note is at the cap, and sanitizing its escapes makes it longer.
+    let fixture = Fixture::standard()?;
+    let store = MemoryStore::new();
+    let first = store.put(b"try a lookup table")?;
+    let second = store.put(&vec![0x1b; MAX_STEER_NOTE_BYTES])?;
+    let state = state_of(vec![
+        fixture.run_started(Some(root())),
+        Event::Steered {
+            generation: 2,
+            ordinal: 1,
+            note: second,
+        },
+        Event::Steered {
+            generation: 2,
+            ordinal: 0,
+            note: first,
+        },
+    ])?;
+
+    // Act
+    let notes = notes(&store, &state, 2)?;
+
+    // Assert
+    let ordinals: Vec<u32> = notes.iter().map(SteerNote::ordinal).collect();
+    assert_eq!(ordinals, vec![0, 1]);
+    assert_eq!(
+        notes.first().map(|note| note.text().as_str()),
+        Some("try a lookup table")
+    );
+    for note in &notes {
+        assert!(note.text().as_str().len() <= MAX_STEER_NOTE_BYTES);
+        assert!(!note.text().as_str().contains('\u{1b}'));
+    }
     Ok(())
 }
