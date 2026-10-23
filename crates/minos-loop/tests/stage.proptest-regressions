@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 488066c1e5694267d1fb409e7acd5f3768d89896e59d5acf772ef142648181fe # shrinks to plan = Plan { baseline_trials: 0, candidate_trials: 1, target: 1, batches: [0], wins: [false], crashes: [false] }
+cc 30d6d6145c586860adeaebc39131022781d51fc92fc00511d9a05699e6df1fba # shrinks to plan = Plan { baseline_trials: 0, candidate_trials: 1, target: 1, batches: [0], wins: [false], crashes: [false] }, cut = Index(0), keys = []
