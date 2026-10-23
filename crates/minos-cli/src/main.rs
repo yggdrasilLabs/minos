@@ -8,6 +8,8 @@
 //! - `minos host setup`: sign the `minos-vmm` helper and verify its entitlements (KRUN-08).
 //! - `minos env build [--update] [--allow-dirty]`: build the project's root image and write `minos.lock`
 //!   (KRUN-09, CLI-02; [`minos_cli::env_build`]).
+//! - `minos judge push <dir> [--update]`: register judge data under the manifest's `[judge] version` label in
+//!   `minos.lock` (JUDGE-01, CLI-04; [`minos_cli::judge_push`]).
 //!
 //! Phase 8 adds the rest of the tree CLAUDE.md lists. `anyhow` appears
 //! only here, at the binary boundary (rules/err-anyhow-app); the library half is in `minos_cli`.
@@ -21,6 +23,7 @@ use anyhow::{Context, anyhow};
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use minos_cli::builder::DockerBuildx;
 use minos_cli::env_build::{EnvBuildError, EnvBuildOptions, env_build};
+use minos_cli::judge_push::{JudgePushOptions, judge_push};
 use minos_cli::locate::locate;
 use minos_core::text::SafeText;
 use minos_sandbox::Refusal;
@@ -40,6 +43,21 @@ whose image digest differs from minos.lock is refused unless --update is passed.
 The Dockerfile's USER is ignored: every file in the image is owned by root, and the build and run commands run as \
 uid 64000. Install toolchains into world-readable prefixes such as /usr/local, and set CARGO_HOME and RUSTUP_HOME \
 there, never under /root.";
+
+/// `minos judge push`'s long help: what is packed, where it goes, and the label rule (07-CONTEXT D-01 to D-03).
+const JUDGE_PUSH_HELP: &str = "\
+Register a directory of judge data under the manifest's [judge] version label.
+
+The directory is packed with the source snapshot's hygiene and no override: its own .gitignore and .minosignore \
+files apply, the hard denylist (.git/, .minos/, .env*, keys, ...) drops entries and every drop is listed, \
+symlinks and special files refuse the push, and the secret scan must pass. Data over 96 MiB is refused, never \
+truncated. Every path the judge command names must be in the directory, at the same project-relative path. A \
+directory inside the project must lie under a [source] exclude entry.
+
+The tarball is stored in .minos/blobs, and minos.lock records the label, its tree digest, the file count and \
+bytes, and each file's path and SHA-256, never the data. Committing minos.lock exposes the judge file paths, and \
+a low-entropy file can be guessed from its digest. A fresh clone must push again. Different data under a label \
+minos.lock already records is refused unless --update is passed; bump [judge] version for new data instead.";
 
 fn main() -> ExitCode {
     match run() {
@@ -93,6 +111,31 @@ fn cli() -> Command {
                         ),
                 ),
         )
+        .subcommand(
+            Command::new("judge")
+                .about("Manage the project's judge data")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("push")
+                        .about("register judge data under the manifest's [judge] version label")
+                        .long_about(JUDGE_PUSH_HELP)
+                        .arg(
+                            Arg::new("dir")
+                                .required(true)
+                                .value_parser(clap::value_parser!(std::path::PathBuf))
+                                .help(
+                                    "the directory of judge data to push under the manifest's [judge] version label",
+                                ),
+                        )
+                        .arg(
+                            Arg::new("update")
+                                .long("update")
+                                .action(ArgAction::SetTrue)
+                                .help("replace the judge data already recorded for this label"),
+                        ),
+                ),
+        )
 }
 
 /// Parses the command line and runs the chosen command.
@@ -107,6 +150,10 @@ fn run() -> anyhow::Result<ExitCode> {
         Some(("env", env)) => match env.subcommand() {
             Some(("build", build)) => env_build_command(build),
             _ => Err(anyhow!("unknown env command")),
+        },
+        Some(("judge", judge)) => match judge.subcommand() {
+            Some(("push", push)) => judge_push_command(push),
+            _ => Err(anyhow!("unknown judge command")),
         },
         _ => Err(anyhow!("unknown command")),
     }
@@ -173,6 +220,45 @@ fn env_build_command(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
     }
 }
 
+/// Runs `minos judge push` for the project in the current directory and prints what was recorded. Every path
+/// printed goes through [`SafeText`].
+fn judge_push_command(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let project = env::current_dir().context("reading the current directory")?;
+    let dir = matches
+        .get_one::<std::path::PathBuf>("dir")
+        .ok_or_else(|| anyhow!("the judge data directory is required"))?;
+    let options = JudgePushOptions::new(matches.get_flag("update"));
+    let report = judge_push(&project, dir, options).with_context(|| {
+        format!(
+            "pushing judge data from {}",
+            SafeText::inline(&dir.to_string_lossy())
+        )
+    })?;
+    println!(
+        "judge data: label {}, sha256 {}",
+        report.label(),
+        report.tree()
+    );
+    println!("files: {}, {} bytes", report.file_count(), report.bytes());
+    println!("judge version: {}", report.judge_version());
+    println!(
+        "minos.lock: {}",
+        if report.lock_written() {
+            "written"
+        } else {
+            "unchanged"
+        }
+    );
+    for denied in report.denied() {
+        println!(
+            "dropped by the denylist: {} ({})",
+            denied.path(),
+            denied.rule().pattern()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::cli;
@@ -180,5 +266,13 @@ mod tests {
     #[test]
     fn command_tree_is_well_formed() {
         cli().debug_assert();
+    }
+
+    #[test]
+    fn judge_push_parses_dir_and_update() {
+        let parsed = cli().try_get_matches_from(["minos", "judge", "push", "data", "--update"]);
+        assert!(parsed.is_ok(), "{parsed:?}");
+        let missing = cli().try_get_matches_from(["minos", "judge", "push"]);
+        assert!(missing.is_err(), "push without a directory parsed");
     }
 }
