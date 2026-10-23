@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-10-22T23:58:54.656Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-10-23T00:03:55.211Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 72
+  completed_plans: 73
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 3 of 17
+Plan: 4 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -132,6 +132,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 06 P10 | 10min | 2 tasks | 3 files |
 | Phase 07 P01 | 9min | 3 tasks | 16 files |
 | Phase 07 P02 | 10min | 2 tasks | 8 files |
+| Phase 07 P03 | 3 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -309,6 +310,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-01: phase-7 golden cases live in a second list with their own SHA-256 pin (2da862bd...); the 25-case pin dedebd15... never moves
 - [Phase 07]: 07-02: a [[judge.file]] path over 255 bytes is refused (LockError::JudgeFilePath), so MAX_LOCK_BYTES (4 MiB) provably fits one label at MAX_JUDGE_FILES entries; all labels share the cap
 - [Phase 07]: 07-02: [judge] trials defaults to 3 (1 to 32) and is excluded from JudgeVersion
+- [Phase 07]: 07-03: The loop's ExperimentId::of ban is proven through both the module path and the crate-root re-export, so a re-export cannot route around D-12
+- [Phase 07]: 07-03: std::thread::sleep stays allowed in minos-loop for the D-16 retry pause; SystemTime::now and Instant::now are banned there and in minos-runner
 
 ### Pending Todos
 
@@ -339,6 +342,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-22T23:58:50.526Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-10-23T00:03:55.206Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None
