@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-10-23T00:51:47.567Z"
+stopped_at: Completed 07-09-PLAN.md
+last_updated: "2026-10-23T01:01:26.689Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 78
+  completed_plans: 79
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 9 of 17
+Plan: 10 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -138,6 +138,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P06 | 10min | 3 tasks | 25 files |
 | Phase 07 P07 | 7 min | 2 tasks | 7 files |
 | Phase 07 P08 | 15 min | 2 tasks | 9 files |
+| Phase 07 P09 | 9 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -327,6 +328,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-07: JobFailure carries fixed text in both Infra and Config; CANDIDATE_TRIALS = 1 in v1 (07-RESEARCH A4)
 - [Phase 07]: 07-08: pack_judge_data shares the snapshot's walker, denylist, offender rules, scan, and packer under WalkRules::judge (96 MiB per file, in total, and for the tarball; 10,000 files); no clean check, no judge-path drop
 - [Phase 07]: 07-08: snapshot refuses non-empty files equal to pushed judge data (JudgeOverlap) before the scan and clean check; env build reads minos.lock first and passes Lock::judge_file_digests
+- [Phase 07]: 07-09: an Ended the runner map has no row for (Exited as NotExited, or a future variant) is Infra(InfraCause::Unmapped): fail closed, never blamed on the candidate
+- [Phase 07]: 07-09: a judge that exited 0 passes only with Packed output; otherwise Rejected(OutputTooLarge) or Rejected(OutputInvalid)
 
 ### Pending Todos
 
@@ -357,6 +360,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-23T00:51:39.188Z
-Stopped at: Completed 07-04-PLAN.md
+Last session: 2026-10-23T01:01:26.684Z
+Stopped at: Completed 07-09-PLAN.md
 Resume file: None
