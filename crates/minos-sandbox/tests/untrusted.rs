@@ -1,10 +1,14 @@
-//! The three capped exits from `Untrusted` output (SBX-04), and the judge-only scorecard path (D-14).
+//! The three capped exits from `Untrusted` output (SBX-04), the judge-only scorecard path (D-14), and the two sink
+//! exits, `store_judge_input` on candidate output and `store_tail` on any file (07-CONTEXT D-17).
 //!
 //! Streams are built header by header in memory with `tar::Header`. The compile-fail proof that candidate output
 //! has no `into_scorecard` lands with plan 04-08; here the exits are exercised for both roles.
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::error::Error;
+use std::fmt;
+use std::io::{Cursor, Read};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -15,15 +19,16 @@ use minos_core::guest::{
 use minos_core::id::{BlobId, ImageDigest, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
 use minos_core::ledger::{BackendKind, ConfinementLayer, Isolation};
-use minos_core::limits::Limits;
+use minos_core::limits::{Limits, MAX_STAGE_LOG_BYTES};
 use minos_core::manifest::{Arch, JudgeVersion};
 use minos_core::metric::{Scorecard, ScorecardError};
 use minos_core::outcome::{Reason, Stage};
 use minos_core::path::RelPath;
 use minos_sandbox::{
-    Candidate, Capabilities, Ended, Finished, GuestOutput, InputDisk, JUDGE_LOG_PATH, Judge,
-    JudgeData, Machine, OutputCap, OutputFault, OutputInvalid, RUN_LOG_PATH, Role, RoleKind,
-    SCORECARD_PATH, STATUS_PATH, SandboxSpec, ScorecardFault, StatusFault, Untrusted, preflight,
+    BUILD_LOG_PATH, BlobSink, Candidate, Capabilities, Ended, Finished, GuestOutput, InputDisk,
+    JUDGE_LOG_PATH, Judge, JudgeData, Machine, OutputCap, OutputFault, OutputInvalid, RUN_LOG_PATH,
+    Role, RoleKind, SCORECARD_PATH, STATUS_PATH, SandboxSpec, ScorecardFault, SinkError,
+    StatusFault, Untrusted, preflight,
 };
 use tar::Header;
 
@@ -515,4 +520,291 @@ fn take_status_input_failure_is_accepted_whatever_role_it_names() -> TestResult 
 #[test]
 fn status_path_is_core_s() {
     assert_eq!(STATUS_PATH, minos_core::guest::STATUS_PATH);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sink exits: store_judge_input (candidate output only) and store_tail (any file)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The store error a failing [`Recorder`] returns.
+#[derive(Debug, PartialEq, Eq)]
+struct SinkFailed;
+
+impl fmt::Display for SinkFailed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the test sink failed")
+    }
+}
+
+impl Error for SinkFailed {}
+
+/// What a [`Recorder`] answers to a put.
+#[derive(Clone, Copy)]
+enum Answer {
+    /// The bytes' own digest, as an honest store does.
+    Honest,
+    /// Another blob's ID.
+    WrongId,
+    /// A store failure.
+    Fail,
+}
+
+/// A sink that records every put and answers as told.
+struct Recorder {
+    answer: Answer,
+    puts: RefCell<Vec<Vec<u8>>>,
+}
+
+impl Recorder {
+    fn new(answer: Answer) -> Self {
+        Self {
+            answer,
+            puts: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// The one put the exit made, or an error when it made none or several.
+    fn only_put(self) -> Result<Vec<u8>, Box<dyn Error>> {
+        let mut puts = self.puts.into_inner();
+        match (puts.pop(), puts.is_empty()) {
+            (Some(bytes), true) => Ok(bytes),
+            (None, _) => Err("the sink was never called".into()),
+            (Some(_), false) => Err(format!("the sink was called {} times", puts.len() + 1).into()),
+        }
+    }
+}
+
+impl BlobSink for Recorder {
+    type Error = SinkFailed;
+
+    fn put(&self, bytes: &[u8]) -> Result<BlobId, SinkFailed> {
+        self.puts.borrow_mut().push(bytes.to_vec());
+        match self.answer {
+            Answer::Honest => Ok(BlobId::of(bytes)),
+            Answer::WrongId => Ok(BlobId::of(b"some other blob")),
+            Answer::Fail => Err(SinkFailed),
+        }
+    }
+}
+
+/// One entry of a re-packed archive as the tar crate reads it back: path, bytes, mode, uid, gid, mtime, user
+/// name, group name, and whether it is a regular file.
+type ReadEntry = (String, Vec<u8>, u32, u64, u64, u64, Vec<u8>, Vec<u8>, bool);
+
+/// The entries of `archive`, read with the tar crate in memory (never unpacked).
+fn read_back(archive: &[u8]) -> Result<Vec<ReadEntry>, Box<dyn Error>> {
+    let mut entries = Vec::new();
+    for entry in tar::Archive::new(Cursor::new(archive)).entries()? {
+        let mut entry = entry?;
+        let header = entry.header().clone();
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes)?;
+        entries.push((
+            header.path()?.to_string_lossy().into_owned(),
+            bytes,
+            header.mode()?,
+            header.uid()?,
+            header.gid()?,
+            header.mtime()?,
+            header.username_bytes().ok_or("no user name field")?.to_vec(),
+            header.groupname_bytes().ok_or("no group name field")?.to_vec(),
+            header.entry_type() == tar::EntryType::Regular,
+        ));
+    }
+    Ok(entries)
+}
+
+/// The size `archive` must have: one header block and the padded data per entry, then the two end blocks.
+fn archive_len(entries: &[ReadEntry]) -> usize {
+    entries
+        .iter()
+        .map(|(_, bytes, ..)| BLOCK + bytes.len().div_ceil(BLOCK) * BLOCK)
+        .sum::<usize>()
+        + 2 * BLOCK
+}
+
+/// A candidate output holding a status, logs, a diff, a scorecard-shaped file, two artifacts, and names that only
+/// look like `out/`.
+fn mixed_candidate_output() -> Result<Untrusted<GuestOutput<Candidate>>, Box<dyn Error>> {
+    candidate_output(&[
+        (STATUS_PATH, b"{}"),
+        (BUILD_LOG_PATH, b"build log"),
+        (RUN_LOG_PATH, b"run log"),
+        ("diffs/a.diff", b"--- a/x\n"),
+        ("out/b.txt", b"hello, judge\n"),
+        ("out/a/c.bin", b"\x00\x01\x02binary\n"),
+        ("outx/d", b"not an artifact"),
+        ("out", b"a file named out"),
+        ("scorecard.json", SCORECARD),
+        (SCORECARD_PATH, SCORECARD),
+    ])
+}
+
+#[test]
+fn judge_input_keeps_only_out_files_in_path_order_with_canonical_headers() -> TestResult {
+    let sink = Recorder::new(Answer::Honest);
+    let id = mixed_candidate_output()?.store_judge_input(&sink)?;
+    let archive = sink.only_put()?;
+    assert_eq!(id, BlobId::of(&archive));
+    let entries = read_back(&archive)?;
+    let empty = Vec::new();
+    assert_eq!(
+        entries,
+        vec![
+            (
+                "out/a/c.bin".to_owned(),
+                b"\x00\x01\x02binary\n".to_vec(),
+                0o644,
+                0,
+                0,
+                0,
+                empty.clone(),
+                empty.clone(),
+                true,
+            ),
+            (
+                "out/b.txt".to_owned(),
+                b"hello, judge\n".to_vec(),
+                0o644,
+                0,
+                0,
+                0,
+                empty.clone(),
+                empty,
+                true,
+            ),
+        ]
+    );
+    // Two zero end blocks and nothing after them.
+    assert_eq!(archive.len(), archive_len(&entries));
+    let (_, end) = archive
+        .split_at_checked(archive.len() - 2 * BLOCK)
+        .ok_or("archive shorter than its end blocks")?;
+    assert!(end.iter().all(|byte| *byte == 0));
+    Ok(())
+}
+
+#[test]
+fn judge_input_repack_is_pinned() -> TestResult {
+    // Golden: computed outside the code under test by a Python script that writes each ustar header field by
+    // field (name; mode, uid, gid, size, and mtime as zero-padded octal ending in a NUL; typeflag `0`; magic
+    // `ustar\0`, version `00`; zero user, group, device, and prefix fields; the checksum over the block with the
+    // checksum field as eight spaces, written as seven octal digits and a NUL), pads each file to 512 bytes,
+    // appends 1024 zero bytes, and hashes the 3072 bytes with SHA-256.
+    let sink = Recorder::new(Answer::Honest);
+    let id = mixed_candidate_output()?.store_judge_input(&sink)?;
+    assert_eq!(
+        id.to_string(),
+        "2330b3195cf77d69a0c71abd7e955f90ce7964a7086632f22ff895c18c87aa5f"
+    );
+    assert_eq!(sink.only_put()?.len(), 3072);
+    Ok(())
+}
+
+#[test]
+fn judge_input_without_artifacts_is_the_empty_archive() -> TestResult {
+    let sink = Recorder::new(Answer::Honest);
+    let output = candidate_output(&[(STATUS_PATH, b"{}"), (RUN_LOG_PATH, b"log")])?;
+    let id = output.store_judge_input(&sink)?;
+    assert_eq!(sink.only_put()?, vec![0; 2 * BLOCK]);
+    // Golden: the SHA-256 of 1024 zero bytes, computed with Python's hashlib.
+    assert_eq!(
+        id.to_string(),
+        "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+    );
+    Ok(())
+}
+
+#[test]
+fn judge_input_refuses_a_sink_that_names_another_digest() -> TestResult {
+    let sink = Recorder::new(Answer::WrongId);
+    let result = mixed_candidate_output()?.store_judge_input(&sink);
+    assert!(matches!(result, Err(SinkError::DigestMismatch)));
+    sink.only_put()?;
+    Ok(())
+}
+
+#[test]
+fn judge_input_passes_on_the_store_error() -> TestResult {
+    let sink = Recorder::new(Answer::Fail);
+    let result = mixed_candidate_output()?.store_judge_input(&sink);
+    assert!(matches!(result, Err(SinkError::Store(SinkFailed))));
+    sink.only_put()?;
+    Ok(())
+}
+
+/// `bytes` as the run log of a candidate output, projected with `take`.
+fn run_log(bytes: &[u8]) -> Result<Untrusted<minos_sandbox::OutputFile<Candidate>>, Box<dyn Error>> {
+    candidate_output(&[(RUN_LOG_PATH, bytes)])?
+        .take(&RelPath::try_from(RUN_LOG_PATH)?)
+        .ok_or_else(|| "the log was not taken".into())
+}
+
+/// The bytes `store_tail(max, ..)` handed an honest sink for `log`, checked against the returned ID.
+fn stored_tail<R: Role>(
+    log: Untrusted<minos_sandbox::OutputFile<R>>,
+    max: usize,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let sink = Recorder::new(Answer::Honest);
+    let id = log.store_tail(max, &sink)?;
+    let bytes = sink.only_put()?;
+    assert_eq!(id, BlobId::of(&bytes));
+    Ok(bytes)
+}
+
+#[test]
+fn tail_keeps_the_last_max_bytes() -> TestResult {
+    let log: Vec<u8> = (0..100).collect();
+    assert_eq!(stored_tail(run_log(&log)?, 10)?, (90..100).collect::<Vec<u8>>());
+    Ok(())
+}
+
+#[test]
+fn tail_of_a_short_log_is_the_whole_log() -> TestResult {
+    assert_eq!(stored_tail(run_log(b"short")?, 10)?, b"short".to_vec());
+    Ok(())
+}
+
+#[test]
+fn tail_is_clamped_to_the_stage_log_cap() -> TestResult {
+    let log: Vec<u8> = (0..MAX_STAGE_LOG_BYTES + 7)
+        .map(|i| u8::try_from(i % 251).unwrap_or(0))
+        .collect();
+    let tail = stored_tail(run_log(&log)?, usize::MAX)?;
+    assert_eq!(tail.len(), MAX_STAGE_LOG_BYTES);
+    assert_eq!(tail.as_slice(), log.get(7..).ok_or("short log")?);
+    Ok(())
+}
+
+#[test]
+fn tail_bytes_are_not_sanitized() -> TestResult {
+    let log = b"ok\n\x1b[31mred\x1b[0m\x00\x07\r\xff\xfe\xe2\x80\xae";
+    assert_eq!(stored_tail(run_log(log)?, 1024)?, log.to_vec());
+    Ok(())
+}
+
+#[test]
+fn tail_works_for_judge_output_too() -> TestResult {
+    let log = judge_output(&[(JUDGE_LOG_PATH, b"judge log")])?
+        .take(&RelPath::try_from(JUDGE_LOG_PATH)?)
+        .ok_or("the log was not taken")?;
+    assert_eq!(stored_tail(log, 5)?, b"e log".to_vec());
+    Ok(())
+}
+
+#[test]
+fn tail_refuses_a_wrong_digest_and_passes_on_a_store_error() -> TestResult {
+    let sink = Recorder::new(Answer::WrongId);
+    assert!(matches!(
+        run_log(b"log")?.store_tail(10, &sink),
+        Err(SinkError::DigestMismatch)
+    ));
+    sink.only_put()?;
+    let sink = Recorder::new(Answer::Fail);
+    assert!(matches!(
+        run_log(b"log")?.store_tail(10, &sink),
+        Err(SinkError::Store(SinkFailed))
+    ));
+    sink.only_put()?;
+    Ok(())
 }
