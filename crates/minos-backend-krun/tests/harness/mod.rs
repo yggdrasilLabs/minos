@@ -30,9 +30,10 @@ use minos_backend_krun::jobdir::{JOB_ROOT_PARENT, JobRoot};
 use minos_backend_krun::rootfs::{PackLimits, check_guest_elf, pack_root_image};
 use minos_backend_krun::{KrunBackend, KrunRunning};
 use minos_core::diff::Diff;
+use minos_core::diff::cumulative::CumulativeDiff;
 use minos_core::experiment::Experiment;
 use minos_core::guest::{GuestJob, GuestStatus, StageEnd, StageReport};
-use minos_core::id::{BlobId, ImageDigest, MetricName, TreeId};
+use minos_core::id::{BlobId, ExperimentId, ImageDigest, MetricName, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
 use minos_core::ledger::ConfinementLayer;
 use minos_core::limits::{Limits, MAX_LOG_EXCERPT_BYTES};
@@ -499,7 +500,8 @@ pub fn start_candidate(
         Some(text) => {
             let diff = Diff::parse(text, manifest.writable(), &Limits::standard())?;
             let diff_id = vm.blobs.put(diff.as_bytes())?;
-            let experiment = Experiment::candidate(tree, diff);
+            let id = ExperimentId::of(&tree, &diff);
+            let experiment = Experiment::candidate(CumulativeDiff::recorded(tree, diff, &id)?);
             JobRequest::candidate(&experiment, diff_id, judge_version(manifest), 0, budget)?
         }
         None => JobRequest::baseline(tree, judge_version(manifest), 0, budget)?,

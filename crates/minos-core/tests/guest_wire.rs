@@ -12,6 +12,7 @@ use std::io::Cursor;
 
 use minos_core::chunk::ChunkToken;
 use minos_core::diff::Diff;
+use minos_core::diff::cumulative::CumulativeDiff;
 use minos_core::experiment::Experiment;
 use minos_core::guest::{
     ApplyStatus, GUEST_JOB_VERSION, GUEST_STATUS_VERSION, GuestJob, GuestJobError, GuestRole,
@@ -23,7 +24,7 @@ use minos_core::guest::{
     MAX_CANDIDATE_OUT_BYTES, MAX_GUEST_INPUT_BYTES, MAX_JUDGE_DATA_BYTES, SECTION_ENTRY_BYTES,
     SECTOR_BYTES, SectionKind, read_input_disk, write_input_disk,
 };
-use minos_core::id::{BlobId, TreeId};
+use minos_core::id::{BlobId, ExperimentId, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
 use minos_core::limits::{GUEST_RESERVE_MIB, Limits, MAX_DIFF_BYTES, MAX_OUTPUT_STREAM_BYTES};
 use minos_core::manifest::{JudgeVersion, Manifest};
@@ -131,7 +132,9 @@ fn baseline_request() -> Result<JobRequest, Box<dyn Error>> {
 }
 
 fn candidate_request() -> Result<JobRequest, Box<dyn Error>> {
-    let experiment = Experiment::candidate(base(), diff()?);
+    let diff = diff()?;
+    let id = ExperimentId::of(&base(), &diff);
+    let experiment = Experiment::candidate(CumulativeDiff::recorded(base(), diff, &id)?);
     Ok(JobRequest::candidate(
         &experiment,
         diff_blob()?,

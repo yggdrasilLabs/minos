@@ -9,6 +9,7 @@ use std::error::Error;
 use minos_core::diff::DiffError;
 use minos_core::diff::apply::{ApplyError, Tree, apply};
 use minos_core::diff::compose::{ComposeError, compose, diff_trees};
+use minos_core::diff::cumulative::{BaseTree, CumulativeDiff};
 use minos_core::diff::{Diff, FileDiff, HunkLine};
 use minos_core::experiment::Experiment;
 use minos_core::id::{ExperimentId, TreeId};
@@ -464,7 +465,16 @@ proptest! {
 // Task 2: composition and Experiment
 // ---------------------------------------------------------------------------------------------------------------
 
-fn compose_of(base: &Tree, parent: Option<&Diff>, proposal: &Diff) -> Result<Diff, ComposeError> {
+/// The run's base for the composition tests: `tree` under one fixed tree ID.
+fn based(tree: Tree) -> BaseTree {
+    BaseTree::new(TreeId::of(b"base tarball"), tree)
+}
+
+fn compose_of(
+    base: &BaseTree,
+    parent: Option<&CumulativeDiff>,
+    proposal: &Diff,
+) -> Result<CumulativeDiff, ComposeError> {
     // Both literals are valid paths; a failed parse would shrink the set and fail the test, never pass it.
     let writable: BTreeSet<RelPath> = [SRC, LIB]
         .into_iter()
@@ -554,7 +564,7 @@ fn diff_trees_rejects_non_text() -> TestResult {
     // The same through compose: the proposal touches only text lines, but the file is not UTF-8.
     let edit = proposal("@@ -2,1 +2,1 @@\n-a\n+b\n")?;
     assert_eq!(
-        compose_of(&base, None, &edit),
+        compose_of(&based(base), None, &edit),
         Err(ComposeError::NotText { path: rel(SRC)? })
     );
     Ok(())
@@ -577,7 +587,7 @@ fn diff_trees_rejects_a_change_to_a_non_writable_file() -> TestResult {
 
 #[test]
 fn compose_reports_an_apply_failure() -> TestResult {
-    let base = tree_with(b"a\nb\nc\n")?;
+    let base = based(tree_with(b"a\nb\nc\n")?);
     let edit = proposal("@@ -1,1 +1,1 @@\n-x\n+y\n")?;
     assert_eq!(
         compose_of(&base, None, &edit),
@@ -592,7 +602,7 @@ fn compose_reports_an_apply_failure() -> TestResult {
 
 #[test]
 fn reverting_the_parent_is_no_change() -> TestResult {
-    let base = tree_with(b"a\nb\nc\n")?;
+    let base = based(tree_with(b"a\nb\nc\n")?);
     let parent = compose_of(&base, None, &diff_of("a\nb\nc\n", "a\nB\nc\n")?)?;
     let revert = diff_of("a\nB\nc\n", "a\nb\nc\n")?;
     assert_eq!(
@@ -605,15 +615,22 @@ fn reverting_the_parent_is_no_change() -> TestResult {
 #[test]
 fn compose_is_cumulative_from_the_base() -> TestResult {
     let start = numbered(20);
-    let base = tree_with(start.as_bytes())?;
+    let base = based(tree_with(start.as_bytes())?);
     let first = start.replace("line 3\n", "line three\n");
     let parent = compose_of(&base, None, &diff_of(&start, &first)?)?;
     let second = first.replace("line 17\n", "line seventeen\n");
     let child = compose_of(&base, Some(&parent), &diff_of(&first, &second)?)?;
     // The child's diff carries both changes and applies to the base, not to the parent's tree.
-    assert_eq!(src_of(&apply(&base, &child)?)?, second.as_bytes());
     assert_eq!(
-        child.files().first().map(|file| file.hunks().len()),
+        src_of(&apply(base.tree(), child.as_diff())?)?,
+        second.as_bytes()
+    );
+    assert_eq!(
+        child
+            .as_diff()
+            .files()
+            .first()
+            .map(|file| file.hunks().len()),
         Some(2)
     );
     Ok(())
@@ -622,7 +639,7 @@ fn compose_is_cumulative_from_the_base() -> TestResult {
 #[test]
 fn same_tree_same_experiment_id() -> TestResult {
     let start = numbered(20);
-    let base = tree_with(start.as_bytes())?;
+    let base = based(tree_with(start.as_bytes())?);
     let target = start.replace("line 10\n", "line ten\n");
     // Three proposals with different bytes reach the same candidate tree.
     let wide = diff_of(&start, &target)?;
@@ -637,7 +654,7 @@ fn same_tree_same_experiment_id() -> TestResult {
     )?;
     let via_parent = proposal("@@ -10,1 +10,1 @@\n-draft\n+line ten\n")?;
 
-    let tree_id = TreeId::of(b"base tarball");
+    let tree_id = base.id();
     let composed = [
         compose_of(&base, None, &wide)?,
         compose_of(&base, None, &narrow)?,
@@ -646,10 +663,15 @@ fn same_tree_same_experiment_id() -> TestResult {
     ];
     let ids: BTreeSet<ExperimentId> = composed
         .iter()
-        .map(|diff| ExperimentId::of(&tree_id, diff))
+        .map(|diff| ExperimentId::of(&tree_id, diff.as_diff()))
         .collect();
     assert_eq!(ids.len(), 1);
-    let texts: BTreeSet<&str> = composed.iter().map(Diff::as_str).collect();
+    let minted: BTreeSet<ExperimentId> = composed.iter().map(CumulativeDiff::exp).collect();
+    assert_eq!(minted, ids);
+    let texts: BTreeSet<&str> = composed
+        .iter()
+        .map(|diff| diff.as_diff().as_str())
+        .collect();
     assert_eq!(texts.len(), 1);
     assert_eq!(texts.first().copied(), Some(wide.as_str()));
     Ok(())
@@ -665,7 +687,8 @@ fn experiment_baseline_and_candidate() -> TestResult {
     assert!(baseline.is_baseline());
 
     let diff = diff_of("a\n", "b\n")?;
-    let candidate = Experiment::candidate(base, diff.clone());
+    let id = ExperimentId::of(&base, &diff);
+    let candidate = Experiment::candidate(CumulativeDiff::recorded(base, diff.clone(), &id)?);
     assert_eq!(candidate.id(), ExperimentId::of(&base, &diff));
     assert_eq!(candidate.base(), base);
     assert_eq!(candidate.diff(), Some(&diff));
@@ -683,7 +706,9 @@ fn debug_omits_content() -> TestResult {
     assert!(shown.contains(SRC));
 
     let diff = diff_of("SECRET-OLD\n", "SECRET-NEW\n")?;
-    let experiment = Experiment::candidate(TreeId::of(b"base"), diff);
+    let tree = TreeId::of(b"base");
+    let id = ExperimentId::of(&tree, &diff);
+    let experiment = Experiment::candidate(CumulativeDiff::recorded(tree, diff, &id)?);
     let shown = format!("{experiment:?}");
     assert!(!shown.contains("SECRET"));
     assert!(shown.contains(&experiment.id().to_hex()));
@@ -706,19 +731,22 @@ proptest! {
     #[test]
     fn compose_matches_sequential_apply(a in file_text(), b in file_text(), c in file_text()) {
         prop_assume!(a != b);
-        let base = tree_with(a.as_bytes()).map_err(fail)?;
+        let base = based(tree_with(a.as_bytes()).map_err(fail)?);
         let p = diff_of(&a, &b).map_err(fail)?;
         let parent = compose_of(&base, None, &p).map_err(fail)?;
-        prop_assert_eq!(apply(&base, &parent).map_err(fail)?, apply(&base, &p).map_err(fail)?);
+        prop_assert_eq!(
+            apply(base.tree(), parent.as_diff()).map_err(fail)?,
+            apply(base.tree(), &p).map_err(fail)?
+        );
         // A proposal against the base is already canonical and cumulative.
-        prop_assert_eq!(parent.as_str(), p.as_str());
+        prop_assert_eq!(parent.as_diff().as_str(), p.as_str());
 
         prop_assume!(b != c);
         let q = diff_of(&b, &c).map_err(fail)?;
-        let sequential = apply(&apply(&base, &parent).map_err(fail)?, &q).map_err(fail)?;
+        let sequential = apply(&apply(base.tree(), parent.as_diff()).map_err(fail)?, &q).map_err(fail)?;
         match compose_of(&base, Some(&parent), &q) {
-            Ok(child) => prop_assert_eq!(apply(&base, &child).map_err(fail)?, sequential),
-            Err(ComposeError::NoChange) => prop_assert_eq!(sequential, base),
+            Ok(child) => prop_assert_eq!(apply(base.tree(), child.as_diff()).map_err(fail)?, sequential),
+            Err(ComposeError::NoChange) => prop_assert_eq!(&sequential, base.tree()),
             Err(other) => prop_assert!(false, "unexpected error {:?}", other),
         }
     }

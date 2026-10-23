@@ -4,9 +4,10 @@
 use std::error::Error;
 
 use minos_core::diff::Diff;
+use minos_core::diff::cumulative::CumulativeDiff;
 use minos_core::experiment::Experiment;
 use minos_core::guest::GuestJob;
-use minos_core::id::{BlobId, TreeId};
+use minos_core::id::{BlobId, ExperimentId, TreeId};
 use minos_core::job::{JobBudget, JobRequest};
 use minos_core::limits::Limits;
 use minos_core::manifest::{JudgeVersion, Manifest};
@@ -102,7 +103,9 @@ fn budget() -> Result<JobBudget, Box<dyn Error>> {
 fn candidate_request() -> Result<JobRequest, Box<dyn Error>> {
     let diff = diff()?;
     let blob = BlobId::of(diff.as_bytes());
-    let experiment = Experiment::candidate(base(), diff);
+    // A fixture's experiment is its own hash: the documented re-read path, under the ID it records.
+    let id = ExperimentId::of(&base(), &diff);
+    let experiment = Experiment::candidate(CumulativeDiff::recorded(base(), diff, &id)?);
     Ok(JobRequest::candidate(
         &experiment,
         blob,
@@ -138,7 +141,9 @@ pub(crate) const PARSE_RS_AFTER: &[u8] = b"fn parse() {\n    new();\n}\n";
 fn request_for(base_tar: &[u8], diff_text: &str) -> Result<JobRequest, Box<dyn Error>> {
     let diff = Diff::parse(diff_text, manifest()?.writable(), &Limits::standard())?;
     let blob = BlobId::of(diff.as_bytes());
-    let experiment = Experiment::candidate(TreeId::of(base_tar), diff);
+    let tree = TreeId::of(base_tar);
+    let id = ExperimentId::of(&tree, &diff);
+    let experiment = Experiment::candidate(CumulativeDiff::recorded(tree, diff, &id)?);
     Ok(JobRequest::candidate(
         &experiment,
         blob,

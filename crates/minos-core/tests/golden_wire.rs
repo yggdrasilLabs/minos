@@ -19,6 +19,7 @@ use std::error::Error;
 use std::str::FromStr;
 
 use minos_core::diff::Diff;
+use minos_core::diff::cumulative::CumulativeDiff;
 use minos_core::experiment::Experiment;
 use minos_core::id::{
     BlobId, ExperimentId, ImageDigest, ManifestId, MetricName, ModelId, PromptHash, ReportHash,
@@ -125,7 +126,13 @@ fn diff() -> Result<Diff, Box<dyn Error>> {
 }
 
 fn candidate() -> Result<Experiment, Box<dyn Error>> {
-    Ok(Experiment::candidate(base(), diff()?))
+    let diff = diff()?;
+    let id = ExperimentId::of(&base(), &diff);
+    Ok(Experiment::candidate(CumulativeDiff::recorded(
+        base(),
+        diff,
+        &id,
+    )?))
 }
 
 /// The content address of the candidate's canonical diff.

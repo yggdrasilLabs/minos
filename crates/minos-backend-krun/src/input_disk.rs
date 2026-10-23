@@ -293,9 +293,10 @@ mod tests {
 
     use minos_core::chunk::{CHUNK_HEADER_BYTES, ChunkStream, ChunkToken, TOKEN_BYTES};
     use minos_core::diff::Diff;
+    use minos_core::diff::cumulative::CumulativeDiff;
     use minos_core::experiment::Experiment;
     use minos_core::guest::{GuestJob, MAX_GUEST_JOB_BYTES, SectionKind, read_input_disk};
-    use minos_core::id::{BlobId, ImageDigest, TreeId};
+    use minos_core::id::{BlobId, ExperimentId, ImageDigest, TreeId};
     use minos_core::job::{JobBudget, JobRequest};
     use minos_core::limits::Limits;
     use minos_core::manifest::{Arch, JudgeVersion, Manifest};
@@ -437,7 +438,9 @@ diff --git a/src/parse.rs b/src/parse.rs
 
     /// The request for trial `trial` of the one-diff candidate of [`BASE`].
     fn request(trial: u32) -> Result<JobRequest, Box<dyn Error>> {
-        let experiment = Experiment::candidate(TreeId::of(BASE), diff()?);
+        let (tree, parsed) = (TreeId::of(BASE), diff()?);
+        let id = ExperimentId::of(&tree, &parsed);
+        let experiment = Experiment::candidate(CumulativeDiff::recorded(tree, parsed, &id)?);
         Ok(JobRequest::candidate(
             &experiment,
             BlobId::of(diff()?.as_bytes()),
