@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
 stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-10-23T01:01:26.689Z"
+last_updated: "2026-10-23T01:22:13.778Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 79
+  completed_plans: 80
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 10 of 17
+Plan: 11 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -139,6 +139,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P07 | 7 min | 2 tasks | 7 files |
 | Phase 07 P08 | 15 min | 2 tasks | 9 files |
 | Phase 07 P09 | 9 min | 2 tasks | 6 files |
+| Phase 07 P10 | 20 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -330,6 +331,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-08: snapshot refuses non-empty files equal to pushed judge data (JudgeOverlap) before the scan and clean check; env build reads minos.lock first and passes Lock::judge_file_digests
 - [Phase 07]: 07-09: an Ended the runner map has no row for (Exited as NotExited, or a future variant) is Infra(InfraCause::Unmapped): fail closed, never blamed on the candidate
 - [Phase 07]: 07-09: a judge that exited 0 passes only with Packed output; otherwise Rejected(OutputTooLarge) or Rejected(OutputInvalid)
+- [Phase 07]: 07-10: D-19 resume frame is the writable and readable sets, program path, source excludes, commands, environment, and the whole JudgeSpec; budget, policy, proposers, and params are outside it
+- [Phase 07]: 07-10: admit takes an AdmitStep bundle; a batch refuses a tier/origin mismatch; RunState gained judge_versions and notes_by_ordinal
 
 ### Pending Todos
 
@@ -360,6 +363,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-23T01:01:26.684Z
+Last session: 2026-10-23T01:22:07.384Z
 Stopped at: Completed 07-09-PLAN.md
 Resume file: None
