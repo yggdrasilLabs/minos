@@ -1,17 +1,20 @@
 //! The Ledger and Blobs contract, run against every implementation (STORE-01): the memory store and the file
 //! store, each file case on its own fresh temporary store root.
 //!
-//! Each case is one generic function over `L: Ledger` or `B: Blobs`. `ledger_contract!` and `blob_contract!`
-//! expand a case into a module with one `#[test]` per implementation, so the memory store and the file store
-//! are held to exactly the same assertions.
+//! Each case is one generic function over `L: Ledger`, `B: Blobs`, or `S: RunLock`. `ledger_contract!`,
+//! `blob_contract!`, and `run_lock_contract!` expand a case into a module with one `#[test]` per implementation,
+//! so the memory store and the file store are held to exactly the same assertions. A few run-lock cases that
+//! only the file store can have (its lock file's mode, a planted symlink, two handles) follow the arms.
 
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::fs;
 use std::io::{self, Read};
+use std::os::unix::fs::{PermissionsExt, symlink};
 
 use minos_core::id::{BlobId, ManifestId, RunId, TreeId};
 use minos_core::ledger::{Event, EventKey, Record};
-use minos_store::{Appended, Blobs, FileStore, Ledger, MemoryStore, StoreError};
+use minos_store::{Appended, Blobs, FileStore, Ledger, MemoryStore, RunLock, StoreError};
 use proptest::prelude::*;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -286,6 +289,62 @@ fn put_reader_reader_error<B: Blobs>(blobs: &B) -> TestResult {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Run-lock cases (LOOP-06)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Checks that `result` is `StoreError::RunLocked` naming `expected`, and that it is not retryable.
+fn expect_run_locked<G>(result: Result<G, StoreError>, expected: &RunId) -> TestResult {
+    match result {
+        Err(error) => {
+            assert!(
+                matches!(error, StoreError::RunLocked { run: locked } if locked == *expected),
+                "a held run must be RunLocked naming the run, got {error}"
+            );
+            assert!(!error.is_retryable(), "RunLocked must not be retryable");
+            Ok(())
+        }
+        Ok(_guard) => Err("a second lock on a held run was granted".into()),
+    }
+}
+
+fn second_lock_is_refused<S: RunLock>(store: &S) -> TestResult {
+    let _held = store.lock_run(&run())?;
+
+    let result = store.lock_run(&run());
+
+    expect_run_locked(result, &run())
+}
+
+fn lock_after_drop_succeeds<S: RunLock>(store: &S) -> TestResult {
+    let held = store.lock_run(&run())?;
+    expect_run_locked(store.lock_run(&run()), &run())?;
+
+    drop(held);
+
+    let _again = store.lock_run(&run())?;
+    expect_run_locked(store.lock_run(&run()), &run())
+}
+
+fn runs_lock_independently<S: RunLock>(store: &S) -> TestResult {
+    let _first = store.lock_run(&run())?;
+
+    let _second = store.lock_run(&other_run())?;
+
+    expect_run_locked(store.lock_run(&run()), &run())?;
+    expect_run_locked(store.lock_run(&other_run()), &other_run())
+}
+
+fn locked_run_still_appends<S: RunLock + Ledger>(store: &S) -> TestResult {
+    let _held = store.lock_run(&run())?;
+
+    let appended = store.append(&run(), steered(1, 0, b"stop note"))?;
+
+    assert_eq!(appended, Appended::New { seq: 0 });
+    assert_eq!(store.read(&run())?.lines().len(), 1);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Arms
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -325,6 +384,25 @@ macro_rules! blob_contract {
     };
 }
 
+/// Runs a run-lock case against every implementation. The file arm keeps its `TempDir` alive until the case
+/// returns.
+macro_rules! run_lock_contract {
+    ($case:ident) => {
+        mod $case {
+            #[test]
+            fn memory() -> super::TestResult {
+                super::$case(&minos_store::MemoryStore::new())
+            }
+
+            #[test]
+            fn file() -> super::TestResult {
+                let dir = tempfile::tempdir()?;
+                super::$case(&minos_store::FileStore::open(dir.path())?)
+            }
+        }
+    };
+}
+
 ledger_contract!(append_then_read_round_trips);
 ledger_contract!(duplicate_append_is_a_no_op);
 ledger_contract!(conflicting_append_is_not_written);
@@ -340,6 +418,86 @@ blob_contract!(put_reader_equals_put);
 blob_contract!(put_reader_exact_max);
 blob_contract!(put_reader_over_max);
 blob_contract!(put_reader_reader_error);
+
+run_lock_contract!(second_lock_is_refused);
+run_lock_contract!(lock_after_drop_succeeds);
+run_lock_contract!(runs_lock_independently);
+run_lock_contract!(locked_run_still_appends);
+
+// ---------------------------------------------------------------------------------------------------------------
+// File-only run-lock cases
+// ---------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn driver_lock_is_created_with_mode_0600() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+
+    let _held = store.lock_run(&run())?;
+
+    let path = dir
+        .path()
+        .join("runs")
+        .join(run().to_hex())
+        .join("driver.lock");
+    let meta = fs::symlink_metadata(&path)?;
+    assert!(
+        meta.file_type().is_file(),
+        "driver.lock must be a regular file"
+    );
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::symlink_metadata(dir.path().join("runs").join(run().to_hex()))?
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    Ok(())
+}
+
+#[test]
+fn a_symlink_at_driver_lock_is_refused() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let run_dir = dir.path().join("runs").join(run().to_hex());
+    fs::create_dir_all(&run_dir)?;
+    let target = dir.path().join("elsewhere");
+    fs::write(&target, b"")?;
+    symlink(&target, run_dir.join("driver.lock"))?;
+
+    let result = store.lock_run(&run());
+
+    assert!(
+        matches!(
+            result,
+            Err(StoreError::Unsafe {
+                what: "driver lock file"
+            })
+        ),
+        "a symlink planted at driver.lock must be Unsafe"
+    );
+    Ok(())
+}
+
+#[test]
+fn two_file_handles_refuse_each_others_lock() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let first = FileStore::open(dir.path())?;
+    let second = FileStore::open(dir.path())?;
+
+    let held = first.lock_run(&run())?;
+    expect_run_locked(second.lock_run(&run()), &run())?;
+    assert_eq!(
+        second.append(&run(), steered(1, 0, b"stop note"))?,
+        Appended::New { seq: 0 }
+    );
+
+    drop(held);
+
+    let _taken = second.lock_run(&run())?;
+    expect_run_locked(first.lock_run(&run()), &run())
+}
 
 fn is_send_sync<T: Send + Sync>() {}
 
