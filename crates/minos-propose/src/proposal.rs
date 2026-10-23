@@ -3,8 +3,8 @@
 //!
 //! A model returns each proposal as `{rationale, files: [{path, content}]}`, the full content of every writable
 //! file it changes. [`parse_output`] parses the output into closed types that refuse unknown keys, checks every
-//! rule, builds the candidate tree from the parent tree plus the returned files, and derives the canonical diff,
-//! cumulative from the base, with [`diff_trees`]. An item that breaks a rule is dropped and counted by its
+//! rule, builds the candidate tree from the parent tree plus the returned files, and mints the canonical diff,
+//! cumulative from the run's [`BaseTree`], with [`cumulative`] (07-CONTEXT D-12). An item that breaks a rule is dropped and counted by its
 //! [`DropReason`]; nothing is repaired, trimmed, or normalized. Zero survivors is an empty call, which the loop
 //! records as `Selected { NoValidCandidates }`, never an infrastructure failure (D-12).
 
@@ -13,7 +13,8 @@ use std::fmt;
 
 use minos_core::diff::Diff;
 use minos_core::diff::apply::Tree;
-use minos_core::diff::compose::{ComposeError, diff_trees};
+use minos_core::diff::compose::ComposeError;
+use minos_core::diff::cumulative::{BaseTree, CumulativeDiff, cumulative};
 use minos_core::limits::Limits;
 use minos_core::path::RelPath;
 use serde::Deserialize;
@@ -110,19 +111,21 @@ impl DropCounts {
     }
 }
 
-/// A validated proposal: a canonical diff cumulative from the base tree, and the model's rationale.
+/// A validated proposal: a canonical diff minted cumulative from the run's base tree, and the model's rationale.
 ///
-/// `Debug` prints the diff's own `Debug` (paths and lengths) and the rationale's length only.
+/// The diff is a [`CumulativeDiff`], so the loop admits a proposal as an experiment without re-deriving or
+/// relabelling it (07-CONTEXT D-12). `Debug` prints the diff's own `Debug` (base ID, paths, and lengths) and the
+/// rationale's length only.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Proposal {
-    diff: Diff,
+    diff: CumulativeDiff,
     rationale: String,
 }
 
 impl Proposal {
     /// The proposal `diff` with `rationale`. Crate-private: only the tiers build one, so a test double can hand back
     /// raw output only and every test runs the strict parser.
-    pub(crate) fn new(diff: Diff, rationale: String) -> Result<Self, DropReason> {
+    pub(crate) fn new(diff: CumulativeDiff, rationale: String) -> Result<Self, DropReason> {
         check_rationale(&rationale)?;
         Ok(Self { diff, rationale })
     }
@@ -130,6 +133,12 @@ impl Proposal {
     /// The canonical diff, cumulative from the base tree: what `Proposed` records and `ExperimentId::of` hashes.
     #[must_use]
     pub const fn diff(&self) -> &Diff {
+        self.diff.as_diff()
+    }
+
+    /// The diff with the base it is cumulative from, which `Experiment::candidate` takes.
+    #[must_use]
+    pub const fn cumulative(&self) -> &CumulativeDiff {
         &self.diff
     }
 
@@ -142,7 +151,7 @@ impl Proposal {
 
     /// The diff and the rationale, by value.
     #[must_use]
-    pub fn into_parts(self) -> (Diff, String) {
+    pub fn into_parts(self) -> (CumulativeDiff, String) {
         (self.diff, self.rationale)
     }
 }
@@ -183,8 +192,8 @@ impl Parsed {
     }
 }
 
-/// The canonical diff, cumulative from `base`, that turns `base` into `candidate`, where `candidate` is `parent`
-/// with a proposal's edit applied.
+/// The canonical diff, minted cumulative from the run's `base`, that turns the base into `candidate`, where
+/// `candidate` is `parent` with a proposal's edit applied.
 ///
 /// Shared by every tier, so a proposal that equals its parent or returns to the base is dropped the same way
 /// whichever tier made it (03-CONTEXT D-04 amendment).
@@ -194,16 +203,16 @@ impl Parsed {
 /// [`DropReason::SameAsParent`] when `candidate` equals `parent`, [`DropReason::BackToBase`] when it equals
 /// `base`, and [`DropReason::Compose`] for every other [`ComposeError`].
 pub(crate) fn finish(
-    base: &Tree,
+    base: &BaseTree,
     parent: &Tree,
     candidate: &Tree,
     writable: &BTreeSet<RelPath>,
     limits: &Limits,
-) -> Result<Diff, DropReason> {
+) -> Result<CumulativeDiff, DropReason> {
     if candidate == parent {
         return Err(DropReason::SameAsParent);
     }
-    diff_trees(base, candidate, writable, limits).map_err(|error| match error {
+    cumulative(base, candidate, writable, limits).map_err(|error| match error {
         ComposeError::NoChange => DropReason::BackToBase,
         _ => DropReason::Compose,
     })
@@ -247,7 +256,7 @@ struct RawFile {
 pub fn parse_output(
     output: ModelOutput,
     batch: u32,
-    base: &Tree,
+    base: &BaseTree,
     parent: &Tree,
     writable: &BTreeSet<RelPath>,
     limits: &Limits,
@@ -289,7 +298,7 @@ pub fn parse_output(
 /// One item into a proposal, or the first rule it breaks.
 fn parse_item(
     item: serde_json::Value,
-    base: &Tree,
+    base: &BaseTree,
     parent: &Tree,
     writable: &BTreeSet<RelPath>,
     limits: &Limits,

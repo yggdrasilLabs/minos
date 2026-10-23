@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 
 use minos_core::diff::apply::Tree;
+use minos_core::diff::cumulative::BaseTree;
 use minos_core::id::{ModelId, RunId};
 use minos_core::ledger::{Origin, StopReason};
 use minos_core::manifest::{Manifest, ProposerSpec, Tier};
@@ -33,8 +34,8 @@ pub struct ProposeInput<'a> {
     pub run: &'a RunId,
     /// The generation being proposed, at least 1 (generation 0 is baseline calibration).
     pub generation: u32,
-    /// The run's base surface tree: every proposal's diff is cumulative from it.
-    pub base: &'a Tree,
+    /// The run's base surface; every proposal's diff is minted cumulative from it (07-CONTEXT D-12).
+    pub base: &'a BaseTree,
     /// The incumbent's surface tree: the base with the incumbent's cumulative diff applied by the loop (D-05).
     /// Every proposal is an edit of it.
     pub parent: &'a Tree,
@@ -227,6 +228,7 @@ pub(crate) fn check_input(
     }
     let same_paths = input
         .base
+        .tree()
         .iter()
         .map(|(path, _)| path)
         .eq(input.parent.iter().map(|(path, _)| path));

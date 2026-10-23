@@ -44,6 +44,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use minos_core::diff::apply::Tree;
+use minos_core::diff::cumulative::BaseTree;
 use minos_core::id::{ManifestId, ModelId, RunId, TreeId};
 use minos_core::ledger::Origin;
 use minos_core::limits::Limits;
@@ -396,7 +397,7 @@ fn live_production_provider_ignores_hostile_project() -> TestResult {
         .proposers()
         .first()
         .ok_or("the fixture manifest declares no proposer")?;
-    let base = tree()?;
+    let base = BaseTree::new(TreeId::of(b"base"), tree()?);
     let history = History::empty();
     let run = RunId::of(
         &ManifestId::of(MANIFEST.as_bytes()),
@@ -408,7 +409,7 @@ fn live_production_provider_ignores_hostile_project() -> TestResult {
         run: &run,
         generation: 1,
         base: &base,
-        parent: &base,
+        parent: base.tree(),
         program: PROGRAM.as_bytes(),
         history: &history,
         notes: &[],
@@ -503,14 +504,14 @@ fn live_golden_argv_in_hostile_cwd() -> TestResult {
 
     assert_eq!(status.code(), Some(0), "the CLI did not exit 0");
     let response = classify(&stdout, exit_of(status)?)?;
-    let base = tree()?;
+    let base = BaseTree::new(TreeId::of(b"base"), tree()?);
     let valid = match response.into_completion() {
         Completion::Structured(output) => {
             let parsed = parse_output(
                 output,
                 BATCH,
                 &base,
-                &base,
+                base.tree(),
                 manifest.writable(),
                 &Limits::standard(),
             );

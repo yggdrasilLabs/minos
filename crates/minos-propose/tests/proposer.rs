@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 
 use minos_core::diff::apply::Tree;
+use minos_core::diff::cumulative::BaseTree;
 use minos_core::id::{ManifestId, ModelId, RunId, TreeId};
 use minos_core::manifest::{Manifest, ProposerSpec, Tier};
 use minos_core::path::RelPath;
@@ -142,7 +143,7 @@ fn script() -> Vec<FakeReply> {
 /// Calls `f` with the standard input for generation 1, base equal to parent.
 fn with_input<T>(f: impl FnOnce(&ProposeInput<'_>) -> T) -> Result<T, Box<dyn Error>> {
     let manifest = manifest()?;
-    let base = base()?;
+    let base = BaseTree::new(TreeId::of(b"base"), base()?);
     let history = History::empty();
     let run = RunId::of(&ManifestId::of(b"m"), &TreeId::of(b"t"), 1_760_000_000);
     let input = ProposeInput {
@@ -150,7 +151,7 @@ fn with_input<T>(f: impl FnOnce(&ProposeInput<'_>) -> T) -> Result<T, Box<dyn Er
         run: &run,
         generation: 1,
         base: &base,
-        parent: &base,
+        parent: base.tree(),
         program: PROGRAM,
         history: &history,
         notes: &[],
@@ -192,6 +193,22 @@ fn a_single_shot_spec_calls_its_provider() -> TestResult {
         .ok_or("the proposer must hold its provider")?
         .requests()?;
     assert_eq!(requests.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn every_proposal_is_minted_cumulative_from_the_input_base() -> TestResult {
+    for spec in [sweep_spec()?, single_shot_spec()?] {
+        let proposer = Proposer::with_provider(FakeProvider::new(script()));
+        let (proposals, base) =
+            with_input(|input| (proposer.propose(&spec, input), input.base.id()))?;
+        let proposals = proposals?;
+        assert!(!proposals.items().is_empty());
+        for item in proposals.items() {
+            assert_eq!(item.cumulative().base(), base);
+            assert_eq!(item.cumulative().as_diff(), item.diff());
+        }
+    }
     Ok(())
 }
 

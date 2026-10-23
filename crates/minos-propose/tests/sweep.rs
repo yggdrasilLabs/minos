@@ -5,6 +5,7 @@
 use std::error::Error;
 
 use minos_core::diff::apply::{Tree, apply};
+use minos_core::diff::cumulative::BaseTree;
 use minos_core::id::{ManifestId, ModelId, RunId, TreeId};
 use minos_core::ledger::Origin;
 use minos_core::manifest::{Manifest, ParamName, ProposerSpec, Tier};
@@ -145,11 +146,13 @@ fn propose(
 ) -> Result<Proposals, ProposeError> {
     let history = History::empty();
     let run = run();
+    // A fixed tree ID: the tests compare diffs and trees, not IDs.
+    let base = BaseTree::new(TreeId::of(b"base"), base.clone());
     let input = ProposeInput {
         manifest,
         run: &run,
         generation,
-        base,
+        base: &base,
         parent,
         program: PROGRAM,
         history: &history,

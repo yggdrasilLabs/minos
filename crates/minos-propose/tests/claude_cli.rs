@@ -25,6 +25,7 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use minos_core::diff::apply::Tree;
+use minos_core::diff::cumulative::BaseTree;
 use minos_core::id::{ManifestId, ModelId, PromptHash, RunId, TreeId};
 use minos_core::ledger::Origin;
 use minos_core::manifest::{Manifest, ProposerSpec, Tier};
@@ -1070,11 +1071,13 @@ fn propose_with<P: ModelProvider>(
 ) -> Result<Proposals, ProposeError> {
     let history = History::empty();
     let run = RunId::of(&ManifestId::of(b"m"), &TreeId::of(b"t"), 1_760_000_000);
+    // A fixed tree ID: the tests compare diffs and trees, not IDs.
+    let base = BaseTree::new(TreeId::of(b"base"), base.clone());
     let input = ProposeInput {
         manifest,
         run: &run,
         generation: 1,
-        base,
+        base: &base,
         parent,
         program: PROGRAM,
         history: &history,

@@ -6,6 +6,8 @@ use std::error::Error;
 
 use minos_core::diff::apply::Tree;
 use minos_core::diff::compose::diff_trees;
+use minos_core::diff::cumulative::BaseTree;
+use minos_core::id::TreeId;
 use minos_core::limits::Limits;
 use minos_core::manifest::Manifest;
 use minos_core::path::RelPath;
@@ -140,12 +142,15 @@ fn parse(value: Value) -> Result<Parsed, Box<dyn Error>> {
     parse_with(value, &base()?, &parent()?)
 }
 
+/// `value` parsed with batch 4 against `parent`, every diff minted cumulative from `base` under a fixed tree ID
+/// (the tests compare diffs and trees, not IDs).
 fn parse_with(value: Value, base: &Tree, parent: &Tree) -> Result<Parsed, Box<dyn Error>> {
     let manifest = manifest()?;
+    let base = BaseTree::new(TreeId::of(b"base"), base.clone());
     Ok(parse_output(
         ModelOutput::from_value(value),
         4,
-        base,
+        &base,
         parent,
         manifest.writable(),
         &Limits::standard(),
@@ -237,7 +242,7 @@ fn into_parts_returns_proposals_and_counts() -> TestResult {
         .ok_or("no proposal")?
         .into_parts();
     assert_eq!(rationale, "count bytes");
-    assert!(diff.as_str().contains("bytes().count()"));
+    assert!(diff.as_diff().as_str().contains("bytes().count()"));
     Ok(())
 }
 
