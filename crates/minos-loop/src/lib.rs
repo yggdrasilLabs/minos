@@ -25,6 +25,7 @@
 //! Every value that leaves the loop, in a [`LoopEvent`] or a [`DriverError`], is an ID, a number, a closed enum,
 //! or a validated value. No text a sandbox or a model wrote leaves the loop.
 
+pub mod admit;
 pub mod error;
 pub mod inputs;
 pub mod job;
@@ -37,3 +38,9 @@ pub use inputs::{Resume, RunInputs};
 pub use job::{JobFailure, JobRunner};
 pub use observe::{LoopEvent, NoopObserver, Observer};
 pub use stage::{CANDIDATE_TRIALS, Step, next_step};
+
+/// A byte cap held as `usize` as the `u64` the store's `Blobs::get` takes. Every `usize` fits a `u64` on the
+/// targets Minos builds for; the saturation keeps the conversion total without a cast.
+pub(crate) fn byte_cap(max: usize) -> u64 {
+    u64::try_from(max).unwrap_or(u64::MAX)
+}
