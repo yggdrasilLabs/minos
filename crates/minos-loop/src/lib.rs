@@ -28,7 +28,9 @@
 pub mod error;
 pub mod job;
 pub mod observe;
+pub mod stage;
 
 pub use error::DriverError;
 pub use job::{JobFailure, JobRunner};
 pub use observe::{LoopEvent, NoopObserver, Observer};
+pub use stage::{CANDIDATE_TRIALS, Step, next_step};
