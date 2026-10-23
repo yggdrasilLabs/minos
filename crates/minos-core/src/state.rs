@@ -688,6 +688,18 @@ impl RunState {
             .is_some_and(|trials| trials.contains_key(&trial))
     }
 
+    /// Every judge version `exp` has at least one recorded trial under, in order. Empty when it has none. The loop
+    /// refuses to resume a run whose baseline was judged only under other versions than the current one, naming
+    /// the recorded version (07-CONTEXT D-10).
+    #[must_use]
+    pub fn judge_versions(&self, exp: &ExperimentId) -> BTreeSet<JudgeVersion> {
+        self.judgments
+            .keys()
+            .filter(|(judged, _)| judged == exp)
+            .map(|(_, judge)| *judge)
+            .collect()
+    }
+
     /// The backend classes, each a backend and an architecture, of every recorded trial, in order. The loop
     /// refuses to append a `Judged` that would make this set hold two classes, so a run's speed numbers all come
     /// from one class (07-CONTEXT D-11, JUDGE-04). Empty before the first trial is judged.

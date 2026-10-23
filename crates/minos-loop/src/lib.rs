@@ -26,11 +26,14 @@
 //! or a validated value. No text a sandbox or a model wrote leaves the loop.
 
 pub mod error;
+pub mod inputs;
 pub mod job;
 pub mod observe;
+pub mod record;
 pub mod stage;
 
 pub use error::DriverError;
+pub use inputs::{Resume, RunInputs};
 pub use job::{JobFailure, JobRunner};
 pub use observe::{LoopEvent, NoopObserver, Observer};
 pub use stage::{CANDIDATE_TRIALS, Step, next_step};
