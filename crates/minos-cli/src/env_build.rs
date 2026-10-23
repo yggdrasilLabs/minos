@@ -44,8 +44,8 @@
 //! and run commands as uid 64000 (05-CONTEXT D-08). Install toolchains into world-readable prefixes such as
 //! `/usr/local`, and set `CARGO_HOME` and `RUSTUP_HOME` there, never under `/root` (05-RESEARCH Pitfall 9).
 
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::Path;
 
 use minos_backend_krun::rootfs::{
@@ -54,7 +54,7 @@ use minos_backend_krun::rootfs::{
 use minos_core::id::{BlobId, ImageDigest};
 use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::ledger::BackendKind;
-use minos_core::lock::{Lock, LockError, LockedImage, MAX_LOCK_BYTES};
+use minos_core::lock::{Lock, LockError, LockedImage};
 use minos_core::manifest::{Arch, Manifest, ManifestError};
 use minos_core::path::RelPath;
 use minos_core::text::SafeText;
@@ -63,6 +63,7 @@ use minos_store::{Blobs, FileStore, STORE_DIR, StoreError};
 
 use crate::builder::{BuilderError, RootfsBuilder};
 use crate::locate::GUEST_MAX_BYTES;
+use crate::lock_file::{self, LockFileError, write_lock};
 
 /// The most bytes [`env_build`] stores as one root image. The packer's 1 GiB tar cap (`PackLimits::default`)
 /// bounds the file content, and the compressed image is smaller than that content plus `SquashFS` metadata in
@@ -259,7 +260,7 @@ pub fn env_build<B: RootfsBuilder>(
         CleanPolicy::RequireClean
     };
     let lock_path = project.join(LOCK_FILE);
-    let judge_files = read_lock(&lock_path)?
+    let judge_files = load_lock(&lock_path)?
         .as_ref()
         .map(Lock::judge_file_digests)
         .unwrap_or_default();
@@ -319,7 +320,7 @@ pub fn env_build<B: RootfsBuilder>(
         guest_sha256,
         identity,
     );
-    let lock = read_lock(&lock_path)?;
+    let lock = load_lock(&lock_path)?;
     let lock_written = match lock.as_ref().and_then(|lock| lock.image(BACKEND, ARCH)) {
         Some(locked) if *locked == entry => false,
         Some(locked) if *locked.root_image() != image && !options.update => {
@@ -398,44 +399,14 @@ fn read_text(path: &Path, what: &'static str, max: u64) -> Result<String, EnvBui
     })
 }
 
-/// The lock at `path`, or `None` when there is no file there.
-fn read_lock(path: &Path) -> Result<Option<Lock>, EnvBuildError> {
-    match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(EnvBuildError::Read {
-                what: LOCK_FILE,
-                source,
-            });
-        }
-        Ok(_) => {}
-    }
-    // One byte over the cap is read, so `Lock::parse_toml` refuses an over-cap file as too large.
-    let cap = u64::try_from(MAX_LOCK_BYTES)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
-    let text = match read_text(path, LOCK_FILE, cap) {
-        Err(EnvBuildError::TooLarge { .. }) => {
-            return Err(EnvBuildError::Lock(LockError::TooLarge));
-        }
-        other => other?,
-    };
-    Lock::parse_toml(&text)
-        .map(Some)
-        .map_err(EnvBuildError::Lock)
-}
-
-/// Writes `bytes` to a temporary file in `staging` (the store root, on the source denylist), syncs it, renames it
-/// over `lock`, and syncs the lock's directory, so `lock` is the old file or the new one, never part of one.
-fn write_lock(staging: &Path, lock: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut temp = tempfile::Builder::new()
-        .prefix("minos.lock.")
-        .tempfile_in(staging)?;
-    temp.write_all(bytes)?;
-    temp.as_file().sync_all()?;
-    temp.persist(lock).map_err(|error| error.error)?;
-    if let Some(dir) = lock.parent() {
-        File::open(dir)?.sync_all()?;
-    }
-    Ok(())
+/// The lock at `path` through the shared reader, with its errors on `env build`'s own variants, so the messages
+/// are those `env build` has always printed.
+fn load_lock(path: &Path) -> Result<Option<Lock>, EnvBuildError> {
+    lock_file::read_lock(path).map_err(|error| match error {
+        LockFileError::Read { source } => EnvBuildError::Read {
+            what: LOCK_FILE,
+            source,
+        },
+        LockFileError::Lock(error) => EnvBuildError::Lock(error),
+    })
 }

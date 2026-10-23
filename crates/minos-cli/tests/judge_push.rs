@@ -225,7 +225,11 @@ fn changed_data_refused_without_update() -> TestResult {
     write(&fixture.project, "minos.lock", text.as_bytes())?;
     let first = push(&fixture, &fixture.data, false)?;
     let before = lock_bytes(&fixture)?;
-    write(&fixture.data, "judge/expected.txt", b"other expected output\n")?;
+    write(
+        &fixture.data,
+        "judge/expected.txt",
+        b"other expected output\n",
+    )?;
 
     let result = push(&fixture, &fixture.data, false);
 
@@ -248,6 +252,9 @@ fn changed_data_refused_without_update() -> TestResult {
     assert!(message.contains(&pushed.to_string()), "{message}");
     assert!(message.contains("rerun with --update"), "{message}");
     assert_eq!(lock_bytes(&fixture)?, before);
+    // The refused data was not stored.
+    let store = FileStore::open(&fixture.project.join(STORE_DIR))?;
+    assert!(!store.contains(&pushed.to_blob_id())?);
 
     // With --update the label's entry is replaced and the image entry is untouched.
     let report = push(&fixture, &fixture.data, true)?;
