@@ -62,7 +62,7 @@ pub enum ComposeError {
 /// `writable` and `limits`, so the result is a validated, canonical [`Diff`].
 ///
 /// The result is cumulative only when `base` is the run's base tree, which is what
-/// [`cumulative`](super::cumulative::cumulative) guarantees by taking a [`BaseTree`]; a diff against any other tree,
+/// [`cumulative`] guarantees by taking a [`BaseTree`]; a diff against any other tree,
 /// the sweep's render against the parent included, stays a plain [`Diff`] (07-CONTEXT D-12).
 ///
 /// # Errors
