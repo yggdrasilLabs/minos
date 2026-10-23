@@ -790,6 +790,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "toml",
+ "trybuild",
 ]
 
 [[package]]
@@ -811,9 +812,14 @@ dependencies = [
 name = "minos-loop"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "minos-core",
  "minos-propose",
  "minos-store",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
@@ -840,6 +846,8 @@ dependencies = [
  "minos-core",
  "minos-sandbox",
  "minos-store",
+ "proptest",
+ "tar",
  "thiserror",
 ]
 

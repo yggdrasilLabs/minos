@@ -24,3 +24,4 @@ rand_core.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 insta.workspace = true
+trybuild.workspace = true

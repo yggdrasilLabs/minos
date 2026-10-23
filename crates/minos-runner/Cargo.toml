@@ -15,3 +15,7 @@ minos-core.workspace = true
 minos-store.workspace = true
 minos-sandbox.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tar.workspace = true
+proptest.workspace = true
