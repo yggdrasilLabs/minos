@@ -653,6 +653,25 @@ fn ops() -> impl Strategy<Value = Vec<(u32, u32, u8)>> {
     prop::collection::vec((0_u32..3, 0_u32..3, 0_u8..3), 1..40)
 }
 
+/// What one append did, compared across stores: a store error other than a conflict is `Other`, because the two
+/// stores need not fail the same way, and a differential property that saw one fails its case.
+#[derive(Debug, PartialEq, Eq)]
+enum Projected {
+    New(u64),
+    Duplicate(u64),
+    Conflict(u64),
+    Other,
+}
+
+fn project(result: Result<Appended, StoreError>) -> Projected {
+    match result {
+        Ok(Appended::New { seq }) => Projected::New(seq),
+        Ok(Appended::Duplicate { seq }) => Projected::Duplicate(seq),
+        Err(StoreError::Conflict { seq }) => Projected::Conflict(seq),
+        Err(_) => Projected::Other,
+    }
+}
+
 /// Appends with a run choice, so the differential property covers more than one ledger.
 fn run_ops() -> impl Strategy<Value = Vec<(bool, u32, u32, u8)>> {
     prop::collection::vec((any::<bool>(), 0_u32..3, 0_u32..3, 0_u8..3), 1..40)
@@ -668,14 +687,15 @@ proptest! {
         let store = FileStore::open(dir.path())?;
         for (generation, ordinal, note) in ops {
             let before = ledger_bytes(dir.path(), &run())?;
-            let appended = store.append(&run(), steered(generation, ordinal, &[note]))?;
+            let result = store.append(&run(), steered(generation, ordinal, &[note]));
             let after = ledger_bytes(dir.path(), &run())?;
             prop_assert!(after.starts_with(&before), "an append only adds bytes at the end");
-            match appended {
-                Appended::New { .. } => prop_assert!(after.len() > before.len()),
-                Appended::Duplicate { .. } | Appended::Conflict { .. } => {
+            match result {
+                Ok(Appended::New { .. }) => prop_assert!(after.len() > before.len()),
+                Ok(Appended::Duplicate { .. }) | Err(StoreError::Conflict { .. }) => {
                     prop_assert_eq!(after, before);
                 }
+                Err(other) => prop_assert!(false, "an append failed: {}", other),
             }
         }
     }
@@ -688,10 +708,9 @@ proptest! {
         for (first, generation, ordinal, note) in ops {
             let id = if first { run() } else { other_run() };
             let record = steered(generation, ordinal, &[note]);
-            prop_assert_eq!(
-                file.append(&id, record.clone())?,
-                memory.append(&id, record)?
-            );
+            let from_file = project(file.append(&id, record.clone()));
+            prop_assert_ne!(&from_file, &Projected::Other, "a file append failed");
+            prop_assert_eq!(from_file, project(memory.append(&id, record)));
         }
         for id in [run(), other_run()] {
             prop_assert_eq!(file.read(&id)?, memory.read(&id)?);

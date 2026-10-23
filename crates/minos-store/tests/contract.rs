@@ -93,10 +93,13 @@ fn conflicting_append_is_not_written<L: Ledger>(ledger: &L) -> TestResult {
     );
     let before = ledger.read(&run())?;
 
-    assert_eq!(
-        ledger.append(&run(), steered(2, 0, b"a different note"))?,
-        Appended::Conflict { seq: 0 }
-    );
+    let result = ledger.append(&run(), steered(2, 0, b"a different note"));
+
+    match result {
+        Err(error @ StoreError::Conflict { seq: 0 }) => assert!(!error.is_retryable()),
+        Err(other) => return Err(format!("a conflicting append must be Conflict, got {other}").into()),
+        Ok(appended) => return Err(format!("a conflicting append returned {appended:?}").into()),
+    }
 
     let after = ledger.read(&run())?;
     assert_eq!(after, before);
@@ -354,8 +357,8 @@ fn file_store_is_send_and_sync() {
 
 /// Appends one `Steered` record per `(generation, ordinal, note)` triple and checks every result against a model
 /// in which the first record under each key wins: `New` at the next seq for a new key, `Duplicate` at the first
-/// seq for an equal record, `Conflict` at the first seq for a different one; then `read` returns exactly one line
-/// per distinct key, in first-append order, with contiguous seq.
+/// seq for an equal record, `Err(StoreError::Conflict)` at the first seq for a different one; then `read` returns
+/// exactly one line per distinct key, in first-append order, with contiguous seq.
 fn keeps_first_write<L: Ledger>(ledger: &L, ops: &[(u32, u32, u8)]) -> Result<(), TestCaseError> {
     let id = run();
     let mut first: BTreeMap<EventKey, (u64, Record)> = BTreeMap::new();
@@ -364,15 +367,18 @@ fn keeps_first_write<L: Ledger>(ledger: &L, ops: &[(u32, u32, u8)]) -> Result<()
     for &(generation, ordinal, note) in ops {
         let record = steered(generation, ordinal, &[note]);
         let key = record.event().key(&id);
-        let appended = ledger.append(&id, record.clone())?;
+        let result = ledger.append(&id, record.clone());
         match first.get(&key) {
             Some((seq, kept)) if *kept == record => {
-                prop_assert_eq!(appended, Appended::Duplicate { seq: *seq });
+                prop_assert_eq!(result?, Appended::Duplicate { seq: *seq });
             }
-            Some((seq, _)) => prop_assert_eq!(appended, Appended::Conflict { seq: *seq }),
+            Some((seq, _)) => {
+                let conflict = matches!(result, Err(StoreError::Conflict { seq: at }) if at == *seq);
+                prop_assert!(conflict, "a different record under a stored key must be Conflict at the first seq");
+            }
             None => {
                 let seq = u64::try_from(order.len())?;
-                prop_assert_eq!(appended, Appended::New { seq });
+                prop_assert_eq!(result?, Appended::New { seq });
                 first.insert(key, (seq, record.clone()));
                 order.push(record);
             }
