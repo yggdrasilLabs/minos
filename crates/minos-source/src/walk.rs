@@ -21,6 +21,10 @@
 //! a ustar header, and a size under the cap. Every offender is collected before the walk fails, so one error lists
 //! them all. A file is opened only after `lstat`, and read only if the opened file is the same regular file
 //! (device, inode, and length), so a file swapped for a link mid-walk is refused, never followed.
+//!
+//! The judge-data pack (`crate::judge`, 07-CONTEXT D-03) walks with the same code under [`WalkRules::judge`]: the
+//! same ignore files, hard denylist, offender rules, and identity check, with no manifest excludes, no judge-path
+//! drop, and the judge caps.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, Metadata};
@@ -33,6 +37,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 
 use ignore::{DirEntry, Walk, WalkBuilder};
+use minos_core::guest::MAX_JUDGE_DATA_BYTES;
+use minos_core::limits::MAX_JUDGE_FILES;
 use minos_core::manifest::{Manifest, SourceExclude};
 use minos_core::path::RelPath;
 use minos_core::text::SafeText;
@@ -64,6 +70,65 @@ const MINOSIGNORE: &str = ".minosignore";
 /// The UTF-8 byte order mark, which the ignore matcher strips from the first line of an ignore file.
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
+/// The caps one walk enforces. Each is checked from `lstat` before a file is read.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Caps {
+    /// The most regular files, offenders included.
+    pub(crate) files: u64,
+    /// The largest single file.
+    pub(crate) file_bytes: u64,
+    /// The most content, summed over every packable file.
+    pub(crate) total_bytes: u64,
+}
+
+/// What one walk drops and what it caps: the source snapshot's rules or the judge data's.
+pub(crate) struct WalkRules {
+    /// The case-folded paths the judge command names; each is dropped and reported with
+    /// [`DenyRule::JudgePath`].
+    judge_keys: Vec<String>,
+    /// The manifest's `[source] exclude` entries, dropped silently.
+    excludes: Vec<SourceExclude>,
+    /// The caps.
+    caps: Caps,
+}
+
+impl WalkRules {
+    /// The source snapshot's rules: the judge paths and `[source] exclude` entries of `manifest`, and the
+    /// `MAX_SNAPSHOT_*` caps (04-CONTEXT D-04, D-05).
+    pub(crate) fn source(manifest: &Manifest) -> Self {
+        Self {
+            judge_keys: manifest
+                .judge()
+                .paths()
+                .iter()
+                .map(RelPath::ascii_case_key)
+                .collect(),
+            excludes: manifest.excludes().to_vec(),
+            caps: Caps {
+                files: MAX_SNAPSHOT_FILES,
+                file_bytes: MAX_SNAPSHOT_FILE_BYTES,
+                total_bytes: MAX_SNAPSHOT_BYTES,
+            },
+        }
+    }
+
+    /// The judge data's rules (07-CONTEXT D-03). No judge-path drop, because it would drop the judge program from
+    /// its own data; no excludes, because a judge directory has no manifest; a file-count cap of
+    /// [`MAX_JUDGE_FILES`]; and a per-file and total cap of [`MAX_JUDGE_DATA_BYTES`], the judge section of the
+    /// input disk, which PID 1 reads whole (the pack checks the tarball length against the same cap).
+    pub(crate) const fn judge() -> Self {
+        Self {
+            judge_keys: Vec::new(),
+            excludes: Vec::new(),
+            caps: Caps {
+                files: MAX_JUDGE_FILES,
+                file_bytes: MAX_JUDGE_DATA_BYTES,
+                total_bytes: MAX_JUDGE_DATA_BYTES,
+            },
+        }
+    }
+}
+
 /// One file to be packed: its exact bytes and whether any execute bit was set.
 pub(crate) struct FileEntry {
     pub(crate) bytes: Vec<u8>,
@@ -78,7 +143,8 @@ pub(crate) struct Collected {
     pub(crate) content_bytes: u64,
 }
 
-/// Walks the project at `root` under the four exclusion sources and reads every file to be packed.
+/// Walks the tree at `root` under `rules` and the ignore files and hard denylist, and reads every file to be
+/// packed.
 ///
 /// # Errors
 ///
@@ -86,15 +152,15 @@ pub(crate) struct Collected {
 /// read, [`SnapshotError::MinosignoreNegation`], [`SnapshotError::IgnoreFileTooLarge`],
 /// [`SnapshotError::TooManyFiles`], [`SnapshotError::Offenders`] listing every offender, and
 /// [`SnapshotError::TooLarge`] naming the largest files.
-pub(crate) fn collect(root: &Path, manifest: &Manifest) -> Result<Collected, SnapshotError> {
+pub(crate) fn collect(root: &Path, rules: &WalkRules) -> Result<Collected, SnapshotError> {
     let (sender, receiver) = mpsc::channel();
     let lost = Arc::new(AtomicBool::new(false));
     let drops = Drops {
         sender,
         lost: Arc::clone(&lost),
     };
-    let walk = walker(root, manifest, drops);
-    let mut state = State::default();
+    let walk = walker(root, rules, drops);
+    let mut state = State::new(rules.caps);
     for item in walk {
         let entry = item.map_err(|error| walk_error(&error))?;
         if let Some(error) = entry.error() {
@@ -132,7 +198,7 @@ pub(crate) fn collect(root: &Path, manifest: &Manifest) -> Result<Collected, Sna
 }
 
 /// The walker: `standard_filters(false)` first, then exactly the sources D-04 names.
-fn walker(root: &Path, manifest: &Manifest, denied: Drops) -> Walk {
+fn walker(root: &Path, rules: &WalkRules, denied: Drops) -> Walk {
     let mut walk = WalkBuilder::new(root);
     walk.standard_filters(false)
         .git_ignore(true)
@@ -142,13 +208,8 @@ fn walker(root: &Path, manifest: &Manifest, denied: Drops) -> Walk {
         .follow_links(false)
         .sort_by_file_path(Ord::cmp);
     let base = root.to_path_buf();
-    let judge: Vec<String> = manifest
-        .judge()
-        .paths()
-        .iter()
-        .map(RelPath::ascii_case_key)
-        .collect();
-    let excludes: Vec<SourceExclude> = manifest.excludes().to_vec();
+    let judge = rules.judge_keys.clone();
+    let excludes = rules.excludes.clone();
     walk.filter_entry(move |entry| keep(&base, &judge, &excludes, &denied, entry));
     walk.build()
 }
@@ -227,8 +288,9 @@ fn io_error(op: &'static str, rel: &Path) -> impl FnOnce(io::Error) -> SnapshotE
 }
 
 /// The walk's running state.
-#[derive(Default)]
 struct State {
+    /// The caps this walk enforces.
+    caps: Caps,
     files: BTreeMap<RelPath, FileEntry>,
     /// The first [`SHOWN_OFFENDERS`] offenders in path order.
     offenders: BTreeSet<Offender>,
@@ -245,6 +307,20 @@ struct State {
 }
 
 impl State {
+    /// An empty state under `caps`.
+    const fn new(caps: Caps) -> Self {
+        Self {
+            caps,
+            files: BTreeMap::new(),
+            offenders: BTreeSet::new(),
+            offender_count: 0,
+            regular: 0,
+            total: 0,
+            sizes: Vec::new(),
+            content_bytes: 0,
+        }
+    }
+
     /// Records one offender, keeping only the first [`SHOWN_OFFENDERS`] in path order.
     fn offend(&mut self, path: SafeText, kind: OffenderKind) {
         self.offender_count = self.offender_count.saturating_add(1);
@@ -317,9 +393,9 @@ impl State {
             return Ok(());
         }
         self.regular = self.regular.saturating_add(1);
-        if self.regular > MAX_SNAPSHOT_FILES {
+        if self.regular > self.caps.files {
             return Err(SnapshotError::TooManyFiles {
-                max: MAX_SNAPSHOT_FILES,
+                max: self.caps.files,
             });
         }
         let Some(path) = rel.to_str().and_then(|text| RelPath::try_from(text).ok()) else {
@@ -335,13 +411,13 @@ impl State {
             return Ok(());
         }
         let len = meta.len();
-        if len > MAX_SNAPSHOT_FILE_BYTES {
+        if len > self.caps.file_bytes {
             self.offend(shown(rel), OffenderKind::Oversize { bytes: len });
             return Ok(());
         }
         self.total = self.total.saturating_add(len);
         self.sizes.push((path.clone(), len));
-        if self.total > MAX_SNAPSHOT_BYTES {
+        if self.total > self.caps.total_bytes {
             // The pack fails; keep recording sizes so the error can name the largest files, but read no more.
             return Ok(());
         }
@@ -365,13 +441,13 @@ impl State {
                 shown,
             });
         }
-        if self.total > MAX_SNAPSHOT_BYTES {
+        if self.total > self.caps.total_bytes {
             let mut largest = self.sizes;
             largest.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             largest.truncate(SHOWN_OFFENDERS);
             return Err(SnapshotError::TooLarge {
                 bytes: self.total,
-                max: MAX_SNAPSHOT_BYTES,
+                max: self.caps.total_bytes,
                 largest,
             });
         }

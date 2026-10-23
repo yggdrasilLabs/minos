@@ -6,15 +6,16 @@
 //! checks that the tree is committed, and writes a deterministic ustar tarball (sorted paths, zeroed metadata,
 //! regular files only) whose SHA-256 is the snapshot's `TreeId`.
 //!
-//! [`snapshot`] is the only function that produces a tarball, and it always runs the denylist, the caps, and the
-//! secret scan; [`CleanPolicy::AllowDirty`] skips only the git check. Only `minos-cli` links this crate: `deny.toml`
+//! [`snapshot`] and [`pack_judge_data`] are the only functions that produce a tarball, and both always run the
+//! denylist, the caps, and the secret scan; [`CleanPolicy::AllowDirty`] skips only the git check, and the judge
+//! pack has no git check (07-CONTEXT D-03). Only `minos-cli` links this crate: `deny.toml`
 //! refuses any other dependent, so the filesystem walker and the read-only `git` exec of the clean check never
 //! enter the loop's or the runner's graph.
 //!
 //! The guards are public and tested on their own: [`denylist`], [`scan`], and [`clean`]. None of them produces a
 //! tarball, so exposing them opens no path around the scan.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 
@@ -25,12 +26,14 @@ use minos_core::text::SafeText;
 
 pub mod clean;
 pub mod denylist;
+pub mod judge;
 mod pack;
 pub mod scan;
 mod walk;
 
 pub use clean::{CleanPolicy, Dirty, check_clean};
 pub use denylist::{DenyRule, deny_component};
+pub use judge::{JudgePack, pack_judge_data};
 pub use scan::{ScanError, Scanner, SecretHit};
 
 /// One entry the hard denylist dropped from the snapshot. Every drop is reported, so nothing the user can see in
@@ -77,7 +80,7 @@ pub enum OffenderKind {
     Special,
     /// The path does not fit a ustar header: 255 bytes split at a `/`, final component at most 100.
     UstarPath,
-    /// The file is over the 16 MiB per-file cap.
+    /// The file is over the per-file cap: 16 MiB for a source snapshot, 96 MiB for judge data.
     Oversize {
         /// The file's length.
         bytes: u64,
@@ -98,7 +101,10 @@ impl fmt::Display for OffenderKind {
             Self::UstarPath => {
                 f.write_str("the path does not fit a ustar header (255 bytes, final component 100)")
             }
-            Self::Oversize { bytes } => write!(f, "{bytes} bytes, over the 16 MiB per-file cap"),
+            Self::Oversize { bytes } => write!(
+                f,
+                "{bytes} bytes, over the per-file cap (16 MiB for source, 96 MiB for judge data)"
+            ),
             Self::Raced => f.write_str("the file changed while it was being read"),
         }
     }
@@ -229,7 +235,7 @@ pub enum SnapshotError {
     },
     /// More regular files than the cap.
     #[error(
-        "the project holds more than {max} files; exclude some with .minosignore or [source] exclude"
+        "the tree holds more than {max} files; exclude some with .minosignore, or for a project with [source] exclude"
     )]
     TooManyFiles {
         /// The cap.
@@ -237,7 +243,7 @@ pub enum SnapshotError {
     },
     /// The files together are over the content cap.
     #[error(
-        "the project's files total {bytes} bytes, over the {max}-byte cap; the largest:{}",
+        "the tree's files total {bytes} bytes, over the {max}-byte cap; the largest:{}",
         sizes(.largest)
     )]
     TooLarge {
@@ -290,6 +296,17 @@ pub enum SnapshotError {
     /// The tree is not committed, and the policy requires it.
     #[error("the working tree is not clean")]
     Dirty(#[source] Dirty),
+    /// The judge data's tarball is over the judge section cap of the input disk. Judge data is refused, never
+    /// truncated; data this large waits for a streaming unpack (CLAUDE.md Open questions).
+    #[error(
+        "the judge data packs to {bytes} bytes, over the {max}-byte judge cap; judge data is refused, never truncated"
+    )]
+    JudgeTooLarge {
+        /// The tarball's length.
+        bytes: u64,
+        /// The cap, `MAX_JUDGE_DATA_BYTES`.
+        max: u64,
+    },
 }
 
 /// One item per line, then the count of the rest.
@@ -337,7 +354,7 @@ pub fn snapshot(
     manifest: &Manifest,
     policy: CleanPolicy,
 ) -> Result<Snapshot, SnapshotError> {
-    let collected = walk::collect(root, manifest)?;
+    let collected = walk::collect(root, &walk::WalkRules::source(manifest))?;
 
     let missing: BTreeSet<&RelPath> = manifest
         .writable()
@@ -352,20 +369,7 @@ pub fn snapshot(
         });
     }
 
-    let scanner = Scanner::new().map_err(SnapshotError::Scanner)?;
-    let mut shown = Vec::new();
-    let mut total: u64 = 0;
-    for (path, file) in &collected.files {
-        for hit in scanner.scan(path, &file.bytes) {
-            total = total.saturating_add(1);
-            if shown.len() < walk::SHOWN_OFFENDERS {
-                shown.push(hit);
-            }
-        }
-    }
-    if total > 0 {
-        return Err(SnapshotError::Secrets { shown, total });
-    }
+    scan_files(&collected.files)?;
 
     match policy {
         CleanPolicy::RequireClean => {
@@ -386,4 +390,29 @@ pub fn snapshot(
             denied: collected.denied,
         },
     })
+}
+
+/// Scans exactly the bytes of `files` that will be packed, in path order, and refuses on any hit. There is no
+/// override (04-CONTEXT D-06).
+///
+/// # Errors
+///
+/// [`SnapshotError::Scanner`] if the patterns do not compile, and [`SnapshotError::Secrets`] listing the first
+/// hits and counting all of them.
+fn scan_files(files: &BTreeMap<RelPath, walk::FileEntry>) -> Result<(), SnapshotError> {
+    let scanner = Scanner::new().map_err(SnapshotError::Scanner)?;
+    let mut shown = Vec::new();
+    let mut total: u64 = 0;
+    for (path, file) in files {
+        for hit in scanner.scan(path, &file.bytes) {
+            total = total.saturating_add(1);
+            if shown.len() < walk::SHOWN_OFFENDERS {
+                shown.push(hit);
+            }
+        }
+    }
+    if total > 0 {
+        return Err(SnapshotError::Secrets { shown, total });
+    }
+    Ok(())
 }
