@@ -3,8 +3,8 @@
 //! Each file under `tests/ui/fail/` is a minimal program that must not compile, and its `.stderr` holds the one
 //! error that proves the invariant: a Candidate spec cannot take judge data, no role has a network method,
 //! `LaunchPlan` and `Cleared` cannot be built with a struct literal, `Cleared` cannot be cloned, one `Cleared` cannot
-//! build two `Finished` values, a backend cannot launch a bare `LaunchPlan`, `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`, and candidate output has no
-//! `into_scorecard`. The one file under `tests/ui/pass/` runs the whole judge flow, so a broken fixture cannot make
+//! build two `Finished` values, a backend cannot launch a bare `LaunchPlan`, `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`, candidate output has no
+//! `into_scorecard`, and judge output has no `store_judge_input` (07-CONTEXT D-17). The one file under `tests/ui/pass/` runs the whole judge flow, so a broken fixture cannot make
 //! every fail case pass for the wrong reason.
 //!
 //! Every `.stderr` is committed and was reviewed to hold exactly the intended error. The gate never sets

@@ -1,0 +1,7 @@
+error[E0599]: no method named `store_judge_input` found for struct `Untrusted<GuestOutput<minos_sandbox::Judge>>` in the current scope
+  --> tests/ui/fail/judge_store_judge_input.rs:20:12
+   |
+20 |     output.store_judge_input(sink)
+   |            ^^^^^^^^^^^^^^^^^ method not found in `Untrusted<GuestOutput<minos_sandbox::Judge>>`
+   |
+   = note: the method was found for `Untrusted<GuestOutput<minos_sandbox::Candidate>>`

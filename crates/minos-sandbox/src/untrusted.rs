@@ -14,21 +14,39 @@
 //! The constants here are the layout Phase 5's guest writes into its output tar: PID 1's own status at
 //! [`STATUS_PATH`], which leaves only through [`Untrusted::take_status`], the judge's scorecard, the stage logs, the
 //! diffs a proposer sandbox submits, and the artifacts under [`OUT_DIR`].
+//!
+//! # Sink exits
+//!
+//! Two exits release bytes rather than validated values, and each hands them only to a [`BlobSink`], a
+//! content-addressed blob put, returning nothing but the [`BlobId`] the sink named them by (07-CONTEXT D-17,
+//! approved by the user at the 07-04 checkpoint on 2026-10-22, trait form):
+//!
+//! - [`Untrusted::store_judge_input`], on candidate output only, re-packs the files under [`OUT_DIR`] as a
+//!   canonical ustar archive. It is the only way to make the judge's `candidate_out` blob (LOOP-02).
+//! - [`Untrusted::store_tail`], on one file of any role, keeps at most [`MAX_STAGE_LOG_BYTES`] raw bytes of a
+//!   stage log (D-09). Readers turn such a blob into text only through [`LogExcerpt::from_bytes`].
+//!
+//! The bytes go to a sink and never back to the caller as a value, so the only things that ever hold them are a
+//! blob store and, for the judge input, another VM. The sink can see the bytes, as any put interface must; the
+//! guarantee is that the exit returns none.
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use minos_core::guest::{
-    GuestRole, GuestStatus, GuestStatusError, MAX_STATUS_BYTES, SetupStatus, SetupStep,
+    GuestRole, GuestStatus, GuestStatusError, MAX_CANDIDATE_OUT_BYTES, MAX_STATUS_BYTES,
+    SetupStatus, SetupStep,
 };
-use minos_core::limits::Limits;
+use minos_core::id::BlobId;
+use minos_core::limits::{Limits, MAX_STAGE_LOG_BYTES};
 use minos_core::metric::{Scorecard, ScorecardError};
 use minos_core::outcome::Reason;
 use minos_core::path::RelPath;
 use minos_core::text::LogExcerpt;
+use tar::{Builder, EntryType, Header};
 
 use crate::output::{MAX_DIFF_TEXTS, OutputCap, OutputFault, OutputInvalid};
-use crate::role::{Judge, Role, RoleKind};
+use crate::role::{Candidate, Judge, Role, RoleKind};
 
 pub use minos_core::guest::STATUS_PATH;
 
@@ -154,6 +172,77 @@ fn is_diff(path: &RelPath) -> bool {
         .is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// Whether `path` lies under [`OUT_DIR`]: the `/` after `out` is required, so a file named `out` and a path under
+/// `outx/` are not artifacts.
+fn is_artifact(path: &RelPath) -> bool {
+    path.as_str()
+        .strip_prefix(OUT_DIR)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Where the two sink exits put the bytes they release: a content-addressed blob put (07-CONTEXT D-17).
+///
+/// The production implementor is `minos-runner`'s adapter over `minos-store`'s `Blobs::put`; tests implement it
+/// over a recorder. The trait is not sealed and cannot be: this crate does not link `minos-store`, so the store's
+/// adapter must be able to implement it from outside. Sealing would add nothing against the guest, whose bytes
+/// reach a sink only through an exit that checks the returned digest.
+pub trait BlobSink {
+    /// The store's own error.
+    type Error: std::error::Error + 'static;
+
+    /// Stores `bytes` as one blob and returns the ID it is stored under, which must be the SHA-256 of `bytes`
+    /// ([`BlobId::of`]); an exit refuses any other ID with [`SinkError::DigestMismatch`].
+    ///
+    /// # Errors
+    ///
+    /// The store's own error when it could not store the blob.
+    fn put(&self, bytes: &[u8]) -> Result<BlobId, Self::Error>;
+}
+
+/// Why a sink exit returned no [`BlobId`]. No variant carries a byte of the output.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum SinkError<E> {
+    /// The candidate's `out/` files could not be re-packed as a ustar archive. A candidate fault: the runner
+    /// records it as `Rejected(OutputInvalid)` and never retries it.
+    #[error("the candidate's out/ files could not be re-packed")]
+    Repack,
+    /// The sink named the blob by a digest other than its content's. An infrastructure fault.
+    #[error("the store named the blob by a digest other than its content's")]
+    DigestMismatch,
+    /// The sink failed. The store's own error, retried if the store says it is retryable.
+    #[error("the blob store failed")]
+    Store(#[source] E),
+}
+
+/// Hands `bytes` to `sink` once and returns the blob's ID, only after checking it is the content's own digest.
+fn sink_put<S: BlobSink>(sink: &S, bytes: &[u8]) -> Result<BlobId, SinkError<S::Error>> {
+    let expected = BlobId::of(bytes);
+    let stored = sink.put(bytes).map_err(SinkError::Store)?;
+    if stored == expected {
+        Ok(expected)
+    } else {
+        Err(SinkError::DigestMismatch)
+    }
+}
+
+/// The canonical header of one re-packed artifact, built with exactly these calls in this order (the recipe of
+/// `minos-source`'s packer, with the mode fixed at 0644).
+fn artifact_header(path: &RelPath, size: usize) -> Option<Header> {
+    let size = u64::try_from(size).ok()?;
+    let mut header = Header::new_ustar();
+    header.set_path(path.as_str()).ok()?;
+    header.set_size(size);
+    header.set_mode(0o644);
+    // Set explicitly: they write seven `0` digits and a NUL, where new_ustar leaves zero bytes.
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_entry_type(EntryType::Regular);
+    header.set_cksum();
+    Some(header)
+}
+
 impl<R: Role> Untrusted<GuestOutput<R>> {
     /// How many files the output holds. Reveals no content.
     #[must_use]
@@ -270,6 +359,47 @@ impl<R: Role> Untrusted<GuestOutput<R>> {
     }
 }
 
+impl Untrusted<GuestOutput<Candidate>> {
+    /// Re-packs the candidate's artifacts, the files under [`OUT_DIR`], and stores them through `sink` as the
+    /// judge's `candidate_out` blob. The only way to make that blob (LOOP-02, 07-CONTEXT D-17).
+    ///
+    /// Implemented for candidate output only. The archive holds only files whose path starts with `out/`, in path
+    /// order; everything else is dropped: PID 1's status, the stage logs, the diffs, a scorecard-shaped file, a
+    /// file named `out`, and any path under `outx/` or another directory. Each entry is a regular file with a
+    /// hand-built ustar header: the path, the size, mode 0644, uid, gid, and mtime 0, empty user and group names,
+    /// and the checksum. The archive ends with two 512-byte zero blocks and nothing else, so an output with no
+    /// artifact becomes 1024 zero bytes. The judge VM unpacks it under `/candidate`, so the judge reads
+    /// `/candidate/out/<file>`.
+    ///
+    /// The archive is a subset of a stream the output reader already held to [`MAX_CANDIDATE_OUT_BYTES`]: the
+    /// same names, so every header fits, and the same sizes and padding. It is checked against that cap again
+    /// before it is stored.
+    ///
+    /// Calls [`BlobSink::put`] exactly once on success of the re-pack, and returns the archive's [`BlobId`] only
+    /// after checking `sink` returned that same ID. Returns no byte.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkError::Repack`] when an artifact's header cannot be written as ustar or the archive is over
+    /// [`MAX_CANDIDATE_OUT_BYTES`] (a candidate fault, recorded as `Rejected(OutputInvalid)`);
+    /// [`SinkError::DigestMismatch`] when `sink` returned another ID; [`SinkError::Store`] when `sink` failed.
+    pub fn store_judge_input<S: BlobSink>(self, sink: &S) -> Result<BlobId, SinkError<S::Error>> {
+        let mut builder = Builder::new(Vec::new());
+        for (path, bytes) in self.0.files.iter().filter(|(path, _)| is_artifact(path)) {
+            let header = artifact_header(path, bytes.len()).ok_or(SinkError::Repack)?;
+            builder
+                .append(&header, bytes.as_slice())
+                .map_err(|_| SinkError::Repack)?;
+        }
+        let archive = builder.into_inner().map_err(|_| SinkError::Repack)?;
+        let size = u64::try_from(archive.len()).map_err(|_| SinkError::Repack)?;
+        if size > MAX_CANDIDATE_OUT_BYTES {
+            return Err(SinkError::Repack);
+        }
+        sink_put(sink, &archive)
+    }
+}
+
 impl Untrusted<GuestOutput<Judge>> {
     /// The judge's scorecard, from the file at [`SCORECARD_PATH`], through [`Scorecard::parse_json`] (which checks
     /// the byte cap before parsing).
@@ -300,5 +430,29 @@ impl<R: Role> Untrusted<OutputFile<R>> {
     #[must_use]
     pub fn into_log_excerpt(self, max: usize) -> LogExcerpt {
         LogExcerpt::from_bytes(&self.0.bytes, max)
+    }
+
+    /// Stores the last `min(max, MAX_STAGE_LOG_BYTES)` bytes of the file through `sink`, unsanitized, and returns
+    /// only the blob's [`BlobId`] (07-CONTEXT D-09, D-17).
+    ///
+    /// The bytes are a stage log and stay hostile in the store: every reader turns the blob into text only through
+    /// [`LogExcerpt::from_bytes`]. Calls [`BlobSink::put`] exactly once, and returns the ID only after checking
+    /// `sink` returned the tail's own digest. Returns no byte.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkError::DigestMismatch`] when `sink` returned another ID, and [`SinkError::Store`] when `sink` failed.
+    pub fn store_tail<S: BlobSink>(
+        self,
+        max: usize,
+        sink: &S,
+    ) -> Result<BlobId, SinkError<S::Error>> {
+        let bytes = self.0.bytes.as_slice();
+        let start = bytes.len().saturating_sub(max.min(MAX_STAGE_LOG_BYTES));
+        let tail = bytes
+            .split_at_checked(start)
+            .map(|(_, tail)| tail)
+            .unwrap_or_default();
+        sink_put(sink, tail)
     }
 }

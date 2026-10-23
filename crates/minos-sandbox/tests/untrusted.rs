@@ -606,8 +606,14 @@ fn read_back(archive: &[u8]) -> Result<Vec<ReadEntry>, Box<dyn Error>> {
             header.uid()?,
             header.gid()?,
             header.mtime()?,
-            header.username_bytes().ok_or("no user name field")?.to_vec(),
-            header.groupname_bytes().ok_or("no group name field")?.to_vec(),
+            header
+                .username_bytes()
+                .ok_or("no user name field")?
+                .to_vec(),
+            header
+                .groupname_bytes()
+                .ok_or("no group name field")?
+                .to_vec(),
             header.entry_type() == tar::EntryType::Regular,
         ));
     }
@@ -734,7 +740,9 @@ fn judge_input_passes_on_the_store_error() -> TestResult {
 }
 
 /// `bytes` as the run log of a candidate output, projected with `take`.
-fn run_log(bytes: &[u8]) -> Result<Untrusted<minos_sandbox::OutputFile<Candidate>>, Box<dyn Error>> {
+fn run_log(
+    bytes: &[u8],
+) -> Result<Untrusted<minos_sandbox::OutputFile<Candidate>>, Box<dyn Error>> {
     candidate_output(&[(RUN_LOG_PATH, bytes)])?
         .take(&RelPath::try_from(RUN_LOG_PATH)?)
         .ok_or_else(|| "the log was not taken".into())
@@ -755,7 +763,10 @@ fn stored_tail<R: Role>(
 #[test]
 fn tail_keeps_the_last_max_bytes() -> TestResult {
     let log: Vec<u8> = (0..100).collect();
-    assert_eq!(stored_tail(run_log(&log)?, 10)?, (90..100).collect::<Vec<u8>>());
+    assert_eq!(
+        stored_tail(run_log(&log)?, 10)?,
+        (90..100).collect::<Vec<u8>>()
+    );
     Ok(())
 }
 
