@@ -256,11 +256,20 @@ A spec carries IDs and digests only: the root image digest, the input disk blob,
 Sandbox output is wrapped so it cannot be used unvalidated:
 
 ```rust
-/// No Deref, Display, or Debug. The only exits are validating parsers.
+/// No Deref, Display, or Debug. The only exits are validating parsers and the two capped sink exits.
 pub struct Untrusted<T>(T);
+
+pub trait BlobSink { // a content-addressed blob put; the runner's adapter over Blobs::put
+    type Error: std::error::Error + 'static;
+    fn put(&self, bytes: &[u8]) -> Result<BlobId, Self::Error>;
+}
 
 impl Untrusted<GuestOutput<Judge>> { // judge output only (D-14)
     pub fn into_scorecard(self, limits: &Limits) -> Result<Scorecard, ScorecardFault>;
+}
+
+impl Untrusted<GuestOutput<Candidate>> { // candidate output only (07-CONTEXT D-17)
+    pub fn store_judge_input<S: BlobSink>(self, sink: &S) -> Result<BlobId, SinkError<S::Error>>;
 }
 
 impl<R: Role> Untrusted<GuestOutput<R>> {
@@ -270,8 +279,11 @@ impl<R: Role> Untrusted<GuestOutput<R>> {
 
 impl<R: Role> Untrusted<OutputFile<R>> {
     pub fn into_log_excerpt(self, max: usize) -> LogExcerpt; // truncated, control chars stripped
+    pub fn store_tail<S: BlobSink>(self, max: usize, sink: &S) -> Result<BlobId, SinkError<S::Error>>;
 }
 ```
+
+The two sink exits hand capped bytes only to a `BlobSink` and return only a `BlobId`; neither returns a byte, and `Untrusted` keeps one private field and no `Debug`, `Display`, `Deref`, `Clone`, or `Default`. Each consumes `self`, calls `put` exactly once, and returns the ID only after checking it equals `BlobId::of` the bytes, else `SinkError::DigestMismatch`; `SinkError<E>` is `Repack` (a candidate fault, recorded as `Rejected(OutputInvalid)`), `DigestMismatch` (infrastructure), or `Store(E)` (the sink's own error). `store_judge_input` exists on candidate output only and is the only way to make the judge's `candidate_out` blob: it re-packs only the files under `out/` (the `/` is required, so `outx/` and a file named `out` are dropped, as are the status, the logs, `diffs/`, and any scorecard-shaped file), in path order, as canonical ustar (hand-built headers, mode 0644, uid, gid, and mtime 0, empty owner names, two zero end blocks and nothing after; no artifact gives 1024 zero bytes), bounded by `MAX_CANDIDATE_OUT_BYTES`, and the judge reads `/candidate/out/<file>`. `store_tail` keeps the last `min(max, MAX_STAGE_LOG_BYTES)` raw bytes of a stage log (D-09), whose readers go through `LogExcerpt`. The sink sees the bytes, as any put interface must; the guarantee is that the exit returns none. `BlobSink` cannot be sealed, because `minos-sandbox` does not link `minos-store`; its production implementor is the runner's adapter over `Blobs::put`, and only `minos-runner` calls either exit. Approved by the user at the 07-04 checkpoint on 2026-10-22 (trait form, D-17).
 
 `Backend` has two methods, `capabilities()` and `launch(ok: Cleared<R>)`, and a generic associated type `Running<R>`; `RunningVm::wait(self) -> Result<Finished<R>, InfraError>`. `Finished<R>` holds the host-observed `Ended` (`Exited`, `Crashed`, `TimedOut`, from the K7 classification), the launch key, and the hostile stream, which leaves only through `into_output` (the raw-mode tar reader: ustar regular files only, `RelPath` names, 1024 entries, 8 MiB per entry, 16 MiB total, two zero end blocks and nothing after). `Finished::new` consumes a `Cleared<R>`, so output of a role exists only for a cleared launch of that role, and one clearance yields at most one `Finished` (refinement of 04-CONTEXT D-17; review WR-03). The runner is generic over `B: Backend`. Each binary picks its backend concretely, and a binary that can choose among several at runtime defines its own enum (for example `LocalBackend { Krun, Chv }`). Never use trait objects, and never put a backend enum in `minos-sandbox`. Dropping a `Running` handle destroys the VM. The trait takes no store: a backend is constructed with a `BlobSource`, so `KrunBackend::new(paths, blobs)` takes the CLI's `FileStore`-backed source and fetches the plan's blobs under caps and the verified root image path through it (05-CONTEXT D-13); `deny.toml`'s layering is unchanged, and `minos-backend-krun` still never links `minos-store`. `KrunBackend::new` sweeps the job root and probes the host once, `capabilities()` returns those cached results, and `launch` refuses a host whose probes failed or that lacks Seatbelt, whatever capabilities the plan was cleared against.
 
@@ -473,7 +485,7 @@ minos stop <run>
 
 - Property tests (`proptest`) for parsers, `RelPath`, `Diff::parse`, policy permutation-invariance, and the ledger fold.
 - Golden vectors for every ID hash and golden files for every persisted wire format.
-- Compile-fail tests (`trybuild`) proving a `SandboxSpec<Candidate>` cannot get judge data and that `launch` cannot be called without `Cleared`; that no role has a network method; that `LaunchPlan` and `Cleared` cannot be built by literal and `Cleared` cannot be cloned; that one `Cleared` cannot build two `Finished` values; that `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`; and that candidate output has no `into_scorecard`.
+- Compile-fail tests (`trybuild`) proving a `SandboxSpec<Candidate>` cannot get judge data and that `launch` cannot be called without `Cleared`; that no role has a network method; that `LaunchPlan` and `Cleared` cannot be built by literal and `Cleared` cannot be cloned; that one `Cleared` cannot build two `Finished` values; that `Untrusted` refuses `{:?}`, `{}`, `*`, and `.0`; that candidate output has no `into_scorecard`; and that judge output has no `store_judge_input`.
 - `LocalRunner` tests for orchestrator logic, including the per-generation operation budget.
 - In-memory `Ledger` and `Blobs` implementations for everything above the store.
 - VM tests on the production backend and guest, both ignored and run on a VM host after the build, the signing, and the musl guest build (Commands): the permanent exit tests `exit_egress` (KRUN-03), `exit_env` (GUEST-05, with the one `KRUN_BOOT_START_NS` exception in Local backends), `exit_kill9` (KRUN-05: after SIGKILL of the process that launched a VM, its helper exits on its own within 5 s, no process names the job, and a new backend's sweep removes the job directory), and `exit_forge` (GUEST-04: the candidate cannot open `/dev/vdb` or `/proc/1/environ`, and a stream under a guessed token is `ChunkProtocol`) in `crates/minos-backend-krun/tests/exit.rs` (05-19), and the functional VM tests in `tests/vm.rs` (05-17). Both share `tests/harness/mod.rs`, so every harness item must be used by each target that declares `mod harness;`, or `-D warnings` fails on dead code.
