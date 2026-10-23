@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
 stopped_at: Completed 07-03-PLAN.md
-last_updated: "2026-10-23T00:03:55.211Z"
+last_updated: "2026-10-23T00:13:05.984Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 73
+  completed_plans: 74
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 4 of 17
+Plan: 5 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -133,6 +133,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P01 | 9min | 3 tasks | 16 files |
 | Phase 07 P02 | 10min | 2 tasks | 8 files |
 | Phase 07 P03 | 3 min | 2 tasks | 7 files |
+| Phase 07 P05 | 9 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -312,6 +313,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-02: [judge] trials defaults to 3 (1 to 32) and is excluded from JudgeVersion
 - [Phase 07]: 07-03: The loop's ExperimentId::of ban is proven through both the module path and the crate-root re-export, so a re-export cannot route around D-12
 - [Phase 07]: 07-03: std::thread::sleep stays allowed in minos-loop for the D-16 retry pause; SystemTime::now and Instant::now are banned there and in minos-runner
+- [Phase 07]: 07-05: a same-key append with a different record is Err(StoreError::Conflict { seq }) in both stores (D-08); Appended keeps New and Duplicate
+- [Phase 07]: 07-05: RunLock is a store trait with a GAT guard; FileStore flocks runs/<hex>/driver.lock (0600, separate from ledger.lock), MemoryStore uses Mutex<BTreeSet<RunId>>; a held run is StoreError::RunLocked
 
 ### Pending Todos
 
@@ -342,6 +345,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-23T00:03:55.206Z
+Last session: 2026-10-23T00:12:58.795Z
 Stopped at: Completed 07-03-PLAN.md
 Resume file: None
