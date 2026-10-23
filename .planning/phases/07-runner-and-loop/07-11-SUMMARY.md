@@ -102,3 +102,7 @@ None.
 - 22f5dd6 feat(07-11): implement judge push and share the lock helpers
 - 5fb9124 feat(07-11): add the minos judge push subcommand
 - f163838 docs(07-11): record judge data, the lock table, trials, and the overlap refusal
+
+## Self-Check: PASSED
+
+All three created files exist; commits 8ec703e, 22f5dd6, 5fb9124, and f163838 are in the log.

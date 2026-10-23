@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
 stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-10-23T01:22:13.778Z"
+last_updated: "2026-10-23T01:31:50.105Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 80
+  completed_plans: 81
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 11 of 17
+Plan: 12 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -140,6 +140,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P08 | 15 min | 2 tasks | 9 files |
 | Phase 07 P09 | 9 min | 2 tasks | 6 files |
 | Phase 07 P10 | 20 min | 3 tasks | 9 files |
+| Phase 07 P11 | 6min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -333,6 +334,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-09: a judge that exited 0 passes only with Packed output; otherwise Rejected(OutputTooLarge) or Rejected(OutputInvalid)
 - [Phase 07]: 07-10: D-19 resume frame is the writable and readable sets, program path, source excludes, commands, environment, and the whole JudgeSpec; budget, policy, proposers, and params are outside it
 - [Phase 07]: 07-10: admit takes an AdmitStep bundle; a batch refuses a tier/origin mismatch; RunState gained judge_versions and notes_by_ordinal
+- [Phase 07]: 07-11: judge push decides the lock outcome before storing, so a refused push stores nothing; an unchanged push still stores the blob for a fresh clone
+- [Phase 07]: 07-11: a judge directory inside the project must lie under a [source] exclude entry, compared ASCII case-insensitively
 
 ### Pending Todos
 
@@ -363,6 +366,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-23T01:22:07.384Z
+Last session: 2026-10-23T01:31:39.419Z
 Stopped at: Completed 07-09-PLAN.md
 Resume file: None

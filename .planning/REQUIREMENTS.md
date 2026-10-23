@@ -124,7 +124,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [ ] **CLI-01**: `minos init --kind <tune|optimize|explore>` scaffolds `minos.toml`, `program.md`, and `minos.Dockerfile`
 - [x] **CLI-02**: `minos env build` writes `minos.lock`
 - [x] **CLI-03**: `minos host doctor` runs the launch preflight and prints every refusal with an explanation and a fix
-- [ ] **CLI-04**: `minos judge push <dir>` registers judge data
+- [x] **CLI-04**: `minos judge push <dir>` registers judge data
 - [ ] **CLI-05**: `minos check` validates the manifest, builds, judges the baseline repeatedly, prints the noise floor and the route table with reasons, and gives actionable errors
 - [ ] **CLI-06**: `minos run --generations N` starts or resumes a run and prints one sanitized progress line per experiment (ID, tier, outcome, delta, elapsed)
 - [ ] **CLI-07**: `minos status`, `minos log`, and `minos show <exp>` display progress, the ledger, and one experiment's diff, rationale, outcome, and lineage, all through the sanitizing renderer
@@ -276,7 +276,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-01 | Phase 8 | Pending |
 | CLI-02 | Phase 5 | Complete |
 | CLI-03 | Phase 5 | Complete |
-| CLI-04 | Phase 7 | Pending |
+| CLI-04 | Phase 7 | Complete |
 | CLI-05 | Phase 8 | Pending |
 | CLI-06 | Phase 8 | Pending |
 | CLI-07 | Phase 8 | Pending |
