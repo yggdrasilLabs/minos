@@ -4,7 +4,7 @@
 //!
 //! # Admission
 //!
-//! [`admit`] names each proposal through [`Experiment::candidate`] over its [`CumulativeDiff`], never by hashing a
+//! [`admit`] names each proposal through [`Experiment::candidate`] over its [`CumulativeDiff`](minos_core::diff::cumulative::CumulativeDiff), never by hashing a
 //! bare diff (D-12). A proposal whose experiment the run already recorded, in an earlier generation or earlier in
 //! the same step, is dropped and counted: a second `Proposed` for one experiment with other fields would fail the
 //! fold. Each surviving proposal's canonical diff and rationale are stored as blobs.
