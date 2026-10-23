@@ -492,6 +492,29 @@ fn root_image_is_the_recorded_digest() -> TestResult {
 }
 
 #[test]
+fn judge_versions_lists_every_version_an_experiment_was_judged_under() -> TestResult {
+    // Arrange
+    let other = JudgeVersion::from_str(&"cd".repeat(32))?;
+    let records = with(Event::Judged {
+        exp: baseline(),
+        judge: other,
+        trial: 0,
+        outcome: scored(100.0)?,
+        backend: backend(),
+        logs: None,
+    })?;
+
+    // Act
+    let state = fold(&records)?;
+
+    // Assert
+    let expected: BTreeSet<JudgeVersion> = [judge()?, other].into();
+    assert_eq!(state.judge_versions(&baseline()), expected);
+    assert!(state.judge_versions(&exp(9)?).is_empty());
+    Ok(())
+}
+
+#[test]
 fn backend_classes_is_empty_with_no_judgment() -> TestResult {
     let state = fold(&[rec(run_started())])?;
     assert!(state.backend_classes().is_empty());
