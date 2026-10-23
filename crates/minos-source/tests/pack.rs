@@ -1,6 +1,7 @@
 //! The deterministic snapshot: byte identity, the externally computed golden `TreeId`, zeroed ustar headers, a
 //! listing by the system `tar`, the four exclusion sources, and the denylist report.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -144,7 +145,12 @@ fn manifest() -> Result<Manifest, Box<dyn Error>> {
 /// Snapshots `dir` with the example manifest. Temporary directories are not repositories, so the clean check is
 /// skipped; the denylist, the caps, and the scan still run.
 fn pack(dir: &Path) -> Result<Snapshot, Box<dyn Error>> {
-    Ok(snapshot(dir, &manifest()?, CleanPolicy::AllowDirty)?)
+    Ok(snapshot(
+        dir,
+        &manifest()?,
+        CleanPolicy::AllowDirty,
+        &BTreeSet::new(),
+    )?)
 }
 
 /// The packed paths, in archive order.

@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 
-use minos_core::id::TreeId;
+use minos_core::id::{BlobId, TreeId};
 use minos_core::manifest::Manifest;
 use minos_core::path::RelPath;
 use minos_core::text::SafeText;
@@ -296,6 +296,18 @@ pub enum SnapshotError {
     /// The tree is not committed, and the policy requires it.
     #[error("the working tree is not clean")]
     Dirty(#[source] Dirty),
+    /// Packed files whose bytes equal pushed judge data (07-CONTEXT D-04, D-20): a judge fixture copied into the
+    /// project would let a candidate see what it is scored on. Zero-length files are exempt.
+    #[error(
+        "{total} packed file(s) equal pushed judge data byte for byte; a candidate would see what it is scored on; remove them or exclude them from the source:{}",
+        listing(.paths, total.saturating_sub(u64::try_from(.paths.len()).unwrap_or(u64::MAX)))
+    )]
+    JudgeOverlap {
+        /// The first offending paths in path order, at most 20.
+        paths: Vec<RelPath>,
+        /// How many packed files overlap.
+        total: u64,
+    },
     /// The judge data's tarball is over the judge section cap of the input disk. Judge data is refused, never
     /// truncated; data this large waits for a streaming unpack (CLAUDE.md Open questions).
     #[error(
@@ -333,12 +345,17 @@ fn sizes(largest: &[(RelPath, u64)]) -> String {
 /// Packs the project at `root` into a deterministic, secret-scanned snapshot.
 ///
 /// In order: the walk under the four exclusion sources, which refuses every offender and every over-cap tree;
-/// the check that every `[surface]` path and the program file are in the snapshot; the secret scan over exactly
-/// the bytes to be packed; the clean check unless `policy` is [`CleanPolicy::AllowDirty`]; and the tarball, whose
-/// SHA-256 is the [`TreeId`]. `AllowDirty` skips only the clean check.
+/// the check that every `[surface]` path and the program file are in the snapshot; the judge-overlap check; the
+/// secret scan over exactly the bytes to be packed; the clean check unless `policy` is
+/// [`CleanPolicy::AllowDirty`]; and the tarball, whose SHA-256 is the [`TreeId`]. `AllowDirty` skips only the
+/// clean check.
 ///
-/// Packed files are not compared with pushed judge data: judge data is stored as one tarball blob, so per-file
-/// digests must first be recorded by `minos judge push` (Phase 7, JUDGE-01).
+/// `judge_files` is the SHA-256 of every pushed judge file; the caller passes `minos.lock`'s
+/// `Lock::judge_file_digests`, or an empty set when there is no lock. Every packed file whose bytes are non-empty
+/// and whose SHA-256 is in the set refuses the snapshot, all of them named, because a judge fixture in the source
+/// would reach the candidate and the image build context (07-CONTEXT D-04, JUDGE-01). Zero-length files are the
+/// one exemption: every empty file has the same digest and reveals nothing, so an empty judge file must not refuse
+/// every `__init__.py` or `.gitkeep` (D-20).
 ///
 /// # Errors
 ///
@@ -347,12 +364,14 @@ fn sizes(largest: &[(RelPath, u64)]) -> String {
 /// - [`SnapshotError::TooManyFiles`], [`SnapshotError::TooLarge`]: the tree is over a cap.
 /// - [`SnapshotError::MinosignoreNegation`], [`SnapshotError::IgnoreFileTooLarge`]: a `.minosignore` is refused.
 /// - [`SnapshotError::SurfaceMissing`]: a surface or program path is not in the snapshot.
+/// - [`SnapshotError::JudgeOverlap`]: non-empty packed files equal pushed judge data, all counted.
 /// - [`SnapshotError::Scanner`], [`SnapshotError::Secrets`]: the scanner failed, or found a secret.
 /// - [`SnapshotError::Dirty`]: the tree is not committed and `policy` is [`CleanPolicy::RequireClean`].
 pub fn snapshot(
     root: &Path,
     manifest: &Manifest,
     policy: CleanPolicy,
+    judge_files: &BTreeSet<BlobId>,
 ) -> Result<Snapshot, SnapshotError> {
     let collected = walk::collect(root, &walk::WalkRules::source(manifest))?;
 
@@ -369,6 +388,7 @@ pub fn snapshot(
         });
     }
 
+    check_judge_overlap(&collected.files, judge_files)?;
     scan_files(&collected.files)?;
 
     match policy {
@@ -413,6 +433,37 @@ fn scan_files(files: &BTreeMap<RelPath, walk::FileEntry>) -> Result<(), Snapshot
     }
     if total > 0 {
         return Err(SnapshotError::Secrets { shown, total });
+    }
+    Ok(())
+}
+
+/// Refuses `files` if any non-empty file's SHA-256 is in `judge_files`, naming the first offenders in path order
+/// and counting all of them (07-CONTEXT D-04, D-20).
+///
+/// # Errors
+///
+/// [`SnapshotError::JudgeOverlap`] when at least one non-empty file equals a judge file byte for byte.
+fn check_judge_overlap(
+    files: &BTreeMap<RelPath, walk::FileEntry>,
+    judge_files: &BTreeSet<BlobId>,
+) -> Result<(), SnapshotError> {
+    if judge_files.is_empty() {
+        return Ok(());
+    }
+    let mut paths = Vec::new();
+    let mut total: u64 = 0;
+    for (path, file) in files {
+        // D-20: an empty file reveals nothing, and every empty file shares one digest.
+        if file.bytes.is_empty() || !judge_files.contains(&BlobId::of(&file.bytes)) {
+            continue;
+        }
+        total = total.saturating_add(1);
+        if paths.len() < walk::SHOWN_OFFENDERS {
+            paths.push(path.clone());
+        }
+    }
+    if total > 0 {
+        return Err(SnapshotError::JudgeOverlap { paths, total });
     }
     Ok(())
 }

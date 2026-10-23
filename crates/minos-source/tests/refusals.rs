@@ -118,7 +118,7 @@ fn pack(
     policy: CleanPolicy,
 ) -> Result<Result<Snapshot, SnapshotError>, Box<dyn Error>> {
     let manifest = Manifest::parse_toml(CLAUDE_EXAMPLE)?;
-    Ok(snapshot(dir, &manifest, policy))
+    Ok(snapshot(dir, &manifest, policy, &BTreeSet::new()))
 }
 
 /// `n` characters cycling through `[A-Z]`.

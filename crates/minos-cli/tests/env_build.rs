@@ -1,8 +1,9 @@
 //! `minos env build` against a fake builder: the lock rules (D-10, D-11), the build context's hygiene (KRUN-09),
-//! the guest check (05-RESEARCH Pitfall 8), and the packed image (D-09). The Docker reproducibility test (D-12) is
+//! the judge-overlap refusal (07-CONTEXT D-04, JUDGE-01), the guest check (05-RESEARCH Pitfall 8), and the packed image (D-09). The Docker reproducibility test (D-12) is
 //! ignored here and runs in plan 05-18 with Docker started.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -11,9 +12,9 @@ use std::process::Command;
 
 use minos_cli::builder::{BuilderError, DockerBuildx, RootfsBuilder, RunningBuild};
 use minos_cli::env_build::{EnvBuildError, EnvBuildOptions, EnvBuildReport, env_build};
-use minos_core::id::BlobId;
+use minos_core::id::{BlobId, TreeId};
 use minos_core::ledger::BackendKind;
-use minos_core::lock::{BuilderId, BuilderText, Lock, LockedImage};
+use minos_core::lock::{BuilderId, BuilderText, Lock, LockedImage, LockedJudge};
 use minos_core::manifest::Arch;
 use minos_core::path::RelPath;
 use minos_source::SnapshotError;
@@ -441,6 +442,40 @@ fn secret_blocks_build() -> TestResult {
     );
     assert_eq!(builder.started.get(), 0);
     assert!(!fixture.project.join("minos.lock").exists());
+    Ok(())
+}
+
+#[test]
+fn judge_overlap_blocks_build() -> TestResult {
+    let fixture = fixture(elf_guest())?;
+    // A lock whose pushed judge data holds a file equal to the project's src/lib.rs, byte for byte.
+    let copied: &[u8] = b"pub mod parse;\n";
+    let files = BTreeMap::from([(RelPath::try_from("expected.txt")?, BlobId::of(copied))]);
+    let judge = LockedJudge::new(
+        1,
+        TreeId::of(b"judge data tarball"),
+        u64::try_from(copied.len())?,
+        BuilderText::try_from("0.1.0".to_owned())?,
+        files,
+    )?;
+    let text = Lock::empty().with_judge(judge).to_toml()?;
+    write(&fixture.project, "minos.lock", text.as_bytes())?;
+    let builder = FakeBuilder::new(rootfs_tar(b"one\n")?);
+
+    let result = build(&fixture, &builder, false);
+
+    let Err(EnvBuildError::Snapshot(SnapshotError::JudgeOverlap { paths, total })) = result else {
+        return Err(format!("expected JudgeOverlap, got {result:?}").into());
+    };
+    assert_eq!(total, 1);
+    let names: Vec<&str> = paths.iter().map(RelPath::as_str).collect();
+    assert_eq!(names, ["src/lib.rs"]);
+    assert_eq!(builder.started.get(), 0);
+    assert!(builder.contexts.borrow().is_empty());
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("minos.lock"))?,
+        text
+    );
     Ok(())
 }
 

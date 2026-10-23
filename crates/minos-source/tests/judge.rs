@@ -1,9 +1,11 @@
 //! The judge-data pack (07-CONTEXT D-03): the source snapshot's hygiene under the judge caps, with no manifest
-//! excludes, no judge-path drop, and no clean check.
+//! excludes, no judge-path drop, and no clean check. Then the source snapshot's judge-overlap refusal (D-04,
+//! D-20): a non-empty packed file equal to pushed judge data refuses the snapshot, and an empty one never does.
 //!
 //! No complete secret-shaped value appears in this file. The AWS-shaped key is joined at run time from pieces that
 //! do not match on their own (04-RESEARCH Pitfall 5), so the self-scan in tests/scan.rs still passes.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
@@ -13,8 +15,12 @@ use std::process::Command;
 use minos_core::guest::MAX_JUDGE_DATA_BYTES;
 use minos_core::id::{BlobId, TreeId};
 use minos_core::limits::MAX_JUDGE_FILES;
+use minos_core::manifest::Manifest;
 use minos_core::path::RelPath;
-use minos_source::{DenyRule, JudgePack, OffenderKind, SnapshotError, pack_judge_data};
+use minos_source::{
+    CleanPolicy, DenyRule, JudgePack, OffenderKind, Snapshot, SnapshotError, pack_judge_data,
+    snapshot,
+};
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -24,6 +30,73 @@ const EXPECTED: &[u8] = b"42\n";
 
 /// The judge program.
 const JUDGE: &[u8] = b"#!/bin/sh\necho judged\n";
+
+/// The `minos.toml` example in CLAUDE.md, section "Projects", copied byte for byte from `CLAUDE_EXAMPLE` in
+/// crates/minos-core/tests/manifest.rs.
+const CLAUDE_EXAMPLE: &str = r#"[project]
+name = "logparse"
+kind = "optimize"            # tune | optimize | explore
+program = "program.md"
+
+[surface]
+writable = ["src/parse.rs"]
+readable = ["src/lib.rs"]
+
+[source]
+exclude = ["judge/", "docs/", "target/"]
+
+[environment]
+dockerfile = "minos.Dockerfile"
+requires = { arch = "arm64" }
+
+[commands]
+build = ["cargo", "build", "--release"]
+run = ["./target/release/bench", "--out", "/out/result.json"]
+check = ["cargo", "check"]
+
+[budget]
+build = "2m"
+run = "5m"
+spend_usd = 40
+
+[judge]
+version = 1
+command = ["./judge"]
+
+[[judge.gate]]
+metric = "identical_output"
+
+[[judge.objective]]
+metric = "throughput_mb_s"
+goal = "maximize"
+min_improvement = "5%"
+
+[policy]
+kind = "greedy"              # greedy | pareto | review
+width = 4
+
+[[proposer]]
+kind = "single_shot"
+model = "mid"
+batch = 4
+"#;
+
+/// The five project files: path, bytes, and whether the file is executable.
+const PROJECT: [(&str, &[u8], bool); 5] = [
+    ("minos.Dockerfile", b"FROM scratch\n", false),
+    ("minos.toml", CLAUDE_EXAMPLE.as_bytes(), false),
+    (
+        "program.md",
+        b"Make src/parse.rs faster without changing its output.\n",
+        false,
+    ),
+    ("src/lib.rs", b"pub mod parse;\n", false),
+    (
+        "src/parse.rs",
+        b"pub fn parse(input: &str) -> usize {\n    input.len()\n}\n",
+        true,
+    ),
+];
 
 /// Writes `bytes` to `dir/rel`, creating parent directories, with mode 0755 when `executable` and 0644 otherwise.
 fn write_file(dir: &Path, rel: &str, bytes: &[u8], executable: bool) -> TestResult {
@@ -323,5 +396,144 @@ fn no_clean_check_and_no_judge_path_drop() -> TestResult {
         ]
     );
     assert!(pack.report().denied().is_empty());
+    Ok(())
+}
+
+/// A temporary directory holding the five-file project.
+fn project() -> Result<TempDir, Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    for (rel, bytes, executable) in PROJECT {
+        write_file(dir.path(), rel, bytes, executable)?;
+    }
+    Ok(dir)
+}
+
+/// Snapshots `dir` with the example manifest under `policy`, against the judge digests `judge`.
+fn pack_source(
+    dir: &Path,
+    policy: CleanPolicy,
+    judge: &BTreeSet<BlobId>,
+) -> Result<Result<Snapshot, SnapshotError>, Box<dyn Error>> {
+    let manifest = Manifest::parse_toml(CLAUDE_EXAMPLE)?;
+    Ok(snapshot(dir, &manifest, policy, judge))
+}
+
+/// The judge digest set holding exactly the SHA-256 of `EXPECTED`.
+fn expected_set() -> BTreeSet<BlobId> {
+    BTreeSet::from([BlobId::of(EXPECTED)])
+}
+
+#[test]
+fn source_file_equal_to_judge_data_is_refused() -> TestResult {
+    let dir = project()?;
+    write_file(dir.path(), "src/fixture.txt", EXPECTED, false)?;
+    let result = pack_source(dir.path(), CleanPolicy::AllowDirty, &expected_set())?;
+    let Err(error @ SnapshotError::JudgeOverlap { .. }) = result else {
+        return Err("expected JudgeOverlap".into());
+    };
+    if let SnapshotError::JudgeOverlap { paths, total } = &error {
+        assert_eq!(*total, 1);
+        let names: Vec<&str> = paths.iter().map(RelPath::as_str).collect();
+        assert_eq!(names, ["src/fixture.txt"]);
+    }
+    let text = error.to_string();
+    assert!(text.contains("src/fixture.txt"), "{text:?}");
+    Ok(())
+}
+
+#[test]
+fn every_overlapping_file_is_named_in_order() -> TestResult {
+    let dir = project()?;
+    write_file(dir.path(), "tests/b.txt", EXPECTED, false)?;
+    write_file(dir.path(), "data/a.txt", EXPECTED, false)?;
+    let Err(SnapshotError::JudgeOverlap { paths, total }) =
+        pack_source(dir.path(), CleanPolicy::AllowDirty, &expected_set())?
+    else {
+        return Err("expected JudgeOverlap".into());
+    };
+    assert_eq!(total, 2);
+    let names: Vec<&str> = paths.iter().map(RelPath::as_str).collect();
+    assert_eq!(names, ["data/a.txt", "tests/b.txt"]);
+    Ok(())
+}
+
+#[test]
+fn more_than_twenty_overlaps_are_counted() -> TestResult {
+    let dir = project()?;
+    for index in 0..25 {
+        write_file(
+            dir.path(),
+            &format!("copies/c{index:02}.txt"),
+            EXPECTED,
+            false,
+        )?;
+    }
+    let result = pack_source(dir.path(), CleanPolicy::AllowDirty, &expected_set())?;
+    let Err(error @ SnapshotError::JudgeOverlap { .. }) = result else {
+        return Err("expected JudgeOverlap".into());
+    };
+    if let SnapshotError::JudgeOverlap { paths, total } = &error {
+        assert_eq!(*total, 25);
+        assert_eq!(paths.len(), 20);
+        assert_eq!(paths.first().map(RelPath::as_str), Some("copies/c00.txt"));
+        assert_eq!(paths.last().map(RelPath::as_str), Some("copies/c19.txt"));
+    }
+    let text = error.to_string();
+    assert!(text.contains("and 5 more"), "{text:?}");
+    assert!(!text.contains("copies/c20.txt"), "{text:?}");
+    Ok(())
+}
+
+#[test]
+fn empty_files_are_exempt() -> TestResult {
+    let dir = project()?;
+    write_file(dir.path(), "src/__init__.py", b"", false)?;
+    write_file(dir.path(), "data/.gitkeep", b"", false)?;
+    let judge = BTreeSet::from([BlobId::of(b""), BlobId::of(EXPECTED)]);
+    let snap = pack_source(dir.path(), CleanPolicy::AllowDirty, &judge)??;
+    assert_eq!(snap.report().files(), 7);
+    Ok(())
+}
+
+#[test]
+fn a_judge_set_that_matches_nothing_changes_nothing() -> TestResult {
+    let dir = project()?;
+    let plain = pack_source(dir.path(), CleanPolicy::AllowDirty, &BTreeSet::new())??;
+    let checked = pack_source(dir.path(), CleanPolicy::AllowDirty, &expected_set())??;
+    assert_eq!(plain.tarball(), checked.tarball());
+    assert_eq!(plain.tree(), checked.tree());
+    Ok(())
+}
+
+#[test]
+fn overlap_is_checked_before_the_scan_and_the_clean_check() -> TestResult {
+    let dir = project()?;
+    write_file(dir.path(), "src/fixture.txt", EXPECTED, false)?;
+    let planted = format!("const KEY: &str = \"{}\";\n", aws_key());
+    write_file(dir.path(), "src/key.rs", planted.as_bytes(), false)?;
+    // Not a repository, so RequireClean would refuse as Dirty if it ran first; the scan would find the key.
+    let result = pack_source(dir.path(), CleanPolicy::RequireClean, &expected_set())?;
+    assert!(
+        matches!(result, Err(SnapshotError::JudgeOverlap { total: 1, .. })),
+        "{result:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn pushed_judge_digests_refuse_their_copy_in_the_source() -> TestResult {
+    let judge = judge_dir()?;
+    let pushed = pack_judge_data(judge.path())?;
+    let digests: BTreeSet<BlobId> = pushed.files().values().copied().collect();
+    let dir = project()?;
+    write_file(dir.path(), "bench/judge.sh", JUDGE, true)?;
+    let Err(SnapshotError::JudgeOverlap { paths, total }) =
+        pack_source(dir.path(), CleanPolicy::AllowDirty, &digests)?
+    else {
+        return Err("expected JudgeOverlap".into());
+    };
+    assert_eq!(total, 1);
+    let names: Vec<&str> = paths.iter().map(RelPath::as_str).collect();
+    assert_eq!(names, ["bench/judge.sh"]);
     Ok(())
 }

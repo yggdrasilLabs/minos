@@ -7,8 +7,10 @@
 //! 1. the manifest, `<project>/minos.toml`, read under [`MAX_MANIFEST_BYTES`] and validated;
 //! 2. the source snapshot (`minos_source::snapshot`), with the clean check unless `--allow-dirty`, the same
 //!    semantics as `minos run` (CLI-11). Its tarball is the whole build context: judge paths are excluded, the hard
-//!    denylist (`.git/`, `.minos/`, `.env*`, `minos.lock`, keys) applies, and the secret scan has run over exactly
-//!    the packed bytes, so the builder never sees judge data or a secret (KRUN-09);
+//!    denylist (`.git/`, `.minos/`, `.env*`, `minos.lock`, keys) applies, any non-empty file equal to pushed judge
+//!    data refuses it (the existing `minos.lock`'s `[[judge]]` file digests, read first; 07-CONTEXT D-04), and the
+//!    secret scan has run over exactly the packed bytes, so the builder never sees judge data or a secret
+//!    (KRUN-09, JUDGE-01);
 //! 3. the Dockerfile, taken from that tarball so its SHA-256 is of the bytes the builder was given, read under
 //!    [`MAX_DOCKERFILE_BYTES`], with every `FROM` pinned by digest (`image::base_images`);
 //! 4. the guest binary, read under [`GUEST_MAX_BYTES`] and checked to be a static `AArch64` ELF before anything
@@ -249,13 +251,20 @@ pub fn env_build<B: RootfsBuilder>(
         return Err(EnvBuildError::Arch);
     }
 
-    // 2. The build context: the source snapshot, and nothing else.
+    // 2. The build context: the source snapshot, and nothing else. The lock's judge file digests are read first,
+    // so no file equal to pushed judge data reaches the builder (D-04, JUDGE-01).
     let policy = if options.allow_dirty {
         CleanPolicy::AllowDirty
     } else {
         CleanPolicy::RequireClean
     };
-    let snapshot = snapshot(project, &manifest, policy).map_err(EnvBuildError::Snapshot)?;
+    let lock_path = project.join(LOCK_FILE);
+    let judge_files = read_lock(&lock_path)?
+        .as_ref()
+        .map(Lock::judge_file_digests)
+        .unwrap_or_default();
+    let snapshot =
+        snapshot(project, &manifest, policy, &judge_files).map_err(EnvBuildError::Snapshot)?;
 
     // 3. The Dockerfile as the builder will see it, and its digest pins.
     let dockerfile = manifest.environment().dockerfile();
@@ -299,7 +308,8 @@ pub fn env_build<B: RootfsBuilder>(
         .map_err(EnvBuildError::Store)?;
     let image = ImageDigest::from_blob_id(&blob);
 
-    // 7. The lock, only after the blob is stored.
+    // 7. The lock, only after the blob is stored. It is read again, so an entry written during the build (a
+    // `judge push`) is kept.
     let entry = LockedImage::new(
         BACKEND,
         ARCH,
@@ -309,7 +319,6 @@ pub fn env_build<B: RootfsBuilder>(
         guest_sha256,
         identity,
     );
-    let lock_path = project.join(LOCK_FILE);
     let lock = read_lock(&lock_path)?;
     let lock_written = match lock.as_ref().and_then(|lock| lock.image(BACKEND, ARCH)) {
         Some(locked) if *locked == entry => false,
