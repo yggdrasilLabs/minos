@@ -27,6 +27,7 @@
 
 pub mod admit;
 pub mod error;
+pub mod history;
 pub mod inputs;
 pub mod job;
 pub mod observe;

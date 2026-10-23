@@ -755,6 +755,16 @@ impl RunState {
             .collect()
     }
 
+    /// The steering notes for `generation` with their ordinals, in ordinal order. The loop renders each note under
+    /// its recorded ordinal, so a gap in the ordinals shows in the prompt as it is in the ledger (03-CONTEXT D-07).
+    #[must_use]
+    pub fn notes_by_ordinal(&self, generation: u32) -> Vec<(u32, BlobId)> {
+        self.notes
+            .range((generation, 0)..=(generation, u32::MAX))
+            .map(|((_, ordinal), note)| (*ordinal, *note))
+            .collect()
+    }
+
     /// The ordinal for the next note of `generation`: one past the highest recorded, or 0 when there is none.
     /// `None` when the highest recorded ordinal is `u32::MAX`, so no further note can be keyed apart from it.
     #[must_use]
