@@ -668,7 +668,9 @@ pub fn stops(events: &[(u64, Event)]) -> Vec<(u32, StopReason)> {
     events
         .iter()
         .filter_map(|(_, event)| match event {
-            Event::StopRequested { generation, reason } => Some((*generation, *reason)),
+            Event::StopRequested {
+                generation, reason, ..
+            } => Some((*generation, *reason)),
             _ => None,
         })
         .collect()

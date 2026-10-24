@@ -44,6 +44,7 @@ fn an_old_user_stop_does_not_block_a_resume_from_reaching_its_target() -> TestRe
         Record::v1(Event::StopRequested {
             generation: 1,
             reason: StopReason::UserStop,
+            ordinal: None,
         }),
     )?;
 
@@ -81,6 +82,7 @@ fn a_user_stop_during_a_launch_ends_the_session_after_that_trial_is_recorded() -
                     Record::v1(Event::StopRequested {
                         generation: 0,
                         reason: StopReason::UserStop,
+                        ordinal: None,
                     }),
                 )
                 .map_err(|_error| STOP_FAILED)?;
@@ -178,6 +180,7 @@ fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_is_a_dupli
                     Record::v1(Event::StopRequested {
                         generation: 1,
                         reason: StopReason::UserStop,
+                        ordinal: None,
                     }),
                 )
                 .map_err(|_error| STOP_FAILED)?;

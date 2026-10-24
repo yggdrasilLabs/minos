@@ -274,6 +274,39 @@ impl Review {
     }
 }
 
+/// One recorded stop request: its generation, its reason, and its ordinal (07-REVIEW WR-01).
+///
+/// This is the stop's identity, the fields its `EventKey` hashes, so two recorded stops are equal exactly when
+/// they are one ledger line. The fields are declared in that order, so the derived order sorts by generation,
+/// then reason, then ordinal with `None` first. Only the fold builds one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RecordedStop {
+    generation: u32,
+    reason: StopReason,
+    ordinal: Option<u32>,
+}
+
+impl RecordedStop {
+    /// The generation at which the stop was requested.
+    #[must_use]
+    pub const fn generation(&self) -> u32 {
+        self.generation
+    }
+
+    /// Why the stop was requested.
+    #[must_use]
+    pub const fn reason(&self) -> StopReason {
+        self.reason
+    }
+
+    /// The stop's position among the user's stops at its generation, or `None` for a driver's own stop and for
+    /// every line written before the field.
+    #[must_use]
+    pub const fn ordinal(&self) -> Option<u32> {
+        self.ordinal
+    }
+}
+
 /// The state of a run, rebuilt from its ledger by [`fold`] and never stored.
 ///
 /// Every collection is a `BTreeMap` or `BTreeSet`, so every accessor iterates in key order, whatever order the
@@ -293,7 +326,7 @@ pub struct RunState {
     spends: BTreeMap<SpendId, Spend>,
     total_usage: Usage,
     notes: BTreeMap<(u32, u32), BlobId>,
-    stops: BTreeSet<(u32, StopReason)>,
+    stops: BTreeSet<RecordedStop>,
     reviews: BTreeMap<ReviewId, Review>,
     acknowledged: BTreeSet<(ExperimentId, ReportHash)>,
 }
@@ -512,8 +545,16 @@ impl RunState {
             } => {
                 self.notes.insert((*generation, *ordinal), *note);
             }
-            Event::StopRequested { generation, reason } => {
-                self.stops.insert((*generation, *reason));
+            Event::StopRequested {
+                generation,
+                reason,
+                ordinal,
+            } => {
+                self.stops.insert(RecordedStop {
+                    generation: *generation,
+                    reason: *reason,
+                    ordinal: *ordinal,
+                });
             }
             Event::ReviewRequested { request, kind } => {
                 self.reviews.insert(
@@ -781,14 +822,40 @@ impl RunState {
     /// [`RunState::stops`] instead, and honours only stops recorded after its session started (07-CONTEXT D-19).
     #[must_use]
     pub fn stop_requested(&self) -> Option<(u32, StopReason)> {
-        self.stops.first().copied()
+        self.stops
+            .first()
+            .map(|stop| (stop.generation, stop.reason))
     }
 
-    /// Every recorded stop request, by generation and then reason. The driver snapshots this set when its session
-    /// starts and exits only on a stop outside it, so a stop from an earlier session does not block a resume
-    /// (07-CONTEXT D-19).
-    pub fn stops(&self) -> impl Iterator<Item = (u32, StopReason)> + '_ {
+    /// Every recorded stop request, by generation, reason, and ordinal: the identity the driver snapshots when its
+    /// session starts. The driver exits only on a stop outside that snapshot, so a stop from an earlier session
+    /// does not block a resume, and a repeated `minos stop` with a new ordinal is still honoured (07-CONTEXT D-19,
+    /// 07-REVIEW WR-01).
+    pub fn stops(&self) -> impl Iterator<Item = RecordedStop> + '_ {
         self.stops.iter().copied()
+    }
+
+    /// The ordinal Phase 8's `minos stop` writes for a `UserStop` at `generation`: one past the highest `Some`
+    /// ordinal of a `UserStop` recorded at `generation`, or 0 when there is none. A stop with no ordinal and a
+    /// stop of another reason consume no ordinal. `None` when the highest recorded ordinal is `u32::MAX`, so no
+    /// further stop can be keyed apart from it (07-REVIEW WR-01).
+    #[must_use]
+    pub fn next_user_stop_ordinal(&self, generation: u32) -> Option<u32> {
+        let lowest = RecordedStop {
+            generation,
+            reason: StopReason::UserStop,
+            ordinal: None,
+        };
+        let highest = RecordedStop {
+            generation,
+            reason: StopReason::UserStop,
+            ordinal: Some(u32::MAX),
+        };
+        self.stops
+            .range(lowest..=highest)
+            .next_back()
+            .and_then(|stop| stop.ordinal)
+            .map_or(Some(0), |ordinal| ordinal.checked_add(1))
     }
 
     /// Every metered step, in [`SpendId`] order.

@@ -113,7 +113,7 @@ use minos_core::policy::{
     infra_breaker, noise_check, noise_floor, reduce_trials, spend_ok,
 };
 use minos_core::route::{RouteError, SurfaceStats, route};
-use minos_core::state::{RunState, fold};
+use minos_core::state::{RecordedStop, RunState, fold};
 use minos_core::usage::Usage;
 use minos_propose::{ModelProvider, ProposeError, ProposeInput, Proposer};
 use minos_store::{Blobs, Ledger, RunLock, StoreError};
@@ -282,8 +282,9 @@ where
     options: DriverOptions,
     run: RunId,
     completed: BTreeSet<u32>,
-    /// The stops recorded when the session started; only a stop outside this set ends the session (D-19).
-    session_stops: BTreeSet<(u32, StopReason)>,
+    /// The stop identities, ordinal included, recorded when the session started; only a stop outside this set
+    /// ends the session (D-19, 07-REVIEW WR-01).
+    session_stops: BTreeSet<RecordedStop>,
     /// Consecutive infrastructure failures in this session (D-16); a restart resets it.
     streak: u32,
 }
@@ -629,11 +630,11 @@ where
         let state = self.state()?;
 
         // 1. A stop added since the session started: honoured, never recorded again (D-19).
-        if let Some((recorded, reason)) = state
+        if let Some(stop) = state
             .stops()
             .find(|stop| !self.session_stops.contains(stop))
         {
-            return Err(self.stopped(recorded, reason));
+            return Err(self.stopped(stop.generation(), stop.reason()));
         }
 
         // 2. The breaker: K empty generations in a row (D-14, LOOP-08).
@@ -660,7 +661,12 @@ where
 
     /// Records `StopRequested { generation, reason }` and ends the session; a halt while recording it wins.
     fn stop(&mut self, generation: u32, reason: StopReason) -> Halt {
-        match self.record(generation, Event::StopRequested { generation, reason }) {
+        let event = Event::StopRequested {
+            generation,
+            reason,
+            ordinal: None,
+        };
+        match self.record(generation, event) {
             Ok(()) => self.stopped(generation, reason),
             Err(halt) => halt,
         }
@@ -688,7 +694,11 @@ where
             return match append(
                 self.store,
                 &self.run,
-                Event::StopRequested { generation, reason },
+                Event::StopRequested {
+                    generation,
+                    reason,
+                    ordinal: None,
+                },
             ) {
                 Ok(()) => Err(self.stopped(generation, reason)),
                 Err(DriverError::Store { source, .. }) if source.is_retryable() => {

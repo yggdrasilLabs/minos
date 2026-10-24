@@ -680,7 +680,8 @@ fn provider_limit_records_its_spend_then_the_stop_and_ends_the_session() -> Test
             event,
             Event::StopRequested {
                 generation: 1,
-                reason: StopReason::ProviderLimit
+                reason: StopReason::ProviderLimit,
+                ordinal: None
             }
         )
     })

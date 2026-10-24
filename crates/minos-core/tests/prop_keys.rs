@@ -136,6 +136,7 @@ fn one_of_each() -> Result<Vec<Event>, Box<dyn Error>> {
         Event::StopRequested {
             generation: 2,
             reason: StopReason::UserStop,
+            ordinal: None,
         },
         Event::ReviewRequested {
             request: review(ReviewKind::Params, 0),
@@ -303,9 +304,34 @@ fn manifest_a_to_b_to_a_gives_three_keys() {
 }
 
 #[test]
+fn a_stop_ordinal_joins_the_key_only_when_present() {
+    // Arrange
+    let run = run();
+    let stop = |ordinal: Option<u32>| Event::StopRequested {
+        generation: 3,
+        reason: StopReason::UserStop,
+        ordinal,
+    };
+
+    // Act
+    let keys: BTreeSet<EventKey> = [None, Some(0), Some(1)]
+        .into_iter()
+        .map(|ordinal| stop(ordinal).key(&run))
+        .collect();
+
+    // Assert
+    assert_eq!(keys.len(), 3);
+    assert_eq!(stop(Some(1)).key(&run), stop(Some(1)).key(&run));
+}
+
+#[test]
 fn stop_requests_are_keyed_by_generation_and_reason() {
     let run = run();
-    let stop = |generation: u32, reason: StopReason| Event::StopRequested { generation, reason };
+    let stop = |generation: u32, reason: StopReason| Event::StopRequested {
+        generation,
+        reason,
+        ordinal: None,
+    };
     assert_ne!(
         stop(3, StopReason::UserStop).key(&run),
         stop(5, StopReason::UserStop).key(&run)
@@ -484,6 +510,7 @@ enum Spec {
     StopRequested {
         generation: u32,
         reason: u8,
+        ordinal: Option<u32>,
     },
     ReviewRequested {
         kind: u8,
@@ -546,8 +573,13 @@ fn spec_strategy() -> impl Strategy<Value = Spec> {
             ordinal,
             note
         }),
-        (small(), 0_u8..7)
-            .prop_map(|(generation, reason)| Spec::StopRequested { generation, reason }),
+        (small(), 0_u8..7, prop::option::of(small())).prop_map(|(generation, reason, ordinal)| {
+            Spec::StopRequested {
+                generation,
+                reason,
+                ordinal,
+            }
+        }),
         (0_u8..3, seed()).prop_map(|(kind, subject)| Spec::ReviewRequested { kind, subject }),
         (0_u8..3, seed(), any::<bool>()).prop_map(|(kind, subject, approved)| Spec::Reviewed {
             kind,
@@ -615,8 +647,16 @@ fn key_fields(spec: &Spec) -> (u8, Vec<u64>) {
             ordinal,
             ..
         } => (7, vec![u64::from(generation), u64::from(ordinal)]),
-        Spec::StopRequested { generation, reason } => {
-            (8, vec![u64::from(generation), u64::from(reason)])
+        Spec::StopRequested {
+            generation,
+            reason,
+            ordinal,
+        } => {
+            let mut fields = vec![u64::from(generation), u64::from(reason)];
+            if let Some(ordinal) = ordinal {
+                fields.push(u64::from(ordinal));
+            }
+            (8, fields)
         }
         Spec::ReviewRequested { kind, subject } => (9, vec![u64::from(kind), u64::from(subject)]),
         Spec::Reviewed { kind, subject, .. } => (10, vec![u64::from(kind), u64::from(subject)]),
@@ -721,9 +761,14 @@ fn event_of(spec: &Spec) -> Result<Event, Box<dyn Error>> {
             ordinal,
             note: BlobId::of(&[note]),
         },
-        Spec::StopRequested { generation, reason } => Event::StopRequested {
+        Spec::StopRequested {
+            generation,
+            reason,
+            ordinal,
+        } => Event::StopRequested {
             generation,
             reason: stop_reason(reason),
+            ordinal,
         },
         Spec::ReviewRequested { kind, subject } => Event::ReviewRequested {
             request: review(review_kind(kind), subject),
@@ -967,6 +1012,7 @@ fn a_tampered_record_fails_verification() -> TestResult {
     let stop = Event::StopRequested {
         generation: 3,
         reason: StopReason::UserStop,
+        ordinal: None,
     };
     let line = Line::new(1, &run, Record::v1(stop));
     let text = serde_json::to_string(&line)?;
@@ -1016,12 +1062,14 @@ fn provider_auth_stop_record_parses() -> TestResult {
     let expected = Record::v1(Event::StopRequested {
         generation: 3,
         reason: StopReason::ProviderAuth,
+        ordinal: None,
     });
     assert_eq!(
         record.event(),
         &Event::StopRequested {
             generation: 3,
             reason: StopReason::ProviderAuth,
+            ordinal: None,
         }
     );
     assert_eq!(record, expected);
@@ -1047,6 +1095,7 @@ fn provider_auth_key_differs_from_every_other_reason() {
             Event::StopRequested {
                 generation: 3,
                 reason,
+                ordinal: None,
             }
             .key(&run)
         })
@@ -1155,10 +1204,33 @@ fn stop_requested_key_golden_vector() {
     let event = Event::StopRequested {
         generation: 3,
         reason: StopReason::UserStop,
+        ordinal: None,
     };
     assert_eq!(
         event.key(&run()).to_hex(),
         "a1ceffd3a6ce3985cacd08e42c5acc64c636aef49b3a635ed1106945a51595c4"
+    );
+}
+
+#[test]
+fn stop_requested_with_ordinal_key_golden_vector() {
+    // { printf 'minos/event/v1\0'; printf '%s' "$RUN" | xxd -r -p; printf '%016x' 8 | xxd -r -p;
+    //   printf '%016x' 3 | xxd -r -p; printf '%016x' 1 | xxd -r -p; printf '%016x' 0 | xxd -r -p; } \
+    //   | /usr/bin/shasum -a 256
+    // Arrange
+    let event = Event::StopRequested {
+        generation: 3,
+        reason: StopReason::UserStop,
+        ordinal: Some(0),
+    };
+
+    // Act
+    let key = event.key(&run()).to_hex();
+
+    // Assert
+    assert_eq!(
+        key,
+        "034355ce65508f1c29332da57708208b7bc1b0b6abe0c0a662000c04a72834dd"
     );
 }
 
