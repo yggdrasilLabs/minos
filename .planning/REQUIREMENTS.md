@@ -103,7 +103,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 ### Runner and Loop (LOOP)
 
 - [x] **LOOP-01**: `minos-runner` runs the candidate VM then the judge VM for a `JobRequest`, converts `Untrusted` output to an `Outcome` via the validating exits, and is the only crate where that conversion happens
-- [ ] **LOOP-02**: The judge VM mounts judge data read-only; the candidate VM never does; judge and candidate never share a process or a disk
+- [x] **LOOP-02**: The judge VM mounts judge data read-only; the candidate VM never does; judge and candidate never share a process or a disk
 - [x] **LOOP-03**: Time and resource usage are measured by the host, never read from candidate output
 - [x] **LOOP-04**: `minos-loop` drives generations as: route tier, propose, validate diffs, run jobs, fold `Judged`, `select_greedy`, append `Selected`; it depends only on core, store, and propose
 - [x] **LOOP-05**: The loop records before acting and keys every effect by content ID, so `minos run` on an interrupted run resumes from the ledger and produces the same result as an uninterrupted run (tested with fakes)
@@ -117,7 +117,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **JUDGE-01**: `minos judge push <dir>` uploads judge data into the local blob store as a new judge version and records its hash; judge data is never in the source tarball or the image build context
 - [ ] **JUDGE-02**: `minos check` judges the baseline several times with the trial index on `Judged` and reports a noise floor the user can compare against `min_improvement`
 - [x] **JUDGE-03**: Gates run before objectives and short-circuit: a failed gate yields `Rejected` without scoring objectives
-- [ ] **JUDGE-04**: Every `Judged` event records backend and architecture, and a run with a speed objective is pinned to one backend class
+- [x] **JUDGE-04**: Every `Judged` event records backend and architecture, and a run with a speed objective is pinned to one backend class
 
 ### CLI (CLI)
 
@@ -261,7 +261,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROP-09 | Phase 6 | Complete |
 | PROP-10 | Phase 6 | Complete |
 | LOOP-01 | Phase 7 | Complete |
-| LOOP-02 | Phase 7 | Pending |
+| LOOP-02 | Phase 7 | Complete |
 | LOOP-03 | Phase 7 | Complete |
 | LOOP-04 | Phase 7 | Complete |
 | LOOP-05 | Phase 7 | Complete |
@@ -272,7 +272,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | JUDGE-01 | Phase 7 | Complete |
 | JUDGE-02 | Phase 8 | Pending |
 | JUDGE-03 | Phase 7 | Complete |
-| JUDGE-04 | Phase 7 | Pending |
+| JUDGE-04 | Phase 7 | Complete |
 | CLI-01 | Phase 8 | Pending |
 | CLI-02 | Phase 5 | Complete |
 | CLI-03 | Phase 5 | Complete |
