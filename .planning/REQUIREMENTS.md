@@ -108,7 +108,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **LOOP-04**: `minos-loop` drives generations as: route tier, propose, validate diffs, run jobs, fold `Judged`, `select_greedy`, append `Selected`; it depends only on core, store, and propose
 - [x] **LOOP-05**: The loop records before acting and keys every effect by content ID, so `minos run` on an interrupted run resumes from the ledger and produces the same result as an uninterrupted run (tested with fakes)
 - [x] **LOOP-06**: A run holds an exclusive lock so two drivers cannot act on the same run
-- [x] **LOOP-07**: Spend cap and model-call or token cap are checked before each generation and each model call; exceeding either stops the run with a recorded reason
+- [x] **LOOP-07**: Spend cap and model-call or token cap are checked before each generation and each model call; exceeding either stops the run with a recorded reason *The cap is metered, so a run may pass it by at most one VM job or one model call (D-15).*
 - [x] **LOOP-08**: The circuit breaker stops the run after K generations with no valid candidate or K consecutive infrastructure failures and records `StopRequested` with the reason
 - [x] **LOOP-09**: The loop is fully testable against the in-memory store, a fake provider, and a fake job runner with no VM
 
@@ -117,7 +117,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **JUDGE-01**: `minos judge push <dir>` uploads judge data into the local blob store as a new judge version and records its hash; judge data is never in the source tarball or the image build context
 - [ ] **JUDGE-02**: `minos check` judges the baseline several times with the trial index on `Judged` and reports a noise floor the user can compare against `min_improvement`
 - [x] **JUDGE-03**: Gates run before objectives and short-circuit: a failed gate yields `Rejected` without scoring objectives
-- [x] **JUDGE-04**: Every `Judged` event records backend and architecture, and a run with a speed objective is pinned to one backend class
+- [x] **JUDGE-04**: Every `Judged` event records backend and architecture, and a run with a speed objective is pinned to one backend class *Phase 7 pins every run to the backend class of its first `Judged`, whatever its objective (D-11).*
 
 ### CLI (CLI)
 
@@ -300,7 +300,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-19 after the Phase 6 final gate (PROP-01 to PROP-10 complete)*
+*Last updated: 2026-10-24 after the Phase 7 final gate (LOOP-01 to LOOP-09, JUDGE-01, JUDGE-03, JUDGE-04, CLI-04 complete; JUDGE-04 and LOOP-07 annotated with D-11 and D-15)*
+*Earlier update: 2026-10-19 after the Phase 6 final gate (PROP-01 to PROP-10 complete)*
 *Earlier update: 2026-10-19 after the Phase 5 final gate (GUEST-01 to GUEST-05, KRUN-01 to KRUN-10, CLI-02, CLI-03 complete; GUEST-05 with its one recorded exception)*
 *Earlier update: 2026-10-19, PROP-07 reworded to `{rationale, files}` candidates (06-CONTEXT.md D-11)*
 *Earlier update: 2026-10-09 after Phase 1 gap closure (GATE-01, GATE-02, GATE-05 reworded: three clippy lints at forbid, a rustflags backstop, and `cargo doc --workspace --no-deps` as the fifth gate command)*
