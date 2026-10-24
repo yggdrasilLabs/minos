@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 Phase: 8 — CLI, Sample Project, and Docs
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-10-24 — Phase 07 complete, transitioned to Phase 8
+Last activity: 2026-10-24 - Completed quick task 261024-i81: WR-01 optional ordinal on StopRequested
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -372,6 +372,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261018-eiw | Fix Phase 4 review warnings WR-01, WR-02, WR-03 | 2026-10-18 | a2c3761 | [261018-eiw-fix-phase-4-review-warnings](./quick/261018-eiw-fix-phase-4-review-warnings/) |
+| 261024-i81 | WR-01: optional `ordinal` on `StopRequested`, in the EventKey only when Some, so a repeated `minos stop` is a new line a resumed driver honours | 2026-10-24 | f18bd53 | [261024-i81-wr-01-add-an-optional-ordinal-to-stopreq](./quick/261024-i81-wr-01-add-an-optional-ordinal-to-stopreq/) |
 
 ## Deferred Items
 
