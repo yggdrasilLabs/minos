@@ -128,3 +128,7 @@ None. No production code changed. The threat register's mitigations are the test
 - T-07-16-02: no `Conflict` at any crash point, and exact fold equality for the sweep.
 - T-07-16-03: refusal on both stores.
 - T-07-16-04: CLAUDE.md written from the summaries' names and constants, with the overshoot and undercount stated plainly.
+
+## Self-Check: PASSED
+
+resume.rs, lock.rs, and this SUMMARY exist; commits aa7d0c6, 7db47b4, and dbf04ad are in the log.

@@ -107,7 +107,7 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 - [x] **LOOP-03**: Time and resource usage are measured by the host, never read from candidate output
 - [x] **LOOP-04**: `minos-loop` drives generations as: route tier, propose, validate diffs, run jobs, fold `Judged`, `select_greedy`, append `Selected`; it depends only on core, store, and propose
 - [x] **LOOP-05**: The loop records before acting and keys every effect by content ID, so `minos run` on an interrupted run resumes from the ledger and produces the same result as an uninterrupted run (tested with fakes)
-- [ ] **LOOP-06**: A run holds an exclusive lock so two drivers cannot act on the same run
+- [x] **LOOP-06**: A run holds an exclusive lock so two drivers cannot act on the same run
 - [x] **LOOP-07**: Spend cap and model-call or token cap are checked before each generation and each model call; exceeding either stops the run with a recorded reason
 - [x] **LOOP-08**: The circuit breaker stops the run after K generations with no valid candidate or K consecutive infrastructure failures and records `StopRequested` with the reason
 - [x] **LOOP-09**: The loop is fully testable against the in-memory store, a fake provider, and a fake job runner with no VM
@@ -265,7 +265,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOOP-03 | Phase 7 | Complete |
 | LOOP-04 | Phase 7 | Complete |
 | LOOP-05 | Phase 7 | Complete |
-| LOOP-06 | Phase 7 | Pending |
+| LOOP-06 | Phase 7 | Complete |
 | LOOP-07 | Phase 7 | Complete |
 | LOOP-08 | Phase 7 | Complete |
 | LOOP-09 | Phase 7 | Complete |
