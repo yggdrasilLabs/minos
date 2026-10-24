@@ -351,6 +351,21 @@ pub fn scored_on(
     finish(request, Outcome::Scored(card), Some(judge_usage()), backend)
 }
 
+/// A scored result whose objective is a pure function of the request alone: 1.0 for the baseline, and for a
+/// candidate 2.0 plus its experiment ID's first byte over 1,000, so candidates differ and every rerun of one
+/// request answers the same.
+///
+/// # Errors
+///
+/// As [`scored`].
+pub fn deterministic(request: &JobRequest) -> Result<JobResult, JobFailure> {
+    if request.is_baseline() {
+        return scored(request, 1.0);
+    }
+    let byte = request.exp().as_bytes().first().copied().unwrap_or(0);
+    scored(request, 2.0 + f64::from(byte) / 1_000.0)
+}
+
 /// A result for `request` whose run stage failed, so the judge never ran.
 ///
 /// # Errors
@@ -406,6 +421,16 @@ impl<S> FaultStore<S> {
             fault: Mutex::new(Some(fault)),
             appends: AtomicUsize::new(0),
         }
+    }
+
+    /// The inner store, which holds every append that landed; a resumed driver runs on it directly.
+    pub const fn inner(&self) -> &S {
+        &self.inner
+    }
+
+    /// How many appends were attempted so far, the failed one included.
+    pub fn appends(&self) -> usize {
+        self.appends.load(Ordering::SeqCst)
     }
 }
 
