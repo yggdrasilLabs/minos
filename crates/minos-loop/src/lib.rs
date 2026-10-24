@@ -26,6 +26,7 @@
 //! or a validated value. No text a sandbox or a model wrote leaves the loop.
 
 pub mod admit;
+pub mod driver;
 pub mod error;
 pub mod history;
 pub mod inputs;
@@ -34,6 +35,7 @@ pub mod observe;
 pub mod record;
 pub mod stage;
 
+pub use driver::{Calibrated, Calibration, Driver, DriverOptions, RETRY_PAUSE, RunEnd};
 pub use error::DriverError;
 pub use inputs::{Resume, RunInputs};
 pub use job::{JobFailure, JobRunner};
