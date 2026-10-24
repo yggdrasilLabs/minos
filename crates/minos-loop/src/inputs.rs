@@ -12,7 +12,8 @@
 //! | [`DriverError::BaseMismatch`] | The working tree's snapshot is not the run's base | Restore the tree, or start a new run |
 //! | [`DriverError::RootImageChanged`] | `minos.lock` names another root image, or the run recorded none (D-10) | `env build --update` means a new run |
 //! | [`DriverError::JudgeChanged`] | The baseline was judged only under another judge version | Judge data pushed again means a new run |
-//! | [`DriverError::ManifestChanged`] | The experiment frame changed, or could not be verified (D-19) | A frame edit means a new run |
+//! | [`DriverError::ManifestChanged`] | The experiment frame changed (D-19) | A frame edit means a new run |
+//! | [`DriverError::ManifestRecordUnreadable`] | The recorded manifest blob is missing, tampered, or no longer parses (07-REVIEW WR-03) | Look at the store; it is never a manifest edit |
 //!
 //! # Manifest edits (D-19)
 //!
@@ -106,8 +107,8 @@ pub fn same_frame(recorded: &Manifest, current: &Manifest) -> bool {
 }
 
 /// Checks a resumed session's inputs against the run's record, in order: prices, base, root image, judge
-/// version, then the manifest. `recorded` is the manifest the run has in effect, parsed from its stored bytes,
-/// or `None` when the driver could not read it.
+/// version, then the manifest. `recorded` is the manifest the run has in effect, parsed from its stored bytes;
+/// the driver refuses the resume before this check when it cannot read them (07-REVIEW WR-03).
 ///
 /// The judge check refuses only when the baseline has recorded trials and none of them is under `inputs.judge`,
 /// so a run that has not judged anything yet can resume under any version. A recorded root image of `None` is
@@ -118,11 +119,11 @@ pub fn same_frame(recorded: &Manifest, current: &Manifest) -> bool {
 /// [`DriverError::PricesMissing`] as [`check_start`]; [`DriverError::BaseMismatch`] when `inputs.base` is not the
 /// run's base; [`DriverError::RootImageChanged`] when the recorded root image is absent or differs;
 /// [`DriverError::JudgeChanged`] when the baseline was judged only under other versions; and
-/// [`DriverError::ManifestChanged`] when the manifest differs and `recorded` is `None` or does not share the
-/// experiment frame with the current one.
+/// [`DriverError::ManifestChanged`] when the manifest differs and `recorded` does not share the experiment frame
+/// with the current one.
 pub fn check_resume(
     state: &RunState,
-    recorded: Option<&Manifest>,
+    recorded: &Manifest,
     inputs: &RunInputs<'_>,
 ) -> Result<Resume, DriverError> {
     check_start(inputs)?;
@@ -156,13 +157,14 @@ pub fn check_resume(
     if *state.manifest() == current {
         return Ok(Resume::Unchanged);
     }
-    match recorded {
-        Some(recorded) if same_frame(recorded, inputs.manifest) => Ok(Resume::ManifestChanged {
+    if same_frame(recorded, inputs.manifest) {
+        Ok(Resume::ManifestChanged {
             from_generation: state.last_concluded_generation().saturating_add(1),
-        }),
-        _ => Err(DriverError::ManifestChanged {
+        })
+    } else {
+        Err(DriverError::ManifestChanged {
             recorded: *state.manifest(),
             current,
-        }),
+        })
     }
 }

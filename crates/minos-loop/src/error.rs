@@ -71,10 +71,9 @@ pub enum DriverError {
         /// The store's error.
         source: StoreError,
     },
-    /// The manifest's experiment frame differs from the one the run recorded, or could not be verified, between
-    /// sessions. Configuration: the frame (surface, commands, judge spec, environment) defines what an
-    /// experiment means, so a changed frame means a new run. A budget, policy, proposer, or param edit is not
-    /// refused (07-CONTEXT D-19).
+    /// The manifest's experiment frame differs from the one the run recorded between sessions. Configuration: the
+    /// frame (surface, commands, judge spec, environment) defines what an experiment means, so a changed frame
+    /// means a new run. A budget, policy, proposer, or param edit is not refused (07-CONTEXT D-19).
     #[error(
         "run recorded manifest {recorded}, but the current manifest is {current}; start a new run"
     )]
@@ -83,6 +82,18 @@ pub enum DriverError {
         recorded: ManifestId,
         /// The current manifest.
         current: ManifestId,
+    },
+    /// The manifest blob the run recorded is missing from the store, over its cap, tampered, or no longer parses
+    /// as a manifest, so the experiment frame cannot be compared (07-REVIEW WR-03). Corruption: the store needs a
+    /// human, and it is never reported as a manifest edit.
+    #[error(
+        "the manifest blob {manifest} recorded for run {run} is missing, tampered, or no longer parses; the store needs a human"
+    )]
+    ManifestRecordUnreadable {
+        /// The run.
+        run: RunId,
+        /// The manifest the run recorded, whose blob could not be read back.
+        manifest: ManifestId,
     },
     /// The source tree supplied for the session is not the run's base tree. Configuration: the working tree
     /// changed since the run started.

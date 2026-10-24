@@ -5,13 +5,13 @@
 
 use std::collections::BTreeSet;
 
-use minos_core::id::{ExperimentId, ImageDigest};
+use minos_core::id::{BlobId, ExperimentId, ImageDigest};
 use minos_core::ledger::{DecisionKind, Event, Origin, SpendSource, StopReason};
 use minos_core::policy::NoiseVerdict;
 use minos_loop::{Calibrated, Driver, DriverError, JobFailure, LoopEvent, NoopObserver, RunEnd};
 use minos_propose::FakeReply;
 use minos_propose::provider::{EmptyCause, ProviderError, ProviderStop};
-use minos_store::{MemoryStore, StoreError};
+use minos_store::{FileStore, MemoryStore, StoreError};
 
 use crate::support::{
     FMT_FAST, FakeJobs, FaultStore, Fixture, PARSE_FAST, PARSE_FASTER, PRICES_WITHOUT_HAIKU,
@@ -571,6 +571,79 @@ fn resume_after_a_run_command_edit_is_refused_and_records_nothing() -> TestResul
         "resume did not refuse the frame edit"
     );
     assert_eq!(ledger(&store, &run)?.len(), lines);
+    Ok(())
+}
+
+/// How the recorded manifest blob is damaged before a resume.
+#[derive(Debug, Clone, Copy)]
+enum Damage {
+    /// The blob file is deleted.
+    Missing,
+    /// The blob file holds bytes that no longer hash to its ID.
+    Tampered,
+    /// The blob file holds bytes with its ID's digest that are not a manifest. Unreachable through the store's
+    /// own API, so it is written past it; the hash check fails first, and the parse failure is the same refusal.
+    NotAManifest,
+}
+
+#[test]
+fn resume_with_an_unreadable_manifest_blob_is_refused_as_corruption_not_as_an_edit() -> TestResult {
+    for damage in [Damage::Missing, Damage::Tampered, Damage::NotAManifest] {
+        // Arrange: a started run on a file store, whose manifest blob is then damaged on disk (WR-03).
+        let project = tempfile::tempdir()?;
+        let store = FileStore::open(&project.path().join(".minos"))?;
+        let fixture = Fixture::sweep()?;
+        let proposer = sweep_proposer();
+        let jobs = FakeJobs::new(|request| scored(request, 1.0));
+        let run = Driver::start(
+            &store,
+            &proposer,
+            &jobs,
+            NoopObserver,
+            fixture.inputs(),
+            options(),
+            STARTED_AT,
+        )?
+        .run_id();
+        let lines = ledger(&store, &run)?.len();
+        let blob: BlobId = fixture.inputs().manifest_id().to_hex().parse()?;
+        let path = store.verified_path(&blob)?;
+        std::fs::remove_file(&path)?;
+        match damage {
+            Damage::Missing => {}
+            Damage::Tampered => std::fs::write(&path, b"[project]\nname = \"tampered\"\n")?,
+            Damage::NotAManifest => std::fs::write(&path, b"not a manifest at all\n")?,
+        }
+
+        // Act: resume under the unchanged inputs.
+        let result = Driver::resume(
+            &store,
+            &proposer,
+            &jobs,
+            NoopObserver,
+            fixture.inputs(),
+            options(),
+            run,
+        );
+
+        // Assert: refused naming the run and the recorded manifest, never as a manifest edit, and nothing recorded.
+        match result {
+            Err(DriverError::ManifestRecordUnreadable {
+                run: named,
+                manifest,
+            }) => {
+                assert_eq!(named, run, "{damage:?}");
+                assert_eq!(manifest, fixture.inputs().manifest_id(), "{damage:?}");
+            }
+            Err(error) => {
+                return Err(
+                    format!("{damage:?}: expected ManifestRecordUnreadable, got {error}").into(),
+                );
+            }
+            Ok(_) => return Err(format!("{damage:?}: the resume was not refused").into()),
+        }
+        assert_eq!(ledger(&store, &run)?.len(), lines);
+    }
     Ok(())
 }
 

@@ -370,25 +370,28 @@ where
             streak: 0,
         };
         let state = driver.state()?;
-        check_resume(&state, Some(inputs.manifest), &inputs)?;
+        check_resume(&state, inputs.manifest, &inputs)?;
         driver.session_stops = state.stops().collect();
         Ok(driver)
     }
 
     /// Resumes `run`.
     ///
-    /// In order: the run lock (LOOP-06), the ledger fold, the recorded manifest read back from its blob,
-    /// [`check_resume`] (a changed base, root image, judge, or experiment frame is refused), and the baseline's
-    /// job preflight. Only then, when the manifest changed outside the experiment frame, are the new manifest
-    /// bytes stored and `ManifestChanged` appended from the next generation (D-19). The stops the ledger holds
-    /// are the session's starting stops, so none of them ends this session by itself (D-19).
+    /// In order: the run lock (LOOP-06), the ledger fold, the recorded manifest read back from its blob (a blob
+    /// that is missing, tampered, or no longer parses refuses the resume as corruption, never as a manifest
+    /// edit; 07-REVIEW WR-03), [`check_resume`] (a changed base, root image, judge, or experiment frame is
+    /// refused), and the baseline's job preflight. Only then, when the manifest changed outside the experiment
+    /// frame, are the new manifest bytes stored and `ManifestChanged` appended from the next generation (D-19).
+    /// The stops the ledger holds are the session's starting stops, so none of them ends this session by itself
+    /// (D-19).
     ///
     /// # Errors
     ///
     /// [`DriverError::RunLocked`] when another driver holds the run; [`DriverError::RunNotFound`] when the store
-    /// holds no ledger for it; [`DriverError::Fold`] when the ledger does not fold; every refusal of
-    /// [`check_resume`]; [`DriverError::Job`] and [`DriverError::Infra`] from the baseline's preflight; and
-    /// [`DriverError::Store`] and [`DriverError::Conflict`] from the store.
+    /// holds no ledger for it; [`DriverError::Fold`] when the ledger does not fold;
+    /// [`DriverError::ManifestRecordUnreadable`] when the recorded manifest blob cannot be read back as a
+    /// manifest; every refusal of [`check_resume`]; [`DriverError::Job`] and [`DriverError::Infra`] from the
+    /// baseline's preflight; and [`DriverError::Store`] and [`DriverError::Conflict`] from the store.
     pub fn resume(
         store: &'a S,
         proposer: &'a Proposer<P>,
@@ -425,7 +428,7 @@ where
 
         // 3. The inputs against the record (D-10, D-19).
         let recorded = recorded_manifest(store, &state)?;
-        let resume = check_resume(&state, recorded.as_ref(), &inputs)?;
+        let resume = check_resume(&state, &recorded, &inputs)?;
 
         // 4. The baseline's plans pass preflight.
         check_job(jobs, &baseline_request(&inputs, 0)?)?;
@@ -1089,33 +1092,35 @@ fn lock<'s, S: RunLock>(store: &'s S, run: &RunId) -> Result<S::Guard<'s>, Drive
     })
 }
 
-/// The manifest the run has in effect, read back from its blob, or `None` when the blob is absent, over the cap,
-/// tampered, or does not parse.
-fn recorded_manifest<S: Blobs>(
-    store: &S,
-    state: &RunState,
-) -> Result<Option<Manifest>, DriverError> {
-    // A manifest's ID is the plain SHA-256 of its bytes, so the blob of those bytes has the same digest.
-    let Ok(blob) = state.manifest().to_hex().parse::<BlobId>() else {
-        return Ok(None);
+/// The manifest the run has in effect, read back from its blob.
+///
+/// A blob that is absent, over the cap, or tampered, and bytes that are not a manifest, are
+/// [`DriverError::ManifestRecordUnreadable`]: a store problem a human must look at, never reported as a manifest
+/// edit (07-REVIEW WR-03). Any other store error is [`DriverError::Store`].
+fn recorded_manifest<S: Blobs>(store: &S, state: &RunState) -> Result<Manifest, DriverError> {
+    let unreadable = || DriverError::ManifestRecordUnreadable {
+        run: *state.run(),
+        manifest: *state.manifest(),
     };
-    let bytes = match store.get(&blob, byte_cap(MAX_MANIFEST_BYTES)) {
-        Ok(bytes) => bytes,
-        Err(
+    // A manifest's ID is the plain SHA-256 of its bytes, so the blob of those bytes has the same digest.
+    let blob = state
+        .manifest()
+        .to_hex()
+        .parse::<BlobId>()
+        .map_err(|_| unreadable())?;
+    let bytes = store
+        .get(&blob, byte_cap(MAX_MANIFEST_BYTES))
+        .map_err(|source| match source {
             StoreError::BlobMissing { .. }
             | StoreError::BlobTooLarge { .. }
-            | StoreError::BlobTampered { .. },
-        ) => return Ok(None),
-        Err(source) => {
-            return Err(DriverError::Store {
+            | StoreError::BlobTampered { .. } => unreadable(),
+            source => DriverError::Store {
                 run: *state.run(),
                 source,
-            });
-        }
-    };
-    Ok(std::str::from_utf8(&bytes)
-        .ok()
-        .and_then(|text| Manifest::parse_toml(text).ok()))
+            },
+        })?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| unreadable())?;
+    Manifest::parse_toml(text).map_err(|_| unreadable())
 }
 
 /// The request for baseline trial `trial` under the session's judge and the manifest's stage budgets.

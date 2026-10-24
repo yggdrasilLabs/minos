@@ -324,7 +324,7 @@ fn check_resume_refuses_another_base_naming_both() -> TestResult {
     };
 
     // Act
-    let result = check_resume(&state, Some(&fixture.manifest), &inputs);
+    let result = check_resume(&state, &fixture.manifest, &inputs);
 
     // Assert
     match result {
@@ -342,7 +342,7 @@ fn check_resume_refuses_a_run_that_recorded_no_root_image() -> TestResult {
     let fixture = Fixture::standard()?;
     let state = state_of(vec![fixture.run_started(None)])?;
 
-    let result = check_resume(&state, Some(&fixture.manifest), &fixture.inputs());
+    let result = check_resume(&state, &fixture.manifest, &fixture.inputs());
 
     match result {
         Err(DriverError::RootImageChanged { recorded, current }) => {
@@ -360,7 +360,7 @@ fn check_resume_refuses_another_root_image_naming_both() -> TestResult {
     let recorded_image = ImageDigest::of(b"an older root image");
     let state = state_of(vec![fixture.run_started(Some(recorded_image))])?;
 
-    let result = check_resume(&state, Some(&fixture.manifest), &fixture.inputs());
+    let result = check_resume(&state, &fixture.manifest, &fixture.inputs());
 
     match result {
         Err(DriverError::RootImageChanged { recorded, current }) => {
@@ -383,7 +383,7 @@ fn check_resume_refuses_a_baseline_judged_only_under_another_version() -> TestRe
     ])?;
 
     // Act
-    let result = check_resume(&state, Some(&fixture.manifest), &fixture.inputs());
+    let result = check_resume(&state, &fixture.manifest, &fixture.inputs());
 
     // Assert
     match result {
@@ -405,7 +405,7 @@ fn check_resume_accepts_a_baseline_judged_under_the_current_version() -> TestRes
         fixture.baseline_judged(fixture.judge(), 0),
     ])?;
 
-    let resume = check_resume(&state, Some(&fixture.manifest), &fixture.inputs())?;
+    let resume = check_resume(&state, &fixture.manifest, &fixture.inputs())?;
 
     assert_eq!(resume, Resume::Unchanged);
     Ok(())
@@ -416,7 +416,7 @@ fn check_resume_accepts_a_run_with_no_judgment_yet() -> TestResult {
     let fixture = Fixture::standard()?;
     let state = state_of(vec![fixture.run_started(Some(root()))])?;
 
-    let resume = check_resume(&state, Some(&fixture.manifest), &fixture.inputs())?;
+    let resume = check_resume(&state, &fixture.manifest, &fixture.inputs())?;
 
     assert_eq!(resume, Resume::Unchanged);
     Ok(())
@@ -428,7 +428,7 @@ fn check_resume_refuses_missing_prices_first() -> TestResult {
     let unpriced = Fixture::new(MANIFEST, &PRICES.replace("\"haiku\"", "\"mid\""))?;
     let state = state_of(vec![priced.run_started(None)])?;
 
-    let result = check_resume(&state, Some(&priced.manifest), &unpriced.inputs());
+    let result = check_resume(&state, &priced.manifest, &unpriced.inputs());
 
     assert!(
         matches!(result, Err(DriverError::PricesMissing { .. })),
@@ -469,14 +469,14 @@ fn resume_under(text: &str) -> Result<Result<Resume, DriverError>, Box<dyn Error
         judge: recorded.judge(),
         ..current.inputs()
     };
-    Ok(check_resume(&state, Some(&recorded.manifest), &inputs))
+    Ok(check_resume(&state, &recorded.manifest, &inputs))
 }
 
 #[test]
 fn check_resume_with_the_recorded_manifest_is_unchanged() -> TestResult {
     let (fixture, state) = recorded_run()?;
 
-    let resume = check_resume(&state, None, &fixture.inputs())?;
+    let resume = check_resume(&state, &fixture.manifest, &fixture.inputs())?;
 
     assert_eq!(resume, Resume::Unchanged);
     Ok(())
@@ -538,30 +538,6 @@ fn check_resume_refuses_a_frame_edit_naming_both_ids() -> TestResult {
             other => return Err(format!("expected ManifestChanged, got {other:?}").into()),
         }
     }
-    Ok(())
-}
-
-#[test]
-fn check_resume_refuses_a_changed_manifest_it_cannot_compare() -> TestResult {
-    // Arrange
-    let (recorded, state) = recorded_run()?;
-    let current = Fixture::new(
-        &MANIFEST.replace("spend_usd = 40", "spend_usd = 80"),
-        PRICES,
-    )?;
-    let inputs = RunInputs {
-        judge: recorded.judge(),
-        ..current.inputs()
-    };
-
-    // Act
-    let result = check_resume(&state, None, &inputs);
-
-    // Assert
-    assert!(
-        matches!(result, Err(DriverError::ManifestChanged { .. })),
-        "{result:?}"
-    );
     Ok(())
 }
 
