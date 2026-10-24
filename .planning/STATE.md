@@ -348,7 +348,7 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-14: RunnerJobs maps RunnerError onto JobFailure only through is_infra and what; the runner VM test uses KrunBackend::new (the production job root) and lives in minos-cli
 - [Phase 07]: 07-15: an append resets the infra streak only when it lands after failing, so a provider infra error that reports usage still reaches max_infra_failures
 - [Phase 07]: 07-15: generation 0 passes a generation safe point before its first pending baseline launch, keeping the one-job overshoot bound across resumes
-- [Phase ?]: 07-16: the crash-point resume test re-measures a re-run trial's candidate usage, so the first-measurement rule (Pitfall 1) is exercised, not hidden by an equal duplicate
+- [Phase 07]: 07-16: the crash-point resume test re-measures a re-run trial's candidate usage, so the first-measurement rule (Pitfall 1) is exercised, not hidden by an equal duplicate
 
 ### Pending Todos
 
