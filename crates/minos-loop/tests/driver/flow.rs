@@ -4,52 +4,21 @@
 //! (06-CONTEXT D-13, D-15), a conflicting append (D-08), and the observer's event order.
 
 use std::collections::BTreeSet;
-use std::time::Duration;
 
 use minos_core::id::{ExperimentId, ImageDigest};
 use minos_core::ledger::{DecisionKind, Event, Origin, SpendSource, StopReason};
 use minos_core::policy::NoiseVerdict;
-use minos_loop::record::event_kind;
-use minos_loop::{
-    Calibrated, Driver, DriverError, DriverOptions, JobFailure, LoopEvent, NoopObserver, RunEnd,
-};
+use minos_loop::{Calibrated, Driver, DriverError, JobFailure, LoopEvent, NoopObserver, RunEnd};
+use minos_propose::FakeReply;
 use minos_propose::provider::{EmptyCause, ProviderError, ProviderStop};
-use minos_propose::{FakeProvider, FakeReply, Proposer};
 use minos_store::{MemoryStore, StoreError};
 
 use crate::support::{
     FMT_FAST, FakeJobs, FaultStore, Fixture, PARSE_FAST, PARSE_FASTER, PRICES_WITHOUT_HAIKU,
-    Recorder, SINGLE_SHOT_MANIFEST, STARTED_AT, SWEEP_MANIFEST, TestResult, candidate_usage, haiku,
-    judge_usage, ledger, proposal, reply, root, run_failed, scored, token_usage,
+    Recorder, SINGLE_SHOT_MANIFEST, STARTED_AT, SWEEP_MANIFEST, TestResult, calls, candidate_usage,
+    haiku, judge_usage, kinds, ledger, options, proposal, reply, root, run_failed, scored,
+    single_shot_proposer, sweep_proposer, token_usage,
 };
-
-/// Session options with no retry pause.
-const fn options() -> DriverOptions {
-    DriverOptions {
-        retry_pause: Duration::ZERO,
-    }
-}
-
-/// A proposer with no provider, for the sweep.
-const fn sweep_proposer() -> Proposer<FakeProvider> {
-    Proposer::without_provider()
-}
-
-/// A proposer over a fake that answers with `script`.
-fn single_shot_proposer(script: Vec<FakeReply>) -> Proposer<FakeProvider> {
-    Proposer::with_provider(FakeProvider::new(script))
-}
-
-/// How many model calls the proposer's fake received.
-fn calls(proposer: &Proposer<FakeProvider>) -> Result<usize, Box<dyn std::error::Error>> {
-    let provider = proposer.provider().ok_or("the proposer has no provider")?;
-    Ok(provider.requests()?.len())
-}
-
-/// The event kinds of a ledger, in seq order.
-fn kinds(events: &[(u64, Event)]) -> Vec<&'static str> {
-    events.iter().map(|(_, event)| event_kind(event)).collect()
-}
 
 /// The seq of the first event `matches` accepts.
 fn seq_of(events: &[(u64, Event)], matches: impl Fn(&Event) -> bool) -> Option<u64> {

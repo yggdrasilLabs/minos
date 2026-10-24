@@ -7,6 +7,8 @@
 //!   [`StoreError`] on its Nth append, so a test can inject a conflict at an exact point.
 //! - The fixtures are built from TOML text and fixed bytes through public constructors only. A candidate's
 //!   experiment ID is always read from the ledger, never hashed by hand (07-CONTEXT D-12).
+//! - A test that needs a scripted job runner (fail the first N calls, append a stop mid-launch, report another
+//!   backend class) captures its own counter or store in the [`FakeJobs`] closure.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -14,13 +16,14 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use minos_core::diff::apply::Tree;
 use minos_core::diff::cumulative::BaseTree;
 use minos_core::id::{BlobId, ImageDigest, MetricName, ModelId, RunId, TreeId};
 use minos_core::job::{JobRequest, JobResult};
 use minos_core::ledger::{
-    BackendInfo, BackendKind, EXPECTED_KRUN_LAYERS, Event, Isolation, Record,
+    BackendInfo, BackendKind, EXPECTED_KRUN_LAYERS, Event, Isolation, Record, StopReason,
 };
 use minos_core::manifest::{Arch, JudgeVersion, Manifest};
 use minos_core::metric::{Metric, Scorecard};
@@ -28,8 +31,9 @@ use minos_core::money::Prices;
 use minos_core::outcome::{Outcome, Reason};
 use minos_core::path::RelPath;
 use minos_core::usage::Usage;
-use minos_loop::{JobFailure, JobRunner, LoopEvent, Observer, RunInputs};
-use minos_propose::FakeReply;
+use minos_loop::record::event_kind;
+use minos_loop::{DriverOptions, JobFailure, JobRunner, LoopEvent, Observer, RunInputs};
+use minos_propose::{FakeProvider, FakeReply, Proposer};
 use minos_store::{Appended, Blobs, Ledger, LedgerRead, RunLock, StoreError};
 use serde_json::{Map, Value};
 
@@ -160,6 +164,30 @@ cache_creation_input_token = "0.00000125"
 cache_read_input_token = "0.0000001"
 "#;
 
+/// Rates under which one fake trial costs exactly $1.50: a vCPU-second is $1 and memory is free, so the
+/// candidate VM's 1,000 vCPU-ms cost $1.00 and the judge VM's 500 vCPU-ms cost $0.50. `haiku` keeps its rates.
+pub const PRICES_DEAR: &str = r#"v = 1
+
+[compute]
+vcpu_second = "1"
+gib_second = "0"
+
+[models."haiku"]
+input_token = "0.000001"
+output_token = "0.000005"
+cache_creation_input_token = "0.00000125"
+cache_read_input_token = "0.0000001"
+"#;
+
+/// `manifest` with `lines` added to its `[budget]` table, right after `spend_usd = 40`, and `spend_usd`
+/// replaced by `spend_usd` dollars.
+pub fn with_budget(manifest: &str, spend_usd: u64, lines: &str) -> String {
+    manifest.replace(
+        "spend_usd = 40\n",
+        &format!("spend_usd = {spend_usd}\n{lines}"),
+    )
+}
+
 /// Rates for another model only, so `haiku` is unpriced.
 pub const PRICES_WITHOUT_HAIKU: &str = r#"v = 1
 
@@ -274,11 +302,16 @@ pub const fn judge_usage() -> Usage {
     Usage::compute(500, 1_024_000)
 }
 
-/// The fixed krun provenance every fake trial reports.
+/// The fixed krun provenance every fake trial reports: krun on arm64.
 pub fn backend() -> BackendInfo {
+    backend_on(Arch::Arm64)
+}
+
+/// The fixed krun provenance on `arch`, for a trial that reports another backend class.
+pub fn backend_on(arch: Arch) -> BackendInfo {
     BackendInfo::new(
         BackendKind::Krun,
-        Arch::Arm64,
+        arch,
         Isolation::Hardware,
         EXPECTED_KRUN_LAYERS.iter().copied().collect(),
         root(),
@@ -292,6 +325,19 @@ pub fn backend() -> BackendInfo {
 ///
 /// [`JobFailure::Config`] when the fixture's scorecard or result is invalid, which no test expects.
 pub fn scored(request: &JobRequest, throughput: f64) -> Result<JobResult, JobFailure> {
+    scored_on(request, throughput, backend())
+}
+
+/// A scored result for `request`, as [`scored`], reported under the provenance `backend`.
+///
+/// # Errors
+///
+/// [`JobFailure::Config`] when the fixture's scorecard or result is invalid, which no test expects.
+pub fn scored_on(
+    request: &JobRequest,
+    throughput: f64,
+    backend: BackendInfo,
+) -> Result<JobResult, JobFailure> {
     let invalid = JobFailure::Config {
         what: "the fake scorecard is invalid",
     };
@@ -302,7 +348,7 @@ pub fn scored(request: &JobRequest, throughput: f64) -> Result<JobResult, JobFai
         (name("throughput_mb_s")?, value(throughput)?, false),
     ])
     .map_err(|_| invalid)?;
-    finish(request, Outcome::Scored(card), Some(judge_usage()))
+    finish(request, Outcome::Scored(card), Some(judge_usage()), backend)
 }
 
 /// A result for `request` whose run stage failed, so the judge never ran.
@@ -311,21 +357,27 @@ pub fn scored(request: &JobRequest, throughput: f64) -> Result<JobResult, JobFai
 ///
 /// [`JobFailure::Config`] when the fixture's result is invalid, which no test expects.
 pub fn run_failed(request: &JobRequest) -> Result<JobResult, JobFailure> {
-    finish(request, Outcome::Rejected(Reason::RunFailed), None)
+    finish(
+        request,
+        Outcome::Rejected(Reason::RunFailed),
+        None,
+        backend(),
+    )
 }
 
-/// The result of `request` with `outcome`, the fixed usages, no logs, and the fixed provenance.
+/// The result of `request` with `outcome`, the fixed usages, no logs, and the provenance `backend`.
 fn finish(
     request: &JobRequest,
     outcome: Outcome,
     judge: Option<Usage>,
+    backend: BackendInfo,
 ) -> Result<JobResult, JobFailure> {
     JobResult::new(
         request,
         outcome,
         candidate_usage(),
         judge,
-        backend(),
+        backend,
         BTreeMap::new(),
     )
     .map_err(|_| JobFailure::Config {
@@ -544,11 +596,55 @@ pub fn proposal(rationale: &str, files: &[(&str, &str)]) -> Value {
 
 /// A completed single-shot reply carrying `items`, with [`token_usage`] resolved to `haiku`.
 pub fn reply(items: Vec<Value>) -> Fallible<FakeReply> {
+    Ok(reply_from(haiku()?, token_usage(), items))
+}
+
+/// A completed single-shot reply carrying `items`, with `usage` resolved to `model`.
+pub fn reply_from(model: ModelId, usage: Usage, items: Vec<Value>) -> FakeReply {
     let mut output = Map::new();
     output.insert("proposals".to_owned(), Value::Array(items));
-    Ok(FakeReply::Structured {
+    FakeReply::Structured {
         output: Value::Object(output),
-        usage: token_usage(),
-        models: BTreeMap::from([(haiku()?, token_usage())]),
-    })
+        usage,
+        models: BTreeMap::from([(model, usage)]),
+    }
+}
+
+/// Session options with no retry pause.
+pub const fn options() -> DriverOptions {
+    DriverOptions {
+        retry_pause: Duration::ZERO,
+    }
+}
+
+/// A proposer with no provider, for the sweep.
+pub const fn sweep_proposer() -> Proposer<FakeProvider> {
+    Proposer::without_provider()
+}
+
+/// A proposer over a fake that answers with `script`.
+pub fn single_shot_proposer(script: Vec<FakeReply>) -> Proposer<FakeProvider> {
+    Proposer::with_provider(FakeProvider::new(script))
+}
+
+/// How many model calls the proposer's fake received.
+pub fn calls(proposer: &Proposer<FakeProvider>) -> Fallible<usize> {
+    let provider = proposer.provider().ok_or("the proposer has no provider")?;
+    Ok(provider.requests()?.len())
+}
+
+/// The event kinds of a ledger, in seq order.
+pub fn kinds(events: &[(u64, Event)]) -> Vec<&'static str> {
+    events.iter().map(|(_, event)| event_kind(event)).collect()
+}
+
+/// Every `StopRequested` in `events`, in seq order.
+pub fn stops(events: &[(u64, Event)]) -> Vec<(u32, StopReason)> {
+    events
+        .iter()
+        .filter_map(|(_, event)| match event {
+            Event::StopRequested { generation, reason } => Some((*generation, *reason)),
+            _ => None,
+        })
+        .collect()
 }

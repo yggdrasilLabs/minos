@@ -2,7 +2,12 @@
 //! login (LOOP-09).
 //!
 //! Every driver scenario lives in this one test target, so the shared `support` module's items are all used
-//! inside one crate and `-D warnings` sees no dead code. Later plans add their modules here beside `flow`.
+//! inside one crate and `-D warnings` sees no dead code. Each scenario family is one module: `flow` (07-13),
+//! and `caps`, `breaker`, `stops`, and `pins` (07-15).
 
+mod breaker;
+mod caps;
 mod flow;
+mod pins;
+mod stops;
 mod support;
