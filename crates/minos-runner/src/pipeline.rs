@@ -388,6 +388,11 @@ impl<B: Backend, S: Blobs> Runner<B, S> {
 
     /// Stores each log in `stages` that `output` holds as a tail blob of at most [`MAX_STAGE_LOG_BYTES`], under its
     /// stage in `logs`. A log the guest did not write is simply absent.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigCause::LogPath`] when a stage log path constant is not a valid [`RelPath`]: a runner defect that
+    /// would otherwise drop the log silently, so it fails loud (07-REVIEW IN-04).
     fn store_logs<R: Role>(
         &self,
         output: &mut Untrusted<GuestOutput<R>>,
@@ -395,11 +400,9 @@ impl<B: Backend, S: Blobs> Runner<B, S> {
         logs: &mut BTreeMap<Stage, BlobId>,
     ) -> Result<(), RunnerError> {
         for (stage, path) in stages {
-            // The paths are minos-sandbox constants that always parse; the pipeline tests pin that every stage's
-            // log is stored, so a path that stopped parsing fails the gate rather than a run.
-            let Ok(path) = RelPath::from_str(path) else {
-                continue;
-            };
+            // The paths are minos-sandbox constants; the pipeline tests pin that every stage's log is stored, and
+            // one that stopped parsing fails the run loudly as well, never by quietly storing no log (IN-04).
+            let path = RelPath::from_str(path).map_err(|_| ConfigCause::LogPath)?;
             if let Some(file) = output.take(&path) {
                 let blob = file
                     .store_tail(MAX_STAGE_LOG_BYTES, &self.sink())

@@ -137,6 +137,10 @@ pub enum ConfigCause {
     /// The job result could not be built from the host-measured usage. A runner defect, because host usage never
     /// carries tokens, so it is never retried.
     JobResult,
+    /// A stage log path constant (`BUILD_LOG_PATH`, `RUN_LOG_PATH`, `JUDGE_LOG_PATH`) is not a valid relative
+    /// path. A runner defect that fails every run alike, so it stops the run rather than silently storing no log
+    /// (07-REVIEW IN-04).
+    LogPath,
 }
 
 impl ConfigCause {
@@ -159,6 +163,7 @@ impl ConfigCause {
             }
             Self::BlobUnsafe => "the store refused a blob as tampered or unsafe; it needs a human",
             Self::JobResult => "the job result could not be built from the host-measured usage",
+            Self::LogPath => "a stage log path is not a valid relative path; a runner defect",
         }
     }
 }
