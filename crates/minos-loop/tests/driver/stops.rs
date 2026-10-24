@@ -1,6 +1,7 @@
 //! Session-relative stops (07-CONTEXT D-14, D-19): a stop from an earlier session does not block a resume, a
 //! stop added while a VM runs ends the session after that trial is recorded, and a cap stop resumes once the cap
-//! is raised and re-trips while it is not.
+//! is raised and re-trips while it is not. One test pins the gap 07-REVIEW WR-01 names: a `minos stop` repeated
+//! at a generation an earlier session already stopped in is a store duplicate the resumed session never sees.
 
 use minos_core::ledger::{Event, Record, SpendSource, StopReason};
 use minos_loop::{Driver, JobFailure, LoopEvent, NoopObserver, RunEnd};
@@ -150,6 +151,76 @@ fn a_user_stop_during_a_launch_ends_the_session_after_that_trial_is_recorded() -
         observed.events().last(),
         Some(LoopEvent::Stopped { .. })
     ));
+    Ok(())
+}
+
+/// Pins the gap 07-REVIEW WR-01 names, open in CLAUDE.md ("Open questions", owner Phase 8): `StopRequested` is
+/// keyed by `(generation, reason)`, so a second `minos stop` at a generation an earlier session already stopped in
+/// is a store duplicate that writes nothing, and the resumed session, which snapshotted the first stop at its
+/// start (D-19), runs every remaining trial of that generation and sees a new stop only once the generation
+/// advances. Closing it needs a per-request key (a `"v":"2"` wire decision) or a `minos stop` that refuses when
+/// the pair already exists. When that lands, this test must flip to a `Stopped` end.
+#[test]
+fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_is_a_duplicate_the_resume_never_sees()
+-> TestResult {
+    // Arrange: `minos stop` appends `StopRequested { 1, UserStop }` during the first candidate trial of each
+    // session: session A's first, which A honours, and session B's first, which is a duplicate of it.
+    let fixture = Fixture::sweep()?;
+    let run = fixture.run();
+    let store = MemoryStore::new();
+    let proposer = sweep_proposer();
+    let candidates = AtomicUsize::new(0);
+    let jobs = FakeJobs::new(|request| {
+        if !request.is_baseline() && candidates.fetch_add(1, Ordering::SeqCst) < 2 {
+            let _ = store
+                .append(
+                    &run,
+                    Record::v1(Event::StopRequested {
+                        generation: 1,
+                        reason: StopReason::UserStop,
+                    }),
+                )
+                .map_err(|_error| STOP_FAILED)?;
+        }
+        scored(request, if request.is_baseline() { 1.0 } else { 2.0 })
+    });
+
+    // Act: session A stops after the trial the stop arrived in; session B resumes at generation 1.
+    let ended_a = {
+        let mut driver = Driver::start(
+            &store,
+            &proposer,
+            &jobs,
+            NoopObserver,
+            fixture.inputs(),
+            options(),
+            STARTED_AT,
+        )?;
+        driver.run_to(2)?
+    };
+    let mut resumed = Driver::resume(
+        &store,
+        &proposer,
+        &jobs,
+        NoopObserver,
+        fixture.inputs(),
+        options(),
+        run,
+    )?;
+    let ended_b = resumed.run_to(2)?;
+
+    // Assert: A honoured the first stop; B never saw the second, which left no line, and reached its target.
+    assert_eq!(
+        ended_a,
+        RunEnd::Stopped {
+            generation: 1,
+            reason: StopReason::UserStop
+        }
+    );
+    // Both stops were appended (the second during B's first candidate trial) and B launched more after it.
+    assert!(candidates.load(Ordering::SeqCst) > 2);
+    assert_eq!(ended_b, RunEnd::Reached { generation: 2 });
+    assert_eq!(stops(&ledger(&store, &run)?), [(1, StopReason::UserStop)]);
     Ok(())
 }
 
