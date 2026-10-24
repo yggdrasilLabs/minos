@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
 stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-10-24T13:20:15.057Z"
+last_updated: "2026-10-24T13:35:35.740Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 82
+  completed_plans: 83
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 13 of 17
+Plan: 14 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -142,6 +142,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P10 | 20 min | 3 tasks | 9 files |
 | Phase 07 P11 | 6min | 3 tasks | 7 files |
 | Phase 07 P12 | 8 min | 2 tasks | 4 files |
+| Phase 07 P13 | 15 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -339,6 +340,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-11: a judge directory inside the project must lie under a [source] exclude entry, compared ASCII case-insensitively
 - [Phase 07]: 07-12: runner store errors split three ways: retryable I/O is Infra(Store), missing or over-cap is Config(BlobMissing), tampered, unsafe, or poisoned is Config(BlobUnsafe) — A tampered blob or unsafe store path is not missing, and a retry reads the same store
 - [Phase 07]: 07-12: the runner requires the diff blob to be the canonical bytes the experiment ID hashes, and check requires the root image blob too — The guest must receive exactly the bytes the ID hashes; a missing root image must stop the run before generation 0
+- [Phase 07]: 07-13: resume runs JobRunner::check before appending ManifestChanged, so neither constructor records anything before every check passes
+- [Phase 07]: 07-13: the driver completes a partly recorded batch first and re-asks next_step, so resumed sessions run trials in uninterrupted order
 
 ### Pending Todos
 
@@ -369,6 +372,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-24T13:19:47.893Z
+Last session: 2026-10-24T13:35:26.383Z
 Stopped at: Completed 07-09-PLAN.md
 Resume file: None
