@@ -49,7 +49,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Store, Source Snapshot, and Sandbox Types** - Crash-safe ledger and blobs, a secret-scanned source tarball, and isolation invariants as compile-time facts (completed 2026-10-15)
 - [x] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor` (completed 2026-10-19)
 - [x] **Phase 6: Proposers** - Seeded sweep and a locked-down `claude -p` single_shot behind the `ModelProvider` abstraction (completed 2026-10-20)
-- [ ] **Phase 7: Runner and Loop** - Candidate-then-judge VMs and a resumable generation driver with caps and a circuit breaker
+- [x] **Phase 7: Runner and Loop** - Candidate-then-judge VMs and a resumable generation driver with caps and a circuit breaker (completed 2026-10-24)
 - [ ] **Phase 8: CLI, Sample Project, and Docs** - The full loop on the sample project, hash-gated adopt, measured cost, and honest docs
 
 ## Phase Details
@@ -376,7 +376,7 @@ Plans:
   4. `minos judge push <dir>` stores judge data in the local blob store as a new judge version with its hash recorded, and that data never appears in the source tarball or the image build context (JUDGE-01, CLI-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 16/17 plans executed
+**Plans**: 17/17 plans complete
 
 Plans:
 **Wave 1**
@@ -415,7 +415,7 @@ Plans:
 
 **Wave 7** *(blocked on all prior plans)*
 
-- [ ] 07-17-PLAN.md — Final gate, requirements, the validation map checked against the real targets, then `cargo clean` (wave 7)
+- [x] 07-17-PLAN.md — Final gate, requirements, the validation map checked against the real targets, then `cargo clean` (wave 7)
 
 **Research**: Standard patterns; skip research-phase (a research pass ran on 2026-10-22; its findings are D-17 to D-20)
 
@@ -450,5 +450,5 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
-| 7. Runner and Loop | 16/17 | In Progress|  |
+| 7. Runner and Loop | 17/17 | Complete   | 2026-10-24 |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |

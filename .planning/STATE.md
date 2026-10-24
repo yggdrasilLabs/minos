@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 07
 current_phase_name: runner-and-loop
-status: executing
-stopped_at: Completed 07-16-PLAN.md
-last_updated: "2026-10-24T14:14:02.189Z"
-last_activity: 2026-10-22
-last_activity_desc: Phase 07 execution started
+status: verifying
+stopped_at: Completed 07-17-PLAN.md
+last_updated: "2026-10-24T14:23:13.996Z"
+last_activity: 2026-10-24
+last_activity_desc: 07-17 phase close (final gate, then cargo clean)
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 87
-  completed_plans: 86
-  percent: 75
+  completed_plans: 87
+  percent: 88
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 07 (runner-and-loop) — EXECUTING
+Phase: 07 (runner-and-loop) — COMPLETE, ready for verification
 Plan: 17 of 17
-Status: Ready to execute
-Last activity: 2026-10-22 — Phase 07 execution started
+Status: Phase complete — ready for verification
+Last activity: 2026-10-24 — 07-17 phase close: final gate passed, then cargo clean (GATE-06)
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -146,6 +146,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P14 | 10min | 3 tasks | 6 files |
 | Phase 07 P15 | 15min | 2 tasks | 8 files |
 | Phase 07 P16 | 9 min | 3 tasks | 6 files |
+| Phase 07 P17 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -349,6 +350,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-15: an append resets the infra streak only when it lands after failing, so a provider infra error that reports usage still reaches max_infra_failures
 - [Phase 07]: 07-15: generation 0 passes a generation safe point before its first pending baseline launch, keeping the one-job overshoot bound across resumes
 - [Phase 07]: 07-16: the crash-point resume test re-measures a re-run trial's candidate usage, so the first-measurement rule (Pitfall 1) is exercised, not hidden by an equal duplicate
+- [Phase 07]: 07-17: the test-variable check's one hit was a doc comment in locate.rs; it was reworded with the same meaning and the whole gate rerun, never narrowing the check
+- [Phase 07]: 07-17: cargo clean runs after the SUMMARY/STATE/ROADMAP commit, then a git-only commit records it (the 06-10 pattern)
 
 ### Pending Todos
 
@@ -379,6 +382,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-24T14:14:02.181Z
-Stopped at: Completed 07-16-PLAN.md
+Last session: 2026-10-24T14:23:13.986Z
+Stopped at: Completed 07-17-PLAN.md
 Resume file: None
