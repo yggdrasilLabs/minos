@@ -14,12 +14,16 @@
 //!   (JUDGE-01, CLI-04; 07-CONTEXT D-01 to D-04).
 //! - [`blob_source`] implements [`minos_sandbox::BlobSource`] over the project's [`minos_store::FileStore`]: the
 //!   CLI is the only crate where the store and the backend meet (05-CONTEXT D-13, D-14).
+//! - [`jobs`] adapts the production [`minos_runner::Runner`] to the loop's [`minos_loop::JobRunner`] seam, mapping
+//!   each runner error onto a job failure by its blame, and reads the judge inputs from `minos.lock`: the CLI is the
+//!   only crate where the runner and the loop meet (07-CONTEXT D-02, D-16).
 //!
 //! The commands themselves, and `anyhow`, live in the binary (rules/err-anyhow-app).
 
 pub mod blob_source;
 pub mod builder;
 pub mod env_build;
+pub mod jobs;
 pub mod judge_push;
 pub mod locate;
 pub mod lock_file;

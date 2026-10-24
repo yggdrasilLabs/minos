@@ -2,6 +2,9 @@
 //! and cannot do: egress, its environment and identity, its limits, writes outside scratch, the input disk node,
 //! a forged output chunk, markers, output volume, and a judge scorecard.
 //!
+//! `minos-probe scorecard <gate> <score>` writes a two-metric scorecard (`probe_ok` = gate, `probe_score` =
+//! score) for the runner's VM test in minos-cli; like every other command it is a test fixture only.
+//!
 //! It is built with the guest but never packed into a user image: `minos env build` writes only the
 //! `minos-guest` binary, as `/init`, and only the VM test harness puts this binary at
 //! `/usr/local/bin/minos-probe` in its own test image.
@@ -78,8 +81,8 @@ mod probe {
         "Max open files",
         "Max core file size",
     ];
-    /// The usage line.
-    const USAGE: &str = "usage: minos-probe egress|env|write-outside|forge|hang|marker-write|marker-check|output-fill|alloc|spawn|fill-scratch|scorecard|exit ...";
+    /// The usage line. `scorecard <gate> <score>` is a test fixture form for the runner's VM test.
+    const USAGE: &str = "usage: minos-probe egress|env|write-outside|forge|hang|marker-write|marker-check|output-fill|alloc|spawn|fill-scratch|scorecard [<gate> <score>]|exit ...";
 
     /// Exit code of a usage error.
     const EXIT_USAGE: u8 = 2;
@@ -107,6 +110,7 @@ mod probe {
             ["spawn", out, count] => spawn(out, count),
             ["fill-scratch", out] => fill_scratch(out),
             ["scorecard"] => scorecard(),
+            ["scorecard", gate, score] => return scorecard_with(gate, score),
             ["exit", code] => return exit(code),
             _ => return usage(),
         };
@@ -412,6 +416,25 @@ mod probe {
     fn scorecard() -> ProbeResult {
         fs::write(SCORECARD, SCORECARD_JSON)?;
         Ok(())
+    }
+
+    /// Writes a scorecard with `probe_ok` = `gate` and `probe_score` = `score`, both visible (test fixture only:
+    /// the runner's VM test in minos-cli uses it to score and to fail the gate). Either value not a `u32` is a
+    /// usage error.
+    fn scorecard_with(gate: &str, score: &str) -> ExitCode {
+        let (Ok(gate), Ok(score)) = (gate.parse::<u32>(), score.parse::<u32>()) else {
+            return usage();
+        };
+        let json = format!(
+            r#"{{"v":1,"metrics":[{{"name":"probe_ok","value":{gate},"held_out":false}},{{"name":"probe_score","value":{score},"held_out":false}}]}}"#
+        );
+        match fs::write(SCORECARD, json) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                drop(writeln!(io::stderr(), "minos-probe: {error}"));
+                ExitCode::FAILURE
+            }
+        }
     }
 
     // -----------------------------------------------------------------------------------------------------------
