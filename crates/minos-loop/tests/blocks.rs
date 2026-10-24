@@ -41,7 +41,7 @@ use minos_loop::admit::{
     AdmitStep, Batch, BatchError, BatchItem, MAX_BATCH_BYTES, admit, load_batch, missing_proposed,
 };
 use minos_loop::error::DriverError;
-use minos_loop::history::{excerpt_stage, history, notes, parent_tree, recorded_diff};
+use minos_loop::history::{excerpt_log, excerpt_stage, history, notes, parent_tree, recorded_diff};
 use minos_loop::inputs::{Resume, RunInputs, check_resume, check_start, same_frame};
 use minos_loop::record::{append, event_kind, spend_once};
 use minos_propose::proposal::parse_output;
@@ -1504,6 +1504,88 @@ fn history_lists_earlier_experiments_with_sanitized_failure_excerpts() -> TestRe
         "{text:?}"
     );
     assert!(!text.contains('\u{1b}') && !text.contains('\0'), "{text:?}");
+    Ok(())
+}
+
+#[test]
+fn excerpt_log_prefers_the_judge_log_for_an_output_fault_the_judge_vm_produced() -> TestResult {
+    // IN-05: the same output reasons come from the judge VM as from the candidate's, and a judge log is stored
+    // only for a launch the candidate passed into, so its presence names the judge as the faulting VM.
+    let fixture = Fixture::standard()?;
+    let judge = fixture.judge();
+    let store = MemoryStore::new();
+    let (exp, proposed) = stored_proposal(
+        &fixture,
+        &store,
+        ("src/parse.rs", PARSE_ONE, "count bytes"),
+        1,
+        fixture.baseline(),
+    )?;
+    let build = store.put(b"compiling\n")?;
+    let run = store.put(b"running\n")?;
+    let judge_log = store.put(b"judge: wrote no scorecard\n")?;
+    let candidate_logs: BTreeMap<Stage, BlobId> = [(Stage::Build, build), (Stage::Run, run)].into();
+    let mut judge_logs = candidate_logs.clone();
+    judge_logs.insert(Stage::Judge, judge_log);
+    let faults = [
+        Reason::OutputInvalid,
+        Reason::OutputTooLarge,
+        Reason::ChunkProtocol,
+    ];
+    for reason in faults {
+        let outcome = Outcome::Rejected(reason.clone());
+        // With a judge log, the judge VM faulted: its log explains the trial.
+        let with_judge = state_of(vec![
+            fixture.run_started(Some(root())),
+            proposed.clone(),
+            judged(exp, judge, outcome.clone(), Some(judge_logs.clone())),
+        ])?;
+        let (_, judgment) = with_judge
+            .trials(&exp, &judge)
+            .next()
+            .ok_or("the trial was not recorded")?;
+        assert_eq!(excerpt_log(judgment), Some(&judge_log), "{reason:?}");
+        // Without one, the fault is the candidate's own output: the run log, as `excerpt_stage` says.
+        let without = state_of(vec![
+            fixture.run_started(Some(root())),
+            proposed.clone(),
+            judged(exp, judge, outcome, Some(candidate_logs.clone())),
+        ])?;
+        let (_, judgment) = without
+            .trials(&exp, &judge)
+            .next()
+            .ok_or("the trial was not recorded")?;
+        assert_eq!(excerpt_log(judgment), Some(&run), "{reason:?}");
+    }
+    // A judge-stage reason never looks past the judge log, and a build failure never reaches for it.
+    let gate = Outcome::Rejected(Reason::GateFailed {
+        gate: MetricName::from_str("identical_output")?,
+    });
+    let state = state_of(vec![
+        fixture.run_started(Some(root())),
+        proposed.clone(),
+        judged(exp, judge, gate, Some(judge_logs.clone())),
+    ])?;
+    let (_, judgment) = state
+        .trials(&exp, &judge)
+        .next()
+        .ok_or("the trial was not recorded")?;
+    assert_eq!(excerpt_log(judgment), Some(&judge_log));
+    let state = state_of(vec![
+        fixture.run_started(Some(root())),
+        proposed,
+        judged(
+            exp,
+            judge,
+            Outcome::Rejected(Reason::BuildFailed),
+            Some(judge_logs),
+        ),
+    ])?;
+    let (_, judgment) = state
+        .trials(&exp, &judge)
+        .next()
+        .ok_or("the trial was not recorded")?;
+    assert_eq!(excerpt_log(judgment), Some(&build));
     Ok(())
 }
 

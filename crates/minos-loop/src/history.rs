@@ -92,11 +92,11 @@ pub fn parent_tree<S: Blobs>(
     Ok((incumbent, tree))
 }
 
-/// The stage whose log explains `outcome`, or `None` when no log does.
+/// The stage whose log explains `outcome`, or `None` when no log does, from the outcome alone.
 ///
 /// A build failure is the build's; a run failure and every output fault are the run's; a scorecard or gate fault
 /// is the judge's; a crash or timeout names its stage. A diff that did not apply ran no stage, and a scored
-/// trial needs no excerpt.
+/// trial needs no excerpt. [`excerpt_log`] refines the output faults against the logs a trial recorded (IN-05).
 #[must_use]
 pub const fn excerpt_stage(outcome: &Outcome) -> Option<Stage> {
     match outcome {
@@ -177,16 +177,38 @@ pub fn history<S: Blobs>(
     ))
 }
 
-/// The excerpt of the first trial, in trial order, whose outcome has an [`excerpt_stage`] and whose recorded logs
-/// name that stage, read under [`MAX_STAGE_LOG_BYTES`] and passed only through [`LogExcerpt::from_bytes`].
+/// The recorded log that explains `judgment`, if any: the log of its [`excerpt_stage`], except that an output
+/// fault (`OutputInvalid`, `OutputTooLarge`, `ChunkProtocol`) is the judge VM's when the trial recorded a judge
+/// log (07-REVIEW IN-05).
+///
+/// The runner stores a judge log only for a launch the candidate passed into, and the same three reasons come
+/// from the judge VM's stream and status as from the candidate's. So a judge log beside one of them says the
+/// candidate passed and the judge's output was at fault, and the judge log is the one that explains it; without
+/// a judge log the fault is the candidate's own, or the judge's stream was unreadable and no log explains it, and
+/// the run log is shown as before.
+#[must_use]
+pub fn excerpt_log(judgment: &Judgment) -> Option<&BlobId> {
+    let logs = judgment.logs()?;
+    let stage = excerpt_stage(judgment.outcome())?;
+    let output_fault = matches!(
+        judgment.outcome(),
+        Outcome::Rejected(Reason::OutputInvalid | Reason::OutputTooLarge | Reason::ChunkProtocol)
+    );
+    if output_fault && let Some(log) = logs.get(&Stage::Judge) {
+        return Some(log);
+    }
+    logs.get(&stage)
+}
+
+/// The excerpt of the first trial, in trial order, that has an [`excerpt_log`], read under
+/// [`MAX_STAGE_LOG_BYTES`] and passed only through [`LogExcerpt::from_bytes`].
 fn excerpt<S: Blobs>(
     store: &S,
     judgments: &[(u32, &Judgment)],
 ) -> Result<Option<LogExcerpt>, StoreError> {
-    let log: Option<&BlobId> = judgments.iter().find_map(|(_, judgment)| {
-        let stage = excerpt_stage(judgment.outcome())?;
-        judgment.logs()?.get(&stage)
-    });
+    let log: Option<&BlobId> = judgments
+        .iter()
+        .find_map(|(_, judgment)| excerpt_log(judgment));
     log.map(|log| {
         let bytes = store.get(log, byte_cap(MAX_STAGE_LOG_BYTES))?;
         Ok(LogExcerpt::from_bytes(&bytes, MAX_LOG_EXCERPT_BYTES))
