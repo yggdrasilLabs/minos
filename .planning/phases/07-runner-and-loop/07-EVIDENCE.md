@@ -169,3 +169,116 @@ $ cargo clippy -p minos-loop --all-targets -- -D warnings
 ```
 
 Exit code: 0.
+
+
+## Runner on real VMs (07-14)
+
+Run on 2026-10-24 by the executor on this Mac (the 05-17 precedent), at commit `c215775`, after Tasks 1 and 2.
+macOS 27.0.1 (build 26A434), arm64; libkrunfw 5.6.2 from `libkrun/krun`; rustc and cargo 1.97.1. Every command
+ran at the repository root (`~/Repos/minos`).
+
+Sequence and exit codes:
+
+| # | Command | Exit |
+|---|---------|------|
+| 1 | `cargo build -p minos-vmm` | 0 |
+| 2 | `cargo build -p minos-guest --release --target aarch64-unknown-linux-musl` | 0 |
+| 3 | `codesign --force --sign - --options runtime --entitlements crates/minos-vmm/minos-vmm.entitlements target/debug/minos-vmm` | 0 |
+| 4 | `codesign --display --entitlements - target/debug/minos-vmm` | 0 |
+| 5 | `cargo run -q -p minos-cli -- host doctor` | 0 |
+| 6 | `MINOS_VMM=$(pwd)/target/debug/minos-vmm MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest MINOS_KRUNFW=/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib cargo test -p minos-cli --test runner_vm -- --ignored --nocapture --test-threads=1` | 0 |
+
+No cargo command between the signing (3) and the test (6) relinked `minos-vmm`: `minos-cli` does not build it, and
+the test target was already built (`Finished` in 0.05 s). The entitlement grep immediately before step 6 still found
+`com.apple.security.hypervisor`.
+
+`codesign --display --entitlements - target/debug/minos-vmm`:
+
+```
+Executable=~/Repos/minos/target/debug/minos-vmm
+[Dict]
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.hypervisor
+	[Value]
+		[Bool] true
+```
+
+`minos host doctor` (exit 0, no refusal). Shown is the rerun taken right after the test for this record; the run
+before the test printed the same checks and the same result, and differed only in the name of the probe's
+temporary directory:
+
+```
+binaries (fixed locations; no configuration file or environment variable):
+  found     ~/Repos/minos/target/debug/minos-vmm  a regular file
+  rejected  ~/Repos/minos/target/debug/minos-guest  not an ELF file (the macOS build of minos-guest is Mach-O)
+  found     ~/Repos/minos/target/aarch64-unknown-linux-musl/release/minos-guest  a static AArch64 ELF
+  kernel    /opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib  checked below
+
+checks:
+ok       helper present  a regular file of 17955744 bytes
+  checked: ~/Repos/minos/target/debug/minos-vmm
+ok       helper entitlements  both entitlements are set to true
+  checked: ~/Repos/minos/target/debug/minos-vmm
+  checked: /usr/bin/codesign
+ok       guest kernel  sha256 59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217
+  checked: /opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib
+ok       hypervisor  kern.hv_support 1, hw.ncpu 16, hw.memsize 51539607552; largest VM 8 vCPUs and 16384 MiB, leaving half the host's memory to the host
+  checked: /usr/sbin/sysctl
+ok       job socket path  41 of at most 103 bytes
+  checked: /private/tmp/minos-501/mnsXXXXXXXX/o.sock
+ok       sandbox-exec present  a regular file
+  checked: /usr/bin/sandbox-exec
+ok       Seatbelt denies network  the control connected; under the profile nc exited 1 and the listener accepted nothing: no stderr
+  checked: /usr/bin/sandbox-exec
+  checked: /usr/bin/nc
+  checked: /bin/cat
+ok       Seatbelt denies unlisted files  the listed file read back; the unlisted read exited 1: cat: /private/tmp/mnpHYnEsK2P/unlisted: Operation not permitted
+  checked: /usr/bin/sandbox-exec
+  checked: /usr/bin/nc
+  checked: /bin/cat
+ok       guest binary  a static aarch64 ELF of 1515688 bytes
+  checked: ~/Repos/minos/target/aarch64-unknown-linux-musl/release/minos-guest
+
+confinement: hardware, seatbelt, rlimits
+dedicated user: missing (deferred, reduced hardening)
+
+job sweep: /private/tmp/minos-501
+  no job directories left over
+builder: docker found at /Applications/Docker.app/Contents/Resources/bin/docker, daemon not running: start Docker Desktop before minos env build
+
+result: every check passed
+```
+
+The VM test, verbatim (it prints only `JobResult` values: validated outcomes, host-measured usage, the backend, and
+the stages that have log tails, never a guest byte):
+
+```
+$ MINOS_VMM=$(pwd)/target/debug/minos-vmm MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest MINOS_KRUNFW=/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib cargo test -p minos-cli --test runner_vm -- --ignored --nocapture --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/runner_vm.rs (target/debug/deps/runner_vm-21f1cfb19a5f04b6)
+
+running 3 tests
+test baseline_scores_on_real_vms ... == baseline: outcome Scored(Scorecard { metrics: {MetricName("probe_ok"): ScoredMetric { value: 1.0, held_out: false }, MetricName("probe_score"): ScoredMetric { value: 7.0, held_out: false }} }); candidate usage 1494 vcpu_ms, 1529856 mem_mib_ms; judge usage Some((644, 659456)); backend Krun on Arm64; logs [Build, Run, Judge]
+ok
+test candidate_artifacts_reach_the_judge_on_real_vms ... == candidate: outcome Scored(Scorecard { metrics: {MetricName("probe_ok"): ScoredMetric { value: 1.0, held_out: false }, MetricName("probe_score"): ScoredMetric { value: 7.0, held_out: false }} }); candidate usage 646 vcpu_ms, 661504 mem_mib_ms; judge usage Some((626, 641024)); backend Krun on Arm64; logs [Build, Run, Judge]
+ok
+test failed_gate_is_rejected_on_real_vms ... == failed gate: outcome Rejected(GateFailed { gate: MetricName("probe_ok") }); candidate usage 718 vcpu_ms, 735232 mem_mib_ms; judge usage Some((664, 679936)); backend Krun on Arm64; logs [Build, Run, Judge]
+ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.48s
+```
+
+What it shows:
+
+- **LOOP-01, LOOP-02:** each trial booted a Candidate VM and then a Judge VM through the production
+  `Runner<KrunBackend, FileStore>` behind `RunnerJobs`, after `JobRunner::check` passed. The candidate test's run
+  stage wrote 4096 bytes under `/out`; the runner re-packed `out/` as the judge's input and the judge scored.
+- **LOOP-03:** usage is host-measured for both VMs: `mem_mib_ms` equals `vcpu_ms / 2 * 2048` in every row (for
+  example 1494 vcpu_ms and 1529856 mem_mib_ms for the baseline's candidate), with no tokens.
+- **JUDGE-03:** the judge whose `probe_ok` was 0 gave `Rejected(GateFailed { gate: probe_ok })` with no scorecard.
+- **JUDGE-04:** every result records `Krun` on `Arm64`, and its build, run, and judge log tails are in the store under
+  `MAX_STAGE_LOG_BYTES`.
+
+test result: ok. 3 passed
