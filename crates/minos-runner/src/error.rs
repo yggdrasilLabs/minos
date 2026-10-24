@@ -114,6 +114,13 @@ pub enum ConfigCause {
     /// A blob the launch needs (the root image, the judge data, the base tarball, or the diff) is absent from the
     /// store or over its cap.
     BlobMissing,
+    /// The store refused a blob the launch needs, or one the runner writes, for a reason a retry does not change:
+    /// its bytes no longer hash to their ID, a store path failed its symlink or inode check, or an in-memory store
+    /// lock was poisoned. A retry reads the same store, so it needs a human.
+    BlobUnsafe,
+    /// The job result could not be built from the host-measured usage. A runner defect, because host usage never
+    /// carries tokens, so it is never retried.
+    JobResult,
 }
 
 impl ConfigCause {
@@ -131,6 +138,8 @@ impl ConfigCause {
             Self::BlobMissing => {
                 "a blob the launch needs is missing from the store or over its cap"
             }
+            Self::BlobUnsafe => "the store refused a blob as tampered or unsafe; it needs a human",
+            Self::JobResult => "the job result could not be built from the host-measured usage",
         }
     }
 }

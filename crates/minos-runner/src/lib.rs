@@ -15,12 +15,15 @@
 //!   `SandboxSpec<Judge>::secrets`, plus only the candidate's `out/` files. The two VMs share no process and no
 //!   disk.
 //!
-//! Errors carry blame by type ([`error`]): a candidate fault is an `Outcome`, never an error.
+//! [`Runner`] composes them ([`pipeline`]): one `JobRequest` in, one `JobResult` out, and [`Runner::check`] before
+//! generation 0. Errors carry blame by type ([`error`]): a candidate fault is an `Outcome`, never an error.
 
 pub mod error;
 pub mod map;
+pub mod pipeline;
 pub mod usage;
 
 pub use error::{ConfigCause, InfraCause, RunnerError};
 pub use map::{Seen, Verdict, candidate_verdict, judge_verdict, judged_outcome};
+pub use pipeline::Runner;
 pub use usage::{RUNNER_VCPUS, host_usage};
