@@ -450,5 +450,5 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
-| 7. Runner and Loop | 17/17 | Complete   | 2026-10-24 |
+| 7. Runner and Loop | 17/17 | Complete    | 2026-10-24 |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
