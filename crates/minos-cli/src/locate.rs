@@ -1,8 +1,8 @@
 //! Where `minos` finds the `minos-vmm` helper, the static `minos-guest`, and the guest kernel (05-CONTEXT D-04).
 //!
 //! The locations are fixed, with no configuration file and no environment variable, so nothing in the user's
-//! environment can redirect a launch to another binary or kernel. `MINOS_VMM`, `MINOS_GUEST`, and `MINOS_KRUNFW`
-//! are read only by the ignored VM tests, never here.
+//! environment can redirect a launch to another binary or kernel. The three path variables of the ignored VM tests
+//! (CLAUDE.md Commands) are read only by those tests, never here.
 //!
 //! In order, [`locate`] checks:
 //!
