@@ -156,6 +156,15 @@ pub enum JudgePushError {
         /// The directory, as resolved.
         dir: SafeText,
     },
+    /// The judge data directory is the project itself (07-REVIEW IN-06). Judge data is never the project: the
+    /// snapshot would pack every file of it, and the judge's own program would sit in the surface.
+    #[error(
+        "the judge data directory {dir} is the project itself; push a directory holding only the judge data, outside the project or under a [source] exclude entry"
+    )]
+    DirIsProject {
+        /// The directory, as resolved.
+        dir: SafeText,
+    },
     /// The judge data pack was refused.
     #[error("the judge data is refused")]
     Pack(#[source] SnapshotError),
@@ -339,15 +348,22 @@ fn decide(lock: Option<&Lock>, entry: &LockedJudge, update: bool) -> Result<bool
 }
 
 /// Refuses a judge directory `dir` that lies inside `project` (both canonical) unless a `[source] exclude` entry
-/// covers its project-relative path. The project itself, and a path that is not a valid [`RelPath`], are refused.
+/// covers its project-relative path. The project itself is refused by name (IN-06), and a path that is not a
+/// valid [`RelPath`] is refused as uncovered.
 ///
 /// # Errors
 ///
-/// [`JudgePushError::DirInSnapshot`] naming `dir`.
+/// [`JudgePushError::DirIsProject`] when `dir` is `project`; [`JudgePushError::DirInSnapshot`] naming `dir`
+/// otherwise.
 fn check_placement(project: &Path, dir: &Path, manifest: &Manifest) -> Result<(), JudgePushError> {
     let Some(rel) = relative_to(project, dir) else {
         return Ok(());
     };
+    if rel.as_os_str().is_empty() {
+        return Err(JudgePushError::DirIsProject {
+            dir: SafeText::inline(&dir.to_string_lossy()),
+        });
+    }
     let covered = rel
         .to_str()
         .and_then(|text| RelPath::try_from(text).ok())

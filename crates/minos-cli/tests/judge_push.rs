@@ -326,10 +326,10 @@ fn dir_in_snapshot_refused() -> TestResult {
         "{result:?}"
     );
 
-    // The project itself is never judge data.
+    // The project itself is never judge data, and is refused by name (IN-06).
     let result = push(&fixture, &fixture.project, false);
     assert!(
-        matches!(result, Err(JudgePushError::DirInSnapshot { .. })),
+        matches!(result, Err(JudgePushError::DirIsProject { .. })),
         "{result:?}"
     );
     assert!(!fixture.project.join("minos.lock").exists());
