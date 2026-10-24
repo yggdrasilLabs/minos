@@ -536,7 +536,8 @@ pub fn noise_check(floor: Option<&NoiseFloor>, objective: &Objective) -> NoiseVe
 /// Infrastructure failures are retried and are not [`Outcome`]s, so the ledger does not record them: the loop
 /// supplies the current streak from memory and records a trip as `StopRequested { reason: InfraFailures }`. A
 /// restart resets the streak, which is acceptable because a restart is a human action (03-RESEARCH Open
-/// Question 8).
+/// Question 8). The infrastructure arm is [`infra_breaker`], which the loop also consults on its own after each
+/// failure, so one function owns that threshold (07-REVIEW IN-02).
 #[must_use]
 pub fn circuit_breaker(state: &RunState, budget: &Budget, infra_streak: u32) -> Option<StopReason> {
     let limit = budget.max_empty_generations();
@@ -553,7 +554,21 @@ pub fn circuit_breaker(state: &RunState, budget: &Budget, infra_streak: u32) -> 
     }
     if empty >= limit {
         Some(StopReason::NoValidCandidates)
-    } else if infra_streak >= budget.max_infra_failures() {
+    } else {
+        infra_breaker(budget, infra_streak)
+    }
+}
+
+/// The circuit breaker's infrastructure arm (D-14): [`StopReason::InfraFailures`] once `infra_streak`, the loop's
+/// count of consecutive infrastructure failures, reaches `max_infra_failures`, which is at least 1
+/// (`Manifest::try_from`), so it trips at exactly the limit and cannot be disabled.
+///
+/// This is the one place that threshold lives: [`circuit_breaker`] calls it at a generation, and the loop calls it
+/// after every failure it counts, so the two can never disagree on the generation a `StopRequested {
+/// InfraFailures }` is recorded under (07-REVIEW IN-02).
+#[must_use]
+pub const fn infra_breaker(budget: &Budget, infra_streak: u32) -> Option<StopReason> {
+    if infra_streak >= budget.max_infra_failures() {
         Some(StopReason::InfraFailures)
     } else {
         None

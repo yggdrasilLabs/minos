@@ -110,7 +110,7 @@ use minos_core::metric::Metric;
 use minos_core::money::CostError;
 use minos_core::policy::{
     NoiseFloor, NoiseVerdict, SpendCheck, TrialRule, baseline_ready, circuit_breaker, conclude,
-    noise_check, noise_floor, reduce_trials, spend_ok,
+    infra_breaker, noise_check, noise_floor, reduce_trials, spend_ok,
 };
 use minos_core::route::{RouteError, SurfaceStats, route};
 use minos_core::state::{RunState, fold};
@@ -676,14 +676,15 @@ where
     /// Counts one infrastructure failure of `generation`'s current step, of which `what` is fixed text (D-16).
     ///
     /// Below `max_infra_failures` it emits [`LoopEvent::Retrying`], pauses for the session's retry pause, and
-    /// returns `Ok`, so the caller re-derives the same step. At the limit it appends
-    /// `StopRequested { InfraFailures }` and ends the session; when even that append fails on a retryable store
-    /// error, the failure is [`DriverError::Infra`] naming `what`, and resuming the run retries from the ledger.
+    /// returns `Ok`, so the caller re-derives the same step. At the limit, as [`infra_breaker`] decides it (the
+    /// one owner of that threshold; 07-REVIEW IN-02), it appends `StopRequested { InfraFailures }` and ends the
+    /// session; when even that append fails on a retryable store error, the failure is [`DriverError::Infra`]
+    /// naming `what`, and resuming the run retries from the ledger.
     fn retry(&mut self, generation: u32, what: &'static str) -> Flow<()> {
         self.streak = self.streak.saturating_add(1);
-        let max = self.inputs.manifest.budget().max_infra_failures();
-        if self.streak >= max {
-            let reason = StopReason::InfraFailures;
+        let budget = self.inputs.manifest.budget();
+        let max = budget.max_infra_failures();
+        if let Some(reason) = infra_breaker(budget, self.streak) {
             return match append(
                 self.store,
                 &self.run,

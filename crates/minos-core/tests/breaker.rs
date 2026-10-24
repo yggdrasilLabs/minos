@@ -11,7 +11,7 @@ use minos_core::id::{BlobId, ExperimentId, ManifestId, ModelId, RunId, TreeId};
 use minos_core::ledger::{Decision, DecisionKind, Event, Origin, Record, SpendSource, StopReason};
 use minos_core::manifest::{Manifest, Tier};
 use minos_core::money::{ApproxCost, CostError, Prices};
-use minos_core::policy::{SpendCheck, circuit_breaker, spend_ok};
+use minos_core::policy::{SpendCheck, circuit_breaker, infra_breaker, spend_ok};
 use minos_core::state::{RunState, fold};
 use minos_core::usage::Usage;
 use proptest::prelude::*;
@@ -282,6 +282,28 @@ fn breaker_trips_at_exactly_max_infra_failures() -> TestResult {
         circuit_breaker(&state, manifest.budget(), u32::MAX),
         Some(StopReason::InfraFailures)
     );
+    Ok(())
+}
+
+#[test]
+fn infra_breaker_is_the_breakers_infrastructure_arm() -> TestResult {
+    // One function owns the threshold (IN-02): on a run with no empty streak, the breaker's verdict is exactly
+    // the infra arm's, and the arm trips at the limit and never below it.
+    let manifest = breaker_manifest(3, 3)?;
+    let budget = manifest.budget();
+    let state = state(&ledger([]))?;
+    for streak in [0, 1, 2, 3, 4, u32::MAX] {
+        assert_eq!(
+            infra_breaker(budget, streak),
+            (streak >= 3).then_some(StopReason::InfraFailures),
+            "streak {streak}"
+        );
+        assert_eq!(
+            circuit_breaker(&state, budget, streak),
+            infra_breaker(budget, streak),
+            "streak {streak}"
+        );
+    }
     Ok(())
 }
 
