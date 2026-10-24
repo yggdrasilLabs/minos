@@ -715,6 +715,7 @@ fn event_kind_names_every_variant_in_snake_case() -> TestResult {
             Event::StopRequested {
                 generation: 1,
                 reason: StopReason::UserStop,
+                ordinal: None,
             },
             "stop_requested",
         ),

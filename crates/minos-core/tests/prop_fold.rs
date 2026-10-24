@@ -251,6 +251,7 @@ fn valid_ledger() -> Result<Vec<Record>, Box<dyn Error>> {
         rec(Event::StopRequested {
             generation: 3,
             reason: StopReason::UserStop,
+            ordinal: None,
         }),
     ])
 }
@@ -404,6 +405,7 @@ fn stops_spends_reviews_and_acknowledgements() -> TestResult {
     let records = with(Event::StopRequested {
         generation: 7,
         reason: StopReason::SpendCap,
+        ordinal: None,
     })?;
     let state = fold(&records)?;
     assert_eq!(state.stop_requested(), Some((3, StopReason::UserStop)));
@@ -689,30 +691,89 @@ fn judged_is_true_exactly_for_recorded_trials() -> TestResult {
 
 #[test]
 fn stops_yields_every_recorded_stop_in_key_order() -> TestResult {
+    // Arrange: the valid ledger already holds `{3, UserStop, None}`.
     let records = starting_with(
         run_started(),
         vec![
             Event::StopRequested {
                 generation: 7,
                 reason: StopReason::SpendCap,
+                ordinal: None,
+            },
+            Event::StopRequested {
+                generation: 3,
+                reason: StopReason::UserStop,
+                ordinal: Some(1),
             },
             Event::StopRequested {
                 generation: 3,
                 reason: StopReason::ProviderAuth,
+                ordinal: None,
+            },
+            Event::StopRequested {
+                generation: 3,
+                reason: StopReason::UserStop,
+                ordinal: Some(0),
             },
         ],
     )?;
+
+    // Act
     let state = fold(&records)?;
+
+    // Assert
     assert_eq!(
-        state.stops().collect::<Vec<_>>(),
+        state
+            .stops()
+            .map(|stop| (stop.generation(), stop.reason(), stop.ordinal()))
+            .collect::<Vec<_>>(),
         vec![
-            (3, StopReason::UserStop),
-            (3, StopReason::ProviderAuth),
-            (7, StopReason::SpendCap),
+            (3, StopReason::UserStop, None),
+            (3, StopReason::UserStop, Some(0)),
+            (3, StopReason::UserStop, Some(1)),
+            (3, StopReason::ProviderAuth, None),
+            (7, StopReason::SpendCap, None),
         ]
     );
     assert_eq!(state.stop_requested(), Some((3, StopReason::UserStop)));
     assert_eq!(fold(&[rec(run_started())])?.stops().count(), 0);
+    Ok(())
+}
+
+#[test]
+fn next_user_stop_ordinal_is_one_past_the_highest_user_stop_ordinal_of_its_generation() -> TestResult
+{
+    // Arrange
+    let stop = |generation: u32, reason: StopReason, ordinal: Option<u32>| Event::StopRequested {
+        generation,
+        reason,
+        ordinal,
+    };
+    let empty = fold(&[rec(run_started())])?;
+    let unnumbered = fold(&starting_with(
+        run_started(),
+        vec![stop(3, StopReason::UserStop, None)],
+    )?)?;
+    let numbered = fold(&starting_with(
+        run_started(),
+        vec![
+            stop(3, StopReason::UserStop, None),
+            stop(3, StopReason::UserStop, Some(0)),
+            stop(3, StopReason::UserStop, Some(4)),
+            stop(3, StopReason::SpendCap, Some(9)),
+            stop(5, StopReason::UserStop, Some(u32::MAX)),
+        ],
+    )?)?;
+
+    // Act and assert: no stops, or only a stop with no ordinal, leaves ordinal 0 free.
+    assert_eq!(empty.next_user_stop_ordinal(3), Some(0));
+    assert_eq!(unnumbered.next_user_stop_ordinal(3), Some(0));
+    // One past the highest `UserStop` ordinal of the generation; another reason's ordinal does not count.
+    assert_eq!(numbered.next_user_stop_ordinal(3), Some(5));
+    assert_eq!(numbered.next_user_stop_ordinal(2), Some(0));
+    assert_eq!(numbered.next_user_stop_ordinal(4), Some(0));
+    // No ordinal is free past `u32::MAX`.
+    assert_eq!(numbered.next_user_stop_ordinal(5), None);
     Ok(())
 }
 
@@ -1364,9 +1425,16 @@ fn build(plan: &LedgerPlan) -> Result<Vec<Record>, Box<dyn Error>> {
         }
     }
     for (generation, reason) in &plan.stops {
+        // The ordinal is derived from the reason byte, so the strategy keeps its shape and ledgers mix stops with
+        // and without an ordinal (07-REVIEW WR-01).
+        let ordinal = match (*reason / 4) % 3 {
+            0 => None,
+            other => Some(u32::from(other)),
+        };
         records.push(rec(Event::StopRequested {
             generation: u32::from(*generation % 6),
             reason: reason_of(*reason),
+            ordinal,
         }));
     }
     if plan.acknowledge {
@@ -1425,6 +1493,10 @@ proptest! {
         prop_assert_eq!(shuffled.stop_requested(), expected.stop_requested());
         for generation in 0..=6 {
             prop_assert_eq!(shuffled.next_model_call(generation), expected.next_model_call(generation));
+            prop_assert_eq!(
+                shuffled.next_user_stop_ordinal(generation),
+                expected.next_user_stop_ordinal(generation)
+            );
         }
         for (id, spend) in expected.spends() {
             prop_assert!(shuffled.has_spend(id), "spend {} of generation {}", id, spend.generation());

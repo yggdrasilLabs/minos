@@ -45,8 +45,9 @@
 //! | Launch | Before every [`JobRunner::run`], baseline or candidate | yes | no | no |
 //! | After trial | After a trial's `Spent` and `Judged` are recorded | yes | no | yes |
 //!
-//! A breaker or cap verdict appends `StopRequested { generation, reason }` and ends the session; the key
-//! `(generation, reason)` makes a repeat a duplicate, so a cap that re-trips on resume records nothing new. A
+//! A breaker or cap verdict appends `StopRequested { generation, reason }` and ends the session. The driver's own
+//! stops carry no ordinal, so their key is `(generation, reason)` and a cap that re-trips on resume records
+//! nothing new. A
 //! resolved model ID that `prices.toml` does not price ends the session with [`DriverError::UnpricedModel`] right
 //! after the first call that used it, its spend already recorded (D-13 extended; 07-RESEARCH Pitfall 7).
 //!
@@ -58,8 +59,11 @@
 //!
 //! # Stops are session-relative (D-19)
 //!
-//! A `StopRequested` stays in the ledger forever, so the driver snapshots the recorded stops when its session
-//! starts and honours only a stop added after that, whether by `minos stop` or by itself. Cap and breaker stops
+//! A `StopRequested` stays in the ledger forever, so the driver snapshots the recorded stop identities
+//! (generation, reason, and ordinal) when its session starts and honours only a stop added after that, whether by
+//! `minos stop` or by itself. Each `minos stop` carries the next free ordinal from
+//! `RunState::next_user_stop_ordinal`, so a repeated stop at a generation an earlier session stopped in is a new
+//! line and is honoured at the next safe point (07-REVIEW WR-01). Cap and breaker stops
 //! are re-derived from the fold at every safe point rather than read from old records, so a run stopped by a cap
 //! resumes once the cap is raised, and an old `UserStop`, `ProviderLimit`, or `ProviderAuth` never blocks a
 //! resume by itself. An honoured stop records nothing.
@@ -94,8 +98,9 @@
 //!
 //! The CLI builds the [`RunInputs`], picks the concrete store, provider, job runner, and observer, and calls
 //! [`Driver::start`] or [`Driver::resume`], then [`Driver::calibrate`] (`minos check`) or [`Driver::run_to`]
-//! (`minos run`). `minos stop` appends `StopRequested { UserStop }`, which a running session honours at its
-//! next safe point.
+//! (`minos run`). `minos stop` appends `StopRequested { UserStop, ordinal: Some(..) }` with the ordinal from
+//! `RunState::next_user_stop_ordinal`, which a running session honours at its next safe point; a `Duplicate`
+//! means a concurrent request already recorded that stop.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -113,7 +118,7 @@ use minos_core::policy::{
     infra_breaker, noise_check, noise_floor, reduce_trials, spend_ok,
 };
 use minos_core::route::{RouteError, SurfaceStats, route};
-use minos_core::state::{RunState, fold};
+use minos_core::state::{RecordedStop, RunState, fold};
 use minos_core::usage::Usage;
 use minos_propose::{ModelProvider, ProposeError, ProposeInput, Proposer};
 use minos_store::{Blobs, Ledger, RunLock, StoreError};
@@ -282,8 +287,9 @@ where
     options: DriverOptions,
     run: RunId,
     completed: BTreeSet<u32>,
-    /// The stops recorded when the session started; only a stop outside this set ends the session (D-19).
-    session_stops: BTreeSet<(u32, StopReason)>,
+    /// The stop identities, ordinal included, recorded when the session started; only a stop outside this set
+    /// ends the session (D-19, 07-REVIEW WR-01).
+    session_stops: BTreeSet<RecordedStop>,
     /// Consecutive infrastructure failures in this session (D-16); a restart resets it.
     streak: u32,
 }
@@ -629,11 +635,11 @@ where
         let state = self.state()?;
 
         // 1. A stop added since the session started: honoured, never recorded again (D-19).
-        if let Some((recorded, reason)) = state
+        if let Some(stop) = state
             .stops()
             .find(|stop| !self.session_stops.contains(stop))
         {
-            return Err(self.stopped(recorded, reason));
+            return Err(self.stopped(stop.generation(), stop.reason()));
         }
 
         // 2. The breaker: K empty generations in a row (D-14, LOOP-08).
@@ -660,7 +666,12 @@ where
 
     /// Records `StopRequested { generation, reason }` and ends the session; a halt while recording it wins.
     fn stop(&mut self, generation: u32, reason: StopReason) -> Halt {
-        match self.record(generation, Event::StopRequested { generation, reason }) {
+        let event = Event::StopRequested {
+            generation,
+            reason,
+            ordinal: None,
+        };
+        match self.record(generation, event) {
             Ok(()) => self.stopped(generation, reason),
             Err(halt) => halt,
         }
@@ -688,7 +699,11 @@ where
             return match append(
                 self.store,
                 &self.run,
-                Event::StopRequested { generation, reason },
+                Event::StopRequested {
+                    generation,
+                    reason,
+                    ordinal: None,
+                },
             ) {
                 Ok(()) => Err(self.stopped(generation, reason)),
                 Err(DriverError::Store { source, .. }) if source.is_retryable() => {

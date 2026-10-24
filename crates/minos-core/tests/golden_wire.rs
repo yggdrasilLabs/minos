@@ -13,6 +13,9 @@
 //! The Phase 7 provenance fields (`RunStarted.root_image`, `Proposed.batch`, `Judged.logs`, and the job result's
 //! `judge_usage`) are optional and omitted when absent, so the 25 lines above stay byte-identical; their present
 //! forms are a second list, [`phase7_goldens`], with its own pin, `phase7_golden_bytes_pinned`.
+//!
+//! `StopRequested.ordinal` (07-REVIEW WR-01) is omitted when absent too; its present form is a third list,
+//! [`stop_ordinal_goldens`], with its own pin, `stop_ordinal_golden_bytes_pinned`.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -689,6 +692,7 @@ fn golden_records() -> Result<Vec<(&'static str, Record)>, Box<dyn Error>> {
             Event::StopRequested {
                 generation: 3,
                 reason: StopReason::SpendCap,
+                ordinal: None,
             },
         ),
         (
@@ -696,6 +700,7 @@ fn golden_records() -> Result<Vec<(&'static str, Record)>, Box<dyn Error>> {
             Event::StopRequested {
                 generation: 3,
                 reason: StopReason::ProviderAuth,
+                ordinal: None,
             },
         ),
         (
@@ -833,6 +838,38 @@ fn phase7_golden(name: &str) -> Result<String, Box<dyn Error>> {
         .ok_or_else(|| format!("no phase 7 golden line {name}").into())
 }
 
+/// A stop with an ordinal, as `minos stop` writes it (07-REVIEW WR-01), with the name of its snapshot, in the
+/// snapshot order of [`stop_ordinal_goldens`].
+fn stop_ordinal_records() -> Vec<(&'static str, Record)> {
+    vec![(
+        "record_v1_stop_requested_ordinal",
+        Record::v1(Event::StopRequested {
+            generation: 3,
+            reason: StopReason::UserStop,
+            ordinal: Some(0),
+        }),
+    )]
+}
+
+/// Every stop ordinal golden line with its snapshot name, in the order `stop_ordinal_golden_bytes_pinned` hashes
+/// them.
+fn stop_ordinal_goldens() -> Result<Vec<(&'static str, String)>, Box<dyn Error>> {
+    let mut lines = Vec::new();
+    for (name, record) in stop_ordinal_records() {
+        lines.push((name, serde_json::to_string(&record)?));
+    }
+    Ok(lines)
+}
+
+/// The stop ordinal golden line named `name`.
+fn stop_ordinal_golden(name: &str) -> Result<String, Box<dyn Error>> {
+    stop_ordinal_goldens()?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, line)| line)
+        .ok_or_else(|| format!("no stop ordinal golden line {name}").into())
+}
+
 /// The event of the record `text` parses to.
 fn parsed_event(text: &str) -> Result<Event, Box<dyn Error>> {
     Ok(serde_json::from_str::<Record>(text)?.event().clone())
@@ -925,8 +962,122 @@ fn phase7_golden_bytes_pinned() -> TestResult {
 }
 
 #[test]
+fn stop_ordinal_golden_snapshot() -> TestResult {
+    // Arrange
+    let lines = stop_ordinal_goldens()?;
+
+    // Act and assert
+    assert_eq!(lines.len(), 1);
+    for (name, line) in lines {
+        insta::assert_snapshot!(name, line);
+    }
+    Ok(())
+}
+
+#[test]
+fn stop_ordinal_golden_bytes_pinned() -> TestResult {
+    // The pin was computed outside the code under test, from the accepted snapshot bodies (the text after each
+    // file's second `---` line), in the order of `stop_ordinal_goldens`, each followed by one newline:
+    //
+    //   cd crates/minos-core/tests/snapshots
+    //   for n in record_v1_stop_requested_ordinal; do
+    //     awk 'n >= 2 { print } /^---$/ { n++ }' "golden_wire__$n.snap"
+    //   done | shasum -a 256
+    // Arrange
+    let mut all = String::new();
+    for (_, line) in stop_ordinal_goldens()? {
+        all.push_str(&line);
+        all.push('\n');
+    }
+
+    // Act
+    let pin = sha256_hex(all.as_bytes());
+
+    // Assert
+    assert_eq!(
+        pin,
+        "283b4b2e13d516a59da162e023d31e81a9c4f9bdd96901f712d0c41f63c37cf7"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_absent_stop_ordinal_keeps_the_existing_line_and_key() -> TestResult {
+    // Arrange
+    let run = run();
+    let old = golden("record_v1_stop_requested")?;
+
+    // Act
+    let parsed = parsed_event(&old)?;
+
+    // Assert: the line written before the field is unchanged, and both existing stop lines read `ordinal: None`.
+    assert_eq!(
+        old,
+        "{\"v\":\"1\",\"stop_requested\":{\"generation\":3,\"reason\":\"spend_cap\"}}"
+    );
+    for name in [
+        "record_v1_stop_requested",
+        "record_v1_stop_requested_provider_auth",
+    ] {
+        let text = golden(name)?;
+        assert!(!text.contains("ordinal"), "{name} contains ordinal");
+        match parsed_event(&text)? {
+            Event::StopRequested { ordinal, .. } => assert_eq!(ordinal, None, "{name}"),
+            other => return Err(format!("{name} parsed as {other:?}").into()),
+        }
+    }
+    let without = Event::StopRequested {
+        generation: 3,
+        reason: StopReason::SpendCap,
+        ordinal: None,
+    };
+    assert_eq!(without.key(&run), parsed.key(&run));
+    let with = Event::StopRequested {
+        generation: 3,
+        reason: StopReason::UserStop,
+        ordinal: Some(0),
+    };
+    let with_none = Event::StopRequested {
+        generation: 3,
+        reason: StopReason::UserStop,
+        ordinal: None,
+    };
+    assert_ne!(with.key(&run), with_none.key(&run));
+    Ok(())
+}
+
+#[test]
+fn stop_ordinal_lines_parse_back_and_refuse_bad_values() -> TestResult {
+    for (name, record) in stop_ordinal_records() {
+        // Arrange
+        let text = stop_ordinal_golden(name)?;
+
+        // Act
+        let parsed = serde_json::from_str::<Record>(&text)?;
+
+        // Assert
+        assert_eq!(parsed, record, "{name}");
+        assert!(text.starts_with("{\"v\":\"1\","), "{name}");
+        assert!(text.contains("\"ordinal\":0"), "{name}");
+        record_rejected(&edit(&text, "\"ordinal\":0", "\"ordinal\":0,\"extra\":1")?)?;
+        for bad in ["\"0\"", "-1", "1.5", "4294967296"] {
+            record_rejected(&edit(
+                &text,
+                "\"ordinal\":0",
+                &format!("\"ordinal\":{bad}"),
+            )?)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn every_golden_line_is_one_json_line() -> TestResult {
-    for (name, line) in goldens()?.into_iter().chain(phase7_goldens()?) {
+    for (name, line) in goldens()?
+        .into_iter()
+        .chain(phase7_goldens()?)
+        .chain(stop_ordinal_goldens()?)
+    {
         assert!(!line.contains('\n'), "{name} spans lines");
         assert!(!line.contains('\r'), "{name} has a carriage return");
         assert!(line.starts_with('{') && line.ends_with('}'), "{name}");

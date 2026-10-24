@@ -20,14 +20,15 @@
 //! | `Selected` | 5 | `u64(generation)` | One decision per generation |
 //! | `Spent` | 6 | `digest(SpendId)` | Through [`SpendId`], so a resumed model call with a new index is neither double-counted nor dropped |
 //! | `Steered` | 7 | `u64(generation)`, `u64(ordinal)` | `ordinal`, so identical notes for one generation stay distinct. The note is not in the key, so `minos steer` must read `RunState::next_note_ordinal` and append under the ledger lock; two different notes at one ordinal fail the fold with `FoldError::NoteConflict` |
-//! | `StopRequested` | 8 | `u64(generation)`, `u64(reason tag)` | `generation`, so a repeated stop is a no-op but a resumed run can stop again later |
+//! | `StopRequested` | 8 | `u64(generation)`, `u64(reason tag)`, then `u64(ordinal)` only when `ordinal` is `Some` | `generation`, so a resumed run can stop again later; `ordinal`, so each `minos stop` at one generation is its own line (07-REVIEW WR-01). With `None` the key is exactly the earlier key, so every line written before the field keeps its key, and the driver's own stops leave it `None`, so a re-tripped cap or breaker stop is still a duplicate. `minos stop` reads `RunState::next_user_stop_ordinal`; two concurrent requests that read the same ordinal write one equal event, a duplicate and never a conflict, because a stop carries no payload |
 //! | `ReviewRequested` | 9 | `digest(request)` | Its own tag, so a request and its answer never share a key |
 //! | `Reviewed` | 10 | `digest(request)` | Its own tag, distinct from `ReviewRequested` |
 //! | `ReportAcknowledged` | 11 | `digest(exp)`, `digest(report)` | One acknowledgement per experiment and report |
 //!
 //! Optional provenance fields are never part of a key: `RunStarted.root_image`, `Proposed.batch`, and
 //! `Judged.logs` (Phase 7, 07-CONTEXT D-09, D-10, D-18) are absent from every hash above, so two records that
-//! differ only in them share a key, and the first one appended wins.
+//! differ only in them share a key, and the first one appended wins. `StopRequested.ordinal` (07-REVIEW WR-01) is
+//! the one `Option` field that joins a key, and only when it is `Some`.
 //!
 //! [`SpendId`] is `IdHasher::new("minos/spend/v1").digest(run).u64(generation)`, then for
 //! [`SpendSource::ModelCall`] `u64(1).u64(call).bytes(model)`, for [`SpendSource::Candidate`]
@@ -48,8 +49,9 @@
 //!
 //! A [`Record`] is `{"v":"1","<snake_case_variant>":{...}}`, and every event and payload struct refuses unknown
 //! fields. Adding an enum variant, or adding an `Option` field to an existing variant (an absent field reads as
-//! `None`), keeps every existing line parseable. A required new field, a renamed field, or a changed type needs a
-//! new record version, `"v":"2"`.
+//! `None`), keeps every existing line parseable. An `Option` field may join a key only when its `None` adds
+//! nothing to the hash, so every existing key is unchanged. A required new field, a renamed field, or a changed
+//! type needs a new record version, `"v":"2"`.
 //!
 //! No ledger type holds a 128-bit integer or a dollar amount: serde cannot carry a 128-bit integer inside an
 //! internally tagged enum, and dollars are derived from [`Usage`] and the user's price table, never stored
@@ -616,6 +618,11 @@ pub enum Event {
         generation: u32,
         /// Why.
         reason: StopReason,
+        /// The position of this `minos stop` among the user's stops at `generation`, from 0, read from
+        /// `RunState::next_user_stop_ordinal`. `None` for the driver's own stops and for every line written before
+        /// the field (07-REVIEW WR-01). Part of the key only when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ordinal: Option<u32>,
     },
     /// A decision now waits on the user.
     ReviewRequested {
@@ -676,8 +683,16 @@ impl Event {
                 .u64(7)
                 .u64(u64::from(*generation))
                 .u64(u64::from(*ordinal)),
-            Self::StopRequested { generation, reason } => {
-                hasher.u64(8).u64(u64::from(*generation)).u64(reason.tag())
+            Self::StopRequested {
+                generation,
+                reason,
+                ordinal,
+            } => {
+                let hasher = hasher.u64(8).u64(u64::from(*generation)).u64(reason.tag());
+                match ordinal {
+                    Some(ordinal) => hasher.u64(u64::from(*ordinal)),
+                    None => hasher,
+                }
             }
             Self::ReviewRequested { request, .. } => hasher.u64(9).digest(request.as_bytes()),
             Self::Reviewed { request, .. } => hasher.u64(10).digest(request.as_bytes()),

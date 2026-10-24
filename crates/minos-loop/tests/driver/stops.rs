@@ -1,7 +1,8 @@
 //! Session-relative stops (07-CONTEXT D-14, D-19): a stop from an earlier session does not block a resume, a
 //! stop added while a VM runs ends the session after that trial is recorded, and a cap stop resumes once the cap
-//! is raised and re-trips while it is not. One test pins the gap 07-REVIEW WR-01 names: a `minos stop` repeated
-//! at a generation an earlier session already stopped in is a store duplicate the resumed session never sees.
+//! is raised and re-trips while it is not. One test proves the gap 07-REVIEW WR-01 named is closed: a `minos stop`
+//! repeated at a generation an earlier session already stopped in carries the next free ordinal, so it is a new
+//! line that the resumed session honours at its next safe point.
 
 use minos_core::ledger::{Event, Record, SpendSource, StopReason};
 use minos_loop::{Driver, JobFailure, LoopEvent, NoopObserver, RunEnd};
@@ -10,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::support::{
     FakeJobs, Fixture, PRICES_DEAR, Recorder, STARTED_AT, SWEEP_MANIFEST, TestResult, kinds,
-    ledger, options, scored, stops, sweep_proposer, with_budget,
+    ledger, options, scored, stop_identities, stops, sweep_proposer, user_stop, with_budget,
 };
 
 /// The failure a fake job reports when it cannot append its stop.
@@ -44,6 +45,7 @@ fn an_old_user_stop_does_not_block_a_resume_from_reaching_its_target() -> TestRe
         Record::v1(Event::StopRequested {
             generation: 1,
             reason: StopReason::UserStop,
+            ordinal: Some(0),
         }),
     )?;
 
@@ -81,6 +83,7 @@ fn a_user_stop_during_a_launch_ends_the_session_after_that_trial_is_recorded() -
                     Record::v1(Event::StopRequested {
                         generation: 0,
                         reason: StopReason::UserStop,
+                        ordinal: Some(0),
                     }),
                 )
                 .map_err(|_error| STOP_FAILED)?;
@@ -154,17 +157,16 @@ fn a_user_stop_during_a_launch_ends_the_session_after_that_trial_is_recorded() -
     Ok(())
 }
 
-/// Pins the gap 07-REVIEW WR-01 names, open in CLAUDE.md ("Open questions", owner Phase 8): `StopRequested` is
-/// keyed by `(generation, reason)`, so a second `minos stop` at a generation an earlier session already stopped in
-/// is a store duplicate that writes nothing, and the resumed session, which snapshotted the first stop at its
-/// start (D-19), runs every remaining trial of that generation and sees a new stop only once the generation
-/// advances. Closing it needs a per-request key (a `"v":"2"` wire decision) or a `minos stop` that refuses when
-/// the pair already exists. When that lands, this test must flip to a `Stopped` end.
+/// Proves the gap 07-REVIEW WR-01 named is closed (user decision 2026-10-24): each `minos stop` carries the next
+/// free ordinal from `RunState::next_user_stop_ordinal`, so a second stop at a generation an earlier session
+/// already stopped in is a new ledger line, not a store duplicate. The resumed session's D-19 snapshot of stop
+/// identities, taken at its start, holds only the first stop, so it honours the second at its next safe point
+/// instead of running every remaining trial of that generation.
 #[test]
-fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_is_a_duplicate_the_resume_never_sees()
+fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_ends_the_resumed_session_at_its_next_safe_point()
 -> TestResult {
-    // Arrange: `minos stop` appends `StopRequested { 1, UserStop }` during the first candidate trial of each
-    // session: session A's first, which A honours, and session B's first, which is a duplicate of it.
+    // Arrange: `minos stop` records a stop at generation 1 during the first candidate trial of each session:
+    // session A's first, with ordinal 0, and session B's first, with ordinal 1.
     let fixture = Fixture::sweep()?;
     let run = fixture.run();
     let store = MemoryStore::new();
@@ -172,15 +174,7 @@ fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_is_a_dupli
     let candidates = AtomicUsize::new(0);
     let jobs = FakeJobs::new(|request| {
         if !request.is_baseline() && candidates.fetch_add(1, Ordering::SeqCst) < 2 {
-            let _ = store
-                .append(
-                    &run,
-                    Record::v1(Event::StopRequested {
-                        generation: 1,
-                        reason: StopReason::UserStop,
-                    }),
-                )
-                .map_err(|_error| STOP_FAILED)?;
+            user_stop(&store, &run, 1)?;
         }
         scored(request, if request.is_baseline() { 1.0 } else { 2.0 })
     });
@@ -209,7 +203,7 @@ fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_is_a_dupli
     )?;
     let ended_b = resumed.run_to(2)?;
 
-    // Assert: A honoured the first stop; B never saw the second, which left no line, and reached its target.
+    // Assert: each session honoured its own stop after the trial it arrived in, and launched nothing after it.
     assert_eq!(
         ended_a,
         RunEnd::Stopped {
@@ -217,10 +211,23 @@ fn a_repeated_user_stop_at_a_generation_an_earlier_session_stopped_in_is_a_dupli
             reason: StopReason::UserStop
         }
     );
-    // Both stops were appended (the second during B's first candidate trial) and B launched more after it.
-    assert!(candidates.load(Ordering::SeqCst) > 2);
-    assert_eq!(ended_b, RunEnd::Reached { generation: 2 });
-    assert_eq!(stops(&ledger(&store, &run)?), [(1, StopReason::UserStop)]);
+    assert_eq!(
+        ended_b,
+        RunEnd::Stopped {
+            generation: 1,
+            reason: StopReason::UserStop
+        }
+    );
+    assert_eq!(candidates.load(Ordering::SeqCst), 2);
+    let events = ledger(&store, &run)?;
+    assert_eq!(
+        stop_identities(&events),
+        [
+            (1, StopReason::UserStop, Some(0)),
+            (1, StopReason::UserStop, Some(1))
+        ]
+    );
+    assert!(matches!(events.last(), Some((_, Event::Judged { .. }))));
     Ok(())
 }
 
@@ -322,6 +329,9 @@ fn a_spend_cap_stop_re_trips_on_resume_when_the_cap_is_unchanged() -> TestResult
         }
     );
     assert_eq!(jobs.requests()?.len(), 1);
-    assert_eq!(ledger(&store, &run)?, before);
+    let after = ledger(&store, &run)?;
+    assert_eq!(after, before);
+    // The driver's own stop keeps no ordinal, so its key is `(generation, reason)` and the re-trip is a duplicate.
+    assert_eq!(stop_identities(&after), [(0, StopReason::SpendCap, None)]);
     Ok(())
 }
