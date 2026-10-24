@@ -45,8 +45,9 @@
 //! | Launch | Before every [`JobRunner::run`], baseline or candidate | yes | no | no |
 //! | After trial | After a trial's `Spent` and `Judged` are recorded | yes | no | yes |
 //!
-//! A breaker or cap verdict appends `StopRequested { generation, reason }` and ends the session; the key
-//! `(generation, reason)` makes a repeat a duplicate, so a cap that re-trips on resume records nothing new. A
+//! A breaker or cap verdict appends `StopRequested { generation, reason }` and ends the session. The driver's own
+//! stops carry no ordinal, so their key is `(generation, reason)` and a cap that re-trips on resume records
+//! nothing new. A
 //! resolved model ID that `prices.toml` does not price ends the session with [`DriverError::UnpricedModel`] right
 //! after the first call that used it, its spend already recorded (D-13 extended; 07-RESEARCH Pitfall 7).
 //!
@@ -58,8 +59,11 @@
 //!
 //! # Stops are session-relative (D-19)
 //!
-//! A `StopRequested` stays in the ledger forever, so the driver snapshots the recorded stops when its session
-//! starts and honours only a stop added after that, whether by `minos stop` or by itself. Cap and breaker stops
+//! A `StopRequested` stays in the ledger forever, so the driver snapshots the recorded stop identities
+//! (generation, reason, and ordinal) when its session starts and honours only a stop added after that, whether by
+//! `minos stop` or by itself. Each `minos stop` carries the next free ordinal from
+//! `RunState::next_user_stop_ordinal`, so a repeated stop at a generation an earlier session stopped in is a new
+//! line and is honoured at the next safe point (07-REVIEW WR-01). Cap and breaker stops
 //! are re-derived from the fold at every safe point rather than read from old records, so a run stopped by a cap
 //! resumes once the cap is raised, and an old `UserStop`, `ProviderLimit`, or `ProviderAuth` never blocks a
 //! resume by itself. An honoured stop records nothing.
@@ -94,8 +98,9 @@
 //!
 //! The CLI builds the [`RunInputs`], picks the concrete store, provider, job runner, and observer, and calls
 //! [`Driver::start`] or [`Driver::resume`], then [`Driver::calibrate`] (`minos check`) or [`Driver::run_to`]
-//! (`minos run`). `minos stop` appends `StopRequested { UserStop }`, which a running session honours at its
-//! next safe point.
+//! (`minos run`). `minos stop` appends `StopRequested { UserStop, ordinal: Some(..) }` with the ordinal from
+//! `RunState::next_user_stop_ordinal`, which a running session honours at its next safe point; a `Duplicate`
+//! means a concurrent request already recorded that stop.
 
 use std::collections::BTreeSet;
 use std::time::Duration;

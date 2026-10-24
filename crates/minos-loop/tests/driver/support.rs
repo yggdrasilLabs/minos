@@ -30,6 +30,7 @@ use minos_core::metric::{Metric, Scorecard};
 use minos_core::money::Prices;
 use minos_core::outcome::{Outcome, Reason};
 use minos_core::path::RelPath;
+use minos_core::state::fold;
 use minos_core::usage::Usage;
 use minos_loop::record::event_kind;
 use minos_loop::{DriverOptions, JobFailure, JobRunner, LoopEvent, Observer, RunInputs};
@@ -674,4 +675,44 @@ pub fn stops(events: &[(u64, Event)]) -> Vec<(u32, StopReason)> {
             _ => None,
         })
         .collect()
+}
+
+/// Every `StopRequested` in `events`, in seq order, with its ordinal.
+pub fn stop_identities(events: &[(u64, Event)]) -> Vec<(u32, StopReason, Option<u32>)> {
+    events
+        .iter()
+        .filter_map(|(_, event)| match event {
+            Event::StopRequested {
+                generation,
+                reason,
+                ordinal,
+            } => Some((*generation, *reason, *ordinal)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What the fake `minos stop` reports when it cannot record its stop.
+const USER_STOP_FAILED: JobFailure = JobFailure::Config {
+    what: "the fake minos stop could not record its stop",
+};
+
+/// Records a `minos stop` at `generation` exactly as Phase 8's command will (07-REVIEW WR-01): it folds the run's
+/// ledger, takes `RunState::next_user_stop_ordinal(generation)`, and appends `StopRequested { generation,
+/// UserStop, Some(ordinal) }`, which must be a new line. Any failure is fixed text.
+pub fn user_stop<L: Ledger>(store: &L, run: &RunId, generation: u32) -> Result<(), JobFailure> {
+    let read = store.read(run).map_err(|_error| USER_STOP_FAILED)?;
+    let state = fold(read.records()).map_err(|_error| USER_STOP_FAILED)?;
+    let ordinal = state
+        .next_user_stop_ordinal(generation)
+        .ok_or(USER_STOP_FAILED)?;
+    let stop = Event::StopRequested {
+        generation,
+        reason: StopReason::UserStop,
+        ordinal: Some(ordinal),
+    };
+    match store.append(run, Record::v1(stop)) {
+        Ok(Appended::New { .. }) => Ok(()),
+        Ok(_) | Err(_) => Err(USER_STOP_FAILED),
+    }
 }
