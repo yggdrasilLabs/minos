@@ -41,7 +41,7 @@
 //! | Safe point | When | New stops | [`circuit_breaker`] | [`spend_ok`] |
 //! |---|---|---|---|---|
 //! | Generation | Before generation 0's first launch in a session, and before every later step of [`Driver::run_to`] | yes | yes | yes |
-//! | Model call | Before every propose call, and again after every model call that reported usage, before its proposals are admitted | yes | no | yes |
+//! | Model call | Before every propose call, and again after every model call that reported usage, once its proposals are admitted and recorded | yes | no | yes |
 //! | Launch | Before every [`JobRunner::run`], baseline or candidate | yes | no | no |
 //! | After trial | After a trial's `Spent` and `Judged` are recorded | yes | no | yes |
 //!
@@ -49,6 +49,12 @@
 //! `(generation, reason)` makes a repeat a duplicate, so a cap that re-trips on resume records nothing new. A
 //! resolved model ID that `prices.toml` does not price ends the session with [`DriverError::UnpricedModel`] right
 //! after the first call that used it, its spend already recorded (D-13 extended; 07-RESEARCH Pitfall 7).
+//!
+//! The safe point after a model call runs once the call's proposals are admitted and recorded, not before
+//! (07-REVIEW WR-02): a cap the call itself crossed, or a `minos stop` appended while the model was thinking, then
+//! ends the session with the paid call's batch and `Proposed` records in the ledger, so the resumed session runs
+//! those trials under the next generation safe point instead of paying for a second call. Admission records
+//! nothing a cap could count, so the overshoot bound of one model call (below) is unchanged.
 //!
 //! # Stops are session-relative (D-19)
 //!
@@ -210,7 +216,8 @@ pub enum RunEnd {
 enum SafePoint {
     /// Before a generation's work: new stops, the circuit breaker, and the caps.
     Generation,
-    /// Before a model call, and after one that reported usage: new stops and the caps.
+    /// Before a model call, and after one that reported usage once its proposals are recorded: new stops and
+    /// the caps.
     ModelCall,
     /// Before a VM launch: new stops only; compute spend is checked once its `Spent` lands.
     Launch,
@@ -496,9 +503,10 @@ where
     /// performing exactly the step [`next_step`] returns each time (D-07, LOOP-04). Calibration comes first, and
     /// every step after it passes the generation safe point (module docs).
     ///
-    /// - A propose step passes the model-call safe point, then records each model call's `Spent`, passes the
-    ///   model-call safe point again, then records the batch blob and one `Proposed` per admitted experiment; a
-    ///   step that admits nothing concludes its generation at once as `NoValidCandidates` (D-18).
+    /// - A propose step passes the model-call safe point, then records each model call's `Spent`, then the batch
+    ///   blob and one `Proposed` per admitted experiment, and only then passes the model-call safe point again, so
+    ///   a stop or cap after the call never discards what the call paid for (07-REVIEW WR-02); a step that admits
+    ///   nothing concludes its generation at once as `NoValidCandidates` (D-18).
     /// - A trial passes the launch safe point, runs through [`JobRunner::run`], is recorded as its `Spent`
     ///   records and then `Judged`, and passes the after-trial safe point.
     /// - A conclusion appends `Selected`, with the drop count from the generation's batch.
@@ -819,7 +827,8 @@ where
         )
     }
 
-    /// Performs the propose step of `generation`, between the model-call safe points.
+    /// Performs the propose step of `generation`, between the model-call safe points: the second one runs after
+    /// the call's proposals are admitted and recorded, so what the call paid for is never discarded (WR-02).
     fn propose(&mut self, state: &RunState, generation: u32) -> Flow<()> {
         let manifest = self.inputs.manifest;
         let base = self.inputs.base;
@@ -875,13 +884,7 @@ where
             }
         }
 
-        // 6. The spend is priced before anything is admitted, so a cap the call crossed or a resolved model
-        //    `prices.toml` does not price stops the run right after this one paid call (D-13 extended, D-15).
-        if paid {
-            self.safe_point(SafePoint::ModelCall, generation)?;
-        }
-
-        // 7. Admission: the batch blob, then one `Proposed` per admitted experiment (D-12, D-18).
+        // 6. Admission: the batch blob, then one `Proposed` per admitted experiment (D-12, D-18).
         let tier = proposals.tier();
         let origin = proposals.origin().clone();
         let dropped = proposals.dropped().total();
@@ -898,9 +901,9 @@ where
             proposals.into_items(),
         )?;
         match admission.batch() {
-            // 8a. Nothing survived: the generation concludes in the same step.
+            // 7a. Nothing survived: the generation concludes in the same step.
             None => self.select(state, generation, admission.dropped())?,
-            // 8b. Every experiment of the batch, in batch order.
+            // 7b. Every experiment of the batch, in batch order.
             Some((blob, batch)) => {
                 let events = missing_proposed(state, blob, batch);
                 let admitted = u32::try_from(events.len()).unwrap_or(u32::MAX);
@@ -915,6 +918,13 @@ where
                     dropped: admission.dropped(),
                 });
             }
+        }
+
+        // 8. The spend is priced once the paid call's proposals are recorded, so a cap the call crossed or a
+        //    resolved model `prices.toml` does not price stops the run right after this one paid call without
+        //    discarding what it paid for (D-13 extended, D-15; WR-02).
+        if paid {
+            self.safe_point(SafePoint::ModelCall, generation)?;
         }
         Ok(())
     }

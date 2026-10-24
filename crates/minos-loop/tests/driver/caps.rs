@@ -161,10 +161,10 @@ fn spend_cap_crossed_by_a_candidate_trial_overshoots_by_exactly_that_one_job() -
 }
 
 #[test]
-fn token_cap_below_one_call_records_its_spend_then_stops_with_token_cap_and_calls_once()
+fn token_cap_below_one_call_records_its_spend_and_proposals_then_stops_and_resumes_without_a_second_call()
 -> TestResult {
     // Arrange: the smallest token cap, 1,000, and a first call that uses 1,200 tokens; a second reply waits.
-    let fixture = Fixture::new(
+    let capped = Fixture::new(
         &with_budget(SINGLE_SHOT_MANIFEST, 40, "max_tokens = 1000\n"),
         PRICES,
     )?;
@@ -180,7 +180,7 @@ fn token_cap_below_one_call_records_its_spend_then_stops_with_token_cap_and_call
         &proposer,
         &jobs,
         NoopObserver,
-        fixture.inputs(),
+        capped.inputs(),
         options(),
         STARTED_AT,
     )?;
@@ -188,7 +188,8 @@ fn token_cap_below_one_call_records_its_spend_then_stops_with_token_cap_and_call
     // Act
     let end = driver.run_to(3)?;
 
-    // Assert: the call's spend, then the stop, with nothing admitted and no second call.
+    // Assert: the call's spend, then its batch admitted and recorded, then the stop; no trial of generation 1
+    // launched and no second call was paid for (WR-02).
     assert_eq!(
         end,
         RunEnd::Stopped {
@@ -197,15 +198,39 @@ fn token_cap_below_one_call_records_its_spend_then_stops_with_token_cap_and_call
         }
     );
     assert_eq!(calls(&proposer)?, 1);
-    let events = ledger(&store, &fixture.run())?;
+    let events = ledger(&store, &capped.run())?;
     assert_eq!(model_calls(&events), [(1, 0, haiku()?)]);
     assert_eq!(
-        kinds(&events).get(events.len().saturating_sub(2)..),
-        Some(["spent", "stop_requested"].as_slice())
+        kinds(&events).get(events.len().saturating_sub(3)..),
+        Some(["spent", "proposed", "stop_requested"].as_slice())
     );
     assert_eq!(stops(&events), [(1, StopReason::TokenCap)]);
-    assert!(!kinds(&events).contains(&"proposed"));
     assert_eq!(jobs.requests()?.len(), 3);
+    drop(driver);
+
+    // Act: resume under a raised token cap, an edit outside the experiment frame.
+    let raised = Fixture::new(
+        &with_budget(SINGLE_SHOT_MANIFEST, 40, "max_tokens = 5000\n"),
+        PRICES,
+    )?;
+    let mut resumed = Driver::resume(
+        &store,
+        &proposer,
+        &jobs,
+        NoopObserver,
+        raised.inputs(),
+        options(),
+        capped.run(),
+    )?;
+    let end = resumed.run_to(1)?;
+
+    // Assert: the recorded proposal's trial ran, the generation concluded, and the paid call was never repeated.
+    assert_eq!(end, RunEnd::Reached { generation: 1 });
+    assert_eq!(calls(&proposer)?, 1);
+    assert_eq!(jobs.requests()?.len(), 4);
+    let events = ledger(&store, &capped.run())?;
+    assert_eq!(model_calls(&events), [(1, 0, haiku()?)]);
+    assert_eq!(stops(&events), [(1, StopReason::TokenCap)]);
     Ok(())
 }
 
@@ -238,7 +263,8 @@ fn unpriced_resolved_model_stops_with_unpriced_model_after_one_call_spend() -> T
     // Act
     let result = driver.run_to(2);
 
-    // Assert: the error names the resolved model; its one call's spend is recorded, and nothing after it.
+    // Assert: the error names the resolved model; its one call's spend and proposals are recorded, and nothing
+    // after them: no trial of generation 1 launched (WR-02).
     let Err(DriverError::UnpricedModel { model }) = result else {
         return Err(format!("expected UnpricedModel, got {result:?}").into());
     };
@@ -246,7 +272,11 @@ fn unpriced_resolved_model_stops_with_unpriced_model_after_one_call_spend() -> T
     assert_eq!(calls(&proposer)?, 1);
     let events = ledger(&store, &fixture.run())?;
     assert_eq!(model_calls(&events), [(1, 0, resolved)]);
-    assert_eq!(kinds(&events).last(), Some(&"spent"));
+    assert_eq!(
+        kinds(&events).get(events.len().saturating_sub(2)..),
+        Some(["spent", "proposed"].as_slice())
+    );
     assert!(stops(&events).is_empty());
+    assert_eq!(jobs.requests()?.len(), 3);
     Ok(())
 }
