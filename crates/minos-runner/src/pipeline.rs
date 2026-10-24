@@ -222,8 +222,9 @@ impl<B: Backend, S: Blobs> Runner<B, S> {
         if let Some(output) = output.as_mut() {
             self.store_logs(output, &CANDIDATE_LOGS, &mut logs)?;
         }
-        // 7. The blame table decides; only a passing candidate reaches the judge.
-        match candidate_verdict(&seen) {
+        // 7. The blame table decides, with the apply status checked against the request (IN-03); only a passing
+        //    candidate reaches the judge.
+        match candidate_verdict(&seen, request.diff().is_some()) {
             Verdict::Pass => {}
             Verdict::Done(outcome) => {
                 return self.result(request, outcome, candidate_usage, None, logs);

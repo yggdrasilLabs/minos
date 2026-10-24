@@ -17,6 +17,7 @@
 //! | Setup failed at input, mount, unpack, apply, or output | infrastructure, retried | same |
 //! | Setup failed with `ScratchFull` | configuration, never retried | same: `Runner::new` proved the scratch holds the judge data and any candidate output (CR-01) |
 //! | A status of the other role | `Rejected(OutputInvalid)` | same |
+//! | Apply status contradicts the request (`Baseline` for a diff, an apply for the baseline, `NotApplicable`) | `Rejected(OutputInvalid)` | n/a |
 //! | Apply failed | `Rejected(ApplyFailed { path, hunk })` | n/a |
 //! | Build timed out | `TimedOut { Build }` | n/a |
 //! | Build non-zero, signaled, or not spawned | `Rejected(BuildFailed)` | n/a |
@@ -75,14 +76,15 @@ pub enum Verdict {
     Config(ConfigCause),
 }
 
-/// The verdict on a candidate launch.
+/// The verdict on a candidate launch. `has_diff` is whether the request carried a diff: a candidate's status
+/// must then report `Applied` or a failed apply, and the baseline's must report `Baseline` (07-REVIEW IN-03).
 #[must_use]
-pub fn candidate_verdict(seen: &Seen) -> Verdict {
+pub fn candidate_verdict(seen: &Seen, has_diff: bool) -> Verdict {
     match seen {
         Seen::NotExited(ended) => not_exited(*ended, Stage::Run, Stage::Run),
         Seen::Output(fault) => rejected(fault.reason()),
         Seen::Status(fault) => rejected(fault.reason()),
-        Seen::Guest(status) => candidate_status(status),
+        Seen::Guest(status) => candidate_status(status, has_diff),
     }
 }
 
@@ -188,24 +190,37 @@ const fn output_verdict(output: OutputStatus) -> Verdict {
     }
 }
 
-/// A candidate's validated status: setup, then role, then apply, then build, then run, then output.
-fn candidate_status(status: &GuestStatus) -> Verdict {
+/// A candidate's validated status: setup, then role, then apply against the request, then build, then run, then
+/// output.
+///
+/// The apply status must match the request (IN-03): a request with a diff passes only `Applied`, and a failed
+/// apply is `ApplyFailed`; the baseline, with no diff, passes only `Baseline`. A status that reports `Baseline`
+/// for a diff, an apply for the baseline, or `NotApplicable` for either is inconsistent and `OutputInvalid`, so a
+/// PID 1 that stopped agreeing with the request is caught here and not only trusted.
+fn candidate_status(status: &GuestStatus, has_diff: bool) -> Verdict {
     if let Some(verdict) = setup_verdict(status.setup()) {
         return verdict;
     }
     if status.role() != GuestRole::Candidate {
         return rejected(Reason::OutputInvalid);
     }
-    match status.apply() {
-        ApplyStatus::Baseline | ApplyStatus::Applied => {}
-        ApplyStatus::Failed { path, hunk } => {
+    match (status.apply(), has_diff) {
+        (ApplyStatus::Applied, true) | (ApplyStatus::Baseline, false) => {}
+        (ApplyStatus::Failed { path, hunk }, true) => {
             return rejected(Reason::ApplyFailed {
                 path: path.clone(),
                 hunk: *hunk,
             });
         }
-        // `GuestStatus::new` refuses a candidate status with this apply; refuse it here too, fail closed.
-        ApplyStatus::NotApplicable => return rejected(Reason::OutputInvalid),
+        // A `Baseline` for a diff, an `Applied` or a failed apply for the baseline, and `NotApplicable` (which
+        // `GuestStatus::new` already refuses for a candidate) for either: the status contradicts the request.
+        (
+            ApplyStatus::Baseline
+            | ApplyStatus::Applied
+            | ApplyStatus::Failed { .. }
+            | ApplyStatus::NotApplicable,
+            _,
+        ) => return rejected(Reason::OutputInvalid),
     }
     if let Some(verdict) = candidate_stage(status, Stage::Build, Reason::BuildFailed) {
         return verdict;

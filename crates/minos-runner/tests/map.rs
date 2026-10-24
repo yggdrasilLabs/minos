@@ -177,7 +177,7 @@ fn card(metrics: &[(&str, &str)]) -> Result<Scorecard, Box<dyn Error>> {
 #[test]
 fn host_timeout_is_a_candidate_run_timeout() {
     assert_eq!(
-        candidate_verdict(&Seen::NotExited(Ended::TimedOut)),
+        candidate_verdict(&Seen::NotExited(Ended::TimedOut), true),
         Verdict::Done(Outcome::TimedOut { stage: Stage::Run })
     );
 }
@@ -195,7 +195,10 @@ fn host_timeout_is_a_judge_timeout() {
 #[test]
 fn missing_status_frame_is_a_candidate_run_crash() {
     assert_eq!(
-        candidate_verdict(&Seen::NotExited(Ended::Crashed(CrashCause::NoStatusFrame))),
+        candidate_verdict(
+            &Seen::NotExited(Ended::Crashed(CrashCause::NoStatusFrame)),
+            true
+        ),
         Verdict::Done(Outcome::Crashed { stage: Stage::Run })
     );
 }
@@ -203,7 +206,10 @@ fn missing_status_frame_is_a_candidate_run_crash() {
 #[test]
 fn console_cap_is_a_candidate_run_crash() {
     assert_eq!(
-        candidate_verdict(&Seen::NotExited(Ended::Crashed(CrashCause::ConsoleCap))),
+        candidate_verdict(
+            &Seen::NotExited(Ended::Crashed(CrashCause::ConsoleCap)),
+            true
+        ),
         Verdict::Done(Outcome::Crashed { stage: Stage::Run })
     );
 }
@@ -223,7 +229,10 @@ fn host_crash_is_a_judge_crash() {
 #[test]
 fn chunk_protocol_is_rejected_for_both_roles() {
     let seen = Seen::NotExited(Ended::ChunkProtocol);
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::ChunkProtocol));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::ChunkProtocol)
+    );
     assert_eq!(judge_verdict(&seen), rejected(Reason::ChunkProtocol));
 }
 
@@ -231,7 +240,7 @@ fn chunk_protocol_is_rejected_for_both_roles() {
 fn an_exited_end_handed_in_as_not_exited_fails_closed_as_infrastructure() {
     let seen = Seen::NotExited(Ended::Exited);
     assert_eq!(
-        candidate_verdict(&seen),
+        candidate_verdict(&seen, true),
         Verdict::Infra(InfraCause::Unmapped)
     );
     assert_eq!(judge_verdict(&seen), Verdict::Infra(InfraCause::Unmapped));
@@ -246,7 +255,10 @@ fn output_over_a_cap_is_rejected_as_too_large() {
     let seen = Seen::Output(OutputFault::TooLarge {
         cap: OutputCap::Total,
     });
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputTooLarge));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputTooLarge)
+    );
     assert_eq!(judge_verdict(&seen), rejected(Reason::OutputTooLarge));
 }
 
@@ -255,35 +267,50 @@ fn output_breaking_a_rule_is_rejected_as_invalid() {
     let seen = Seen::Output(OutputFault::Invalid {
         why: OutputInvalid::EntryType,
     });
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     assert_eq!(judge_verdict(&seen), rejected(Reason::OutputInvalid));
 }
 
 #[test]
 fn missing_status_is_rejected_as_invalid_output() {
     let seen = Seen::Status(StatusFault::Missing);
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     assert_eq!(judge_verdict(&seen), rejected(Reason::OutputInvalid));
 }
 
 #[test]
 fn malformed_status_is_rejected_as_invalid_output() {
     let seen = Seen::Status(StatusFault::Invalid(GuestStatusError::Version));
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     assert_eq!(judge_verdict(&seen), rejected(Reason::OutputInvalid));
 }
 
 #[test]
 fn wrong_role_status_is_rejected_as_invalid_output() {
     let seen = Seen::Status(StatusFault::WrongRole);
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     assert_eq!(judge_verdict(&seen), rejected(Reason::OutputInvalid));
 }
 
 #[test]
 fn a_judge_status_handed_to_the_candidate_map_is_invalid_output() -> TestResult {
     let seen = judge(OK, PACKED)?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     Ok(())
 }
 
@@ -305,7 +332,7 @@ fn input_setup_failure_is_infrastructure_even_with_a_placeholder_role() -> TestR
     let expected = Verdict::Infra(InfraCause::GuestSetup {
         step: SetupStep::Input,
     });
-    assert_eq!(candidate_verdict(&seen), expected);
+    assert_eq!(candidate_verdict(&seen, true), expected);
     assert_eq!(judge_verdict(&seen), expected);
     Ok(())
 }
@@ -317,7 +344,7 @@ fn mount_setup_failure_is_infrastructure() -> TestResult {
         let expected = Verdict::Infra(InfraCause::GuestSetup {
             step: SetupStep::Mount,
         });
-        assert_eq!(candidate_verdict(&seen), expected);
+        assert_eq!(candidate_verdict(&seen, true), expected);
         assert_eq!(judge_verdict(&seen), expected);
     }
     Ok(())
@@ -330,7 +357,7 @@ fn unpack_setup_failure_is_infrastructure() -> TestResult {
         let expected = Verdict::Infra(InfraCause::GuestSetup {
             step: SetupStep::Unpack,
         });
-        assert_eq!(candidate_verdict(&seen), expected);
+        assert_eq!(candidate_verdict(&seen, true), expected);
         assert_eq!(judge_verdict(&seen), expected);
     }
     Ok(())
@@ -343,7 +370,7 @@ fn apply_step_setup_failure_is_infrastructure() -> TestResult {
         let expected = Verdict::Infra(InfraCause::GuestSetup {
             step: SetupStep::Apply,
         });
-        assert_eq!(candidate_verdict(&seen), expected);
+        assert_eq!(candidate_verdict(&seen, true), expected);
         assert_eq!(judge_verdict(&seen), expected);
     }
     Ok(())
@@ -356,7 +383,7 @@ fn output_setup_failure_is_infrastructure() -> TestResult {
         let expected = Verdict::Infra(InfraCause::GuestSetup {
             step: SetupStep::Output,
         });
-        assert_eq!(candidate_verdict(&seen), expected);
+        assert_eq!(candidate_verdict(&seen, true), expected);
         assert_eq!(judge_verdict(&seen), expected);
     }
     Ok(())
@@ -367,7 +394,7 @@ fn full_scratch_is_a_configuration_error_never_retried() -> TestResult {
     for role in [GuestRole::Candidate, GuestRole::Judge] {
         let seen = setup_failed(role, SetupStep::ScratchFull)?;
         let expected = Verdict::Config(ConfigCause::ScratchFull);
-        assert_eq!(candidate_verdict(&seen), expected);
+        assert_eq!(candidate_verdict(&seen, true), expected);
         assert_eq!(judge_verdict(&seen), expected);
     }
     Ok(())
@@ -389,7 +416,7 @@ fn setup_is_read_before_apply_and_stages() -> TestResult {
         OutputStatus::TooLarge,
     )?);
     assert_eq!(
-        candidate_verdict(&seen),
+        candidate_verdict(&seen, true),
         Verdict::Infra(InfraCause::GuestSetup {
             step: SetupStep::Unpack
         })
@@ -414,7 +441,7 @@ fn failed_apply_is_rejected_with_its_path_and_hunk() -> TestResult {
         OutputStatus::NotPacked,
     )?);
     assert_eq!(
-        candidate_verdict(&seen),
+        candidate_verdict(&seen, true),
         rejected(Reason::ApplyFailed {
             path: path("src/parse.rs")?,
             hunk: 3,
@@ -427,7 +454,7 @@ fn failed_apply_is_rejected_with_its_path_and_hunk() -> TestResult {
 fn build_timeout_is_a_build_timeout() -> TestResult {
     let seen = candidate(&[(Stage::Build, StageEnd::TimedOut)], PACKED)?;
     assert_eq!(
-        candidate_verdict(&seen),
+        candidate_verdict(&seen, true),
         Verdict::Done(Outcome::TimedOut {
             stage: Stage::Build
         })
@@ -444,21 +471,30 @@ fn build_nonzero_exit_is_rejected_as_build_failed() -> TestResult {
         ],
         PACKED,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::BuildFailed));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::BuildFailed)
+    );
     Ok(())
 }
 
 #[test]
 fn build_killed_by_a_signal_is_rejected_as_build_failed() -> TestResult {
     let seen = candidate(&[(Stage::Build, StageEnd::Signaled { signal: 9 })], PACKED)?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::BuildFailed));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::BuildFailed)
+    );
     Ok(())
 }
 
 #[test]
 fn build_that_could_not_spawn_is_rejected_as_build_failed() -> TestResult {
     let seen = candidate(&[(Stage::Build, StageEnd::SpawnFailed)], PACKED)?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::BuildFailed));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::BuildFailed)
+    );
     Ok(())
 }
 
@@ -469,7 +505,7 @@ fn run_timeout_is_a_run_timeout() -> TestResult {
         PACKED,
     )?;
     assert_eq!(
-        candidate_verdict(&seen),
+        candidate_verdict(&seen, true),
         Verdict::Done(Outcome::TimedOut { stage: Stage::Run })
     );
     Ok(())
@@ -484,7 +520,7 @@ fn run_nonzero_exit_is_rejected_as_run_failed() -> TestResult {
         ],
         PACKED,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::RunFailed));
+    assert_eq!(candidate_verdict(&seen, true), rejected(Reason::RunFailed));
     Ok(())
 }
 
@@ -497,7 +533,7 @@ fn run_killed_by_a_signal_is_rejected_as_run_failed() -> TestResult {
         ],
         PACKED,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::RunFailed));
+    assert_eq!(candidate_verdict(&seen, true), rejected(Reason::RunFailed));
     Ok(())
 }
 
@@ -507,7 +543,7 @@ fn run_that_could_not_spawn_is_rejected_as_run_failed() -> TestResult {
         &[(Stage::Build, OK), (Stage::Run, StageEnd::SpawnFailed)],
         PACKED,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::RunFailed));
+    assert_eq!(candidate_verdict(&seen, true), rejected(Reason::RunFailed));
     Ok(())
 }
 
@@ -517,7 +553,10 @@ fn output_over_its_cap_after_passing_stages_is_rejected_as_too_large() -> TestRe
         &[(Stage::Build, OK), (Stage::Run, OK)],
         OutputStatus::TooLarge,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputTooLarge));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputTooLarge)
+    );
     Ok(())
 }
 
@@ -527,7 +566,10 @@ fn invalid_output_after_passing_stages_is_rejected_as_invalid() -> TestResult {
         &[(Stage::Build, OK), (Stage::Run, OK)],
         OutputStatus::Invalid,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     Ok(())
 }
 
@@ -537,21 +579,30 @@ fn unpacked_output_after_passing_stages_is_rejected_as_invalid() -> TestResult {
         &[(Stage::Build, OK), (Stage::Run, OK)],
         OutputStatus::NotPacked,
     )?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     Ok(())
 }
 
 #[test]
 fn a_missing_build_stage_is_rejected_as_invalid_output() -> TestResult {
     let seen = candidate(&[], PACKED)?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     Ok(())
 }
 
 #[test]
 fn a_missing_run_stage_after_a_passing_build_is_rejected_as_invalid_output() -> TestResult {
     let seen = candidate(&[(Stage::Build, OK)], PACKED)?;
-    assert_eq!(candidate_verdict(&seen), rejected(Reason::OutputInvalid));
+    assert_eq!(
+        candidate_verdict(&seen, true),
+        rejected(Reason::OutputInvalid)
+    );
     Ok(())
 }
 
@@ -563,7 +614,7 @@ fn a_skipped_stage_where_a_passing_candidate_needs_it_is_rejected_as_invalid_out
         PACKED,
     )?;
     assert_eq!(
-        candidate_verdict(&skipped_build),
+        candidate_verdict(&skipped_build, true),
         rejected(Reason::OutputInvalid)
     );
     let skipped_run = candidate(
@@ -571,7 +622,7 @@ fn a_skipped_stage_where_a_passing_candidate_needs_it_is_rejected_as_invalid_out
         PACKED,
     )?;
     assert_eq!(
-        candidate_verdict(&skipped_run),
+        candidate_verdict(&skipped_run, true),
         rejected(Reason::OutputInvalid)
     );
     Ok(())
@@ -580,7 +631,7 @@ fn a_skipped_stage_where_a_passing_candidate_needs_it_is_rejected_as_invalid_out
 #[test]
 fn a_candidate_whose_diff_applied_and_stages_passed_with_packed_output_passes() -> TestResult {
     let seen = candidate(&[(Stage::Build, OK), (Stage::Run, OK)], PACKED)?;
-    assert_eq!(candidate_verdict(&seen), Verdict::Pass);
+    assert_eq!(candidate_verdict(&seen, true), Verdict::Pass);
     Ok(())
 }
 
@@ -596,7 +647,40 @@ fn the_baseline_with_passing_stages_and_packed_output_passes() -> TestResult {
             content_bytes: 0,
         },
     )?);
-    assert_eq!(candidate_verdict(&seen), Verdict::Pass);
+    assert_eq!(candidate_verdict(&seen, false), Verdict::Pass);
+    Ok(())
+}
+
+#[test]
+fn an_apply_status_that_contradicts_the_request_is_invalid_output() -> TestResult {
+    // IN-03: a candidate request carried a diff, so `Baseline` is a status PID 1 could not honestly send; the
+    // baseline carried none, so `Applied` and a failed apply are equally impossible.
+    let stages = [(Stage::Build, OK), (Stage::Run, OK)];
+    let with = |apply: ApplyStatus| -> Result<Seen, GuestStatusError> {
+        Ok(Seen::Guest(status(
+            GuestRole::Candidate,
+            SetupStatus::Ok,
+            apply,
+            &stages,
+            PACKED,
+        )?))
+    };
+    let failed = ApplyStatus::Failed {
+        path: path("src/parse.rs")?,
+        hunk: 1,
+    };
+    assert_eq!(
+        candidate_verdict(&with(ApplyStatus::Baseline)?, true),
+        rejected(Reason::OutputInvalid)
+    );
+    assert_eq!(
+        candidate_verdict(&with(ApplyStatus::Applied)?, false),
+        rejected(Reason::OutputInvalid)
+    );
+    assert_eq!(
+        candidate_verdict(&with(failed)?, false),
+        rejected(Reason::OutputInvalid)
+    );
     Ok(())
 }
 
@@ -912,13 +996,18 @@ fn stage_end(status: &GuestStatus, stage: Stage) -> Option<StageEnd> {
         .map(StageReport::end)
 }
 
-fn candidate_should_pass(seen: &Seen) -> bool {
+fn candidate_should_pass(seen: &Seen, has_diff: bool) -> bool {
     let Seen::Guest(status) = seen else {
         return false;
     };
+    let apply_matches = match status.apply() {
+        ApplyStatus::Applied => has_diff,
+        ApplyStatus::Baseline => !has_diff,
+        ApplyStatus::Failed { .. } | ApplyStatus::NotApplicable => false,
+    };
     status.role() == GuestRole::Candidate
         && status.setup() == SetupStatus::Ok
-        && matches!(status.apply(), ApplyStatus::Baseline | ApplyStatus::Applied)
+        && apply_matches
         && stage_end(status, Stage::Build) == Some(OK)
         && stage_end(status, Stage::Run) == Some(OK)
         && matches!(status.output(), OutputStatus::Packed { .. })
@@ -948,10 +1037,10 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2048))]
 
     #[test]
-    fn every_observation_maps_and_only_a_full_pass_is_pass(seen in any_seen()) {
-        let candidate = candidate_verdict(&seen);
+    fn every_observation_maps_and_only_a_full_pass_is_pass(seen in any_seen(), has_diff in any::<bool>()) {
+        let candidate = candidate_verdict(&seen, has_diff);
         let judge = judge_verdict(&seen);
-        prop_assert_eq!(candidate == Verdict::Pass, candidate_should_pass(&seen));
+        prop_assert_eq!(candidate == Verdict::Pass, candidate_should_pass(&seen, has_diff));
         prop_assert_eq!(judge == Verdict::Pass, judge_should_pass(&seen));
         prop_assert!(setup_failed_is_never_an_outcome(&seen, &candidate));
         prop_assert!(setup_failed_is_never_an_outcome(&seen, &judge));
