@@ -15,7 +15,7 @@
 //! | An `OutputFault` | `Rejected(fault.reason())` | same |
 //! | A `StatusFault` (missing, invalid, wrong role) | `Rejected(OutputInvalid)` | same |
 //! | Setup failed at input, mount, unpack, apply, or output | infrastructure, retried | same |
-//! | Setup failed with `ScratchFull` | configuration, never retried | same |
+//! | Setup failed with `ScratchFull` | configuration, never retried | same: `Runner::new` proved the scratch holds the judge data and any candidate output (CR-01) |
 //! | A status of the other role | `Rejected(OutputInvalid)` | same |
 //! | Apply failed | `Rejected(ApplyFailed { path, hunk })` | n/a |
 //! | Build timed out | `TimedOut { Build }` | n/a |

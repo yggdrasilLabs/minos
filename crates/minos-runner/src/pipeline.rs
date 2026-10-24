@@ -30,7 +30,10 @@
 //!     the root image, with the backend and architecture (JUDGE-04).
 //!
 //! [`Runner::check`] runs steps 1 to 4 for the baseline without launching, so a configuration that can never work
-//! stops the run before generation 0.
+//! stops the run before generation 0. [`Runner::new`] refuses, earlier still, a `[environment] scratch_mib` that
+//! the judge data plus a full candidate output could fill, because the judge VM unpacks both into one scratch and
+//! PID 1 reports either filling it as `ScratchFull`, a configuration error: with the check passed, that error is
+//! never a candidate's lever (review CR-01).
 //!
 //! This module is the only place in production code where a sandbox's output leaves [`Untrusted`]: through
 //! `take_status`, `into_scorecard`, and the two sink exits, `store_judge_input` and `store_tail`, which hand capped
@@ -51,7 +54,7 @@ use minos_core::diff::cumulative::CumulativeDiff;
 use minos_core::guest::GuestJob;
 use minos_core::id::{BlobId, ImageDigest};
 use minos_core::job::{JobRequest, JobResult};
-use minos_core::limits::{Limits, MAX_STAGE_LOG_BYTES};
+use minos_core::limits::{Limits, MAX_STAGE_LOG_BYTES, judge_scratch_needed_bytes};
 use minos_core::manifest::{Arch, JudgeVersion, Manifest};
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::path::RelPath;
@@ -79,6 +82,40 @@ const CANDIDATE_LOGS: [(Stage, &str); 2] =
 /// The judge's stage log, stored as a tail blob under its stage.
 const JUDGE_LOGS: [(Stage, &str); 1] = [(Stage::Judge, JUDGE_LOG_PATH)];
 
+/// One MiB, in bytes: the unit of `[environment] scratch_mib`.
+const MIB: u64 = 1024 * 1024;
+
+/// The size of the judge data a runner's judge VM unpacks: the content bytes and the file count `minos.lock`
+/// records for the manifest's `[judge] version` label (`LockedJudge::bytes`, `LockedJudge::file_count`).
+///
+/// [`Runner::new`] checks it against `[environment] scratch_mib` with [`judge_scratch_needed_bytes`], so a
+/// judge-side `ScratchFull` is never something a candidate's output can cause (review CR-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JudgeExtent {
+    bytes: u64,
+    files: u64,
+}
+
+impl JudgeExtent {
+    /// Judge data of `bytes` content bytes in `files` files.
+    #[must_use]
+    pub const fn new(bytes: u64, files: u64) -> Self {
+        Self { bytes, files }
+    }
+
+    /// The summed length of the judge files, headers and padding excluded.
+    #[must_use]
+    pub const fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// How many files the judge data holds.
+    #[must_use]
+    pub const fn files(&self) -> u64 {
+        self.files
+    }
+}
+
 /// Runs one trial of one experiment: the candidate VM, then, if the candidate passed, the judge VM.
 ///
 /// Generic over its backend `B` and its blob store `S`, and never a trait object or a backend enum: each binary
@@ -100,14 +137,19 @@ pub struct Runner<B: Backend, S: Blobs> {
 
 impl<B: Backend, S: Blobs> Runner<B, S> {
     /// A runner that launches on `backend`, stores through `store`, builds every VM from `manifest` with the root
-    /// image `root`, and scores with the judge version `judge`, whose data is stored as `judge_data`.
+    /// image `root`, and scores with the judge version `judge`, whose data is stored as `judge_data` and measures
+    /// `judge_extent`.
     ///
     /// Every VM gets [`RUNNER_VCPUS`] vCPUs and the manifest's `[environment] memory_mib`, on the manifest's
-    /// architecture.
+    /// architecture. The manifest's `[environment] scratch_mib` must hold the judge data together with the largest
+    /// candidate output the runner can hand the judge, so that a judge VM whose scratch fills is a configuration
+    /// error and never a candidate's doing (review CR-01).
     ///
     /// # Errors
     ///
-    /// [`ConfigCause::Machine`] when the manifest's memory does not fit a sandbox machine.
+    /// [`ConfigCause::Machine`] when the manifest's memory does not fit a sandbox machine, and
+    /// [`ConfigCause::JudgeScratch`] when its scratch is below
+    /// [`judge_scratch_needed_bytes`] for `judge_extent`.
     pub fn new(
         backend: B,
         store: S,
@@ -115,10 +157,16 @@ impl<B: Backend, S: Blobs> Runner<B, S> {
         root: ImageDigest,
         judge_data: JudgeData,
         judge: JudgeVersion,
+        judge_extent: JudgeExtent,
     ) -> Result<Self, RunnerError> {
         let environment = manifest.environment();
         let machine = Machine::new(RUNNER_VCPUS, environment.memory_mib())
             .map_err(|_| ConfigCause::Machine)?;
+        let scratch = u64::from(environment.scratch_mib()).saturating_mul(MIB);
+        let needed = judge_scratch_needed_bytes(judge_extent.bytes(), judge_extent.files());
+        if scratch < needed {
+            return Err(ConfigCause::JudgeScratch { scratch, needed }.into());
+        }
         let arch = environment.arch();
         Ok(Self {
             backend,

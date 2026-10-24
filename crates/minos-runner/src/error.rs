@@ -100,9 +100,25 @@ pub enum ConfigCause {
         /// Every refusal, sorted.
         refusals: BTreeSet<Refusal>,
     },
-    /// The build or run filled `[environment] scratch_mib`. The same inputs fill it on every launch, so it is
-    /// never retried (guest.rs WR-02).
+    /// A guest's setup filled `[environment] scratch_mib` while it unpacked its inputs. The same inputs fill it on
+    /// every launch, so it is never retried (guest.rs WR-02). For a judge VM, [`Runner::new`] has already proven
+    /// the scratch holds the judge data together with the largest candidate output ([`ConfigCause::JudgeScratch`]),
+    /// so what filled it is the project's own data, never the candidate's output (review CR-01).
+    ///
+    /// [`Runner::new`]: crate::pipeline::Runner::new
     ScratchFull,
+    /// `[environment] scratch_mib` cannot hold the pushed judge data together with the largest candidate output
+    /// the runner can hand the judge (`minos_core::limits::judge_scratch_needed_bytes`; review CR-01). Refused by
+    /// [`Runner::new`] before generation 0, so a judge-side `ScratchFull` is never a lever a candidate can pull.
+    /// Holds the scratch and the need in bytes, never text.
+    ///
+    /// [`Runner::new`]: crate::pipeline::Runner::new
+    JudgeScratch {
+        /// `[environment] scratch_mib`, in bytes.
+        scratch: u64,
+        /// The least scratch the judge VM needs, in bytes.
+        needed: u64,
+    },
     /// The fetched diff does not hash to the request's experiment: the loop built a wrong request.
     DiffMismatch,
     /// The fetched diff blob did not parse against the manifest's writable set: the loop stored a wrong blob.
@@ -130,7 +146,10 @@ impl ConfigCause {
         match self {
             Self::Spec { .. } => "the sandbox spec could not be built; lower the stage budgets",
             Self::Preflight { .. } => "the host refused the sandbox plan",
-            Self::ScratchFull => "the build or run filled [environment] scratch_mib; raise it",
+            Self::ScratchFull => "the guest's inputs filled [environment] scratch_mib; raise it",
+            Self::JudgeScratch { .. } => {
+                "[environment] scratch_mib cannot hold the judge data plus a full candidate output; raise it"
+            }
             Self::DiffMismatch => "the diff does not hash to the requested experiment",
             Self::DiffParse => "the stored diff does not parse against the writable set",
             Self::JudgeMismatch => "the request names another judge version than the runner holds",

@@ -13,7 +13,7 @@ use minos_core::job::{JobRequest, JobResult};
 use minos_core::lock::{Lock, LockMismatch};
 use minos_core::manifest::{JudgeVersion, Manifest};
 use minos_loop::{JobFailure, JobRunner};
-use minos_runner::{Runner, RunnerError};
+use minos_runner::{JudgeExtent, Runner, RunnerError};
 use minos_sandbox::{Backend, JudgeData};
 use minos_store::FileStore;
 
@@ -58,8 +58,10 @@ fn failure(error: &RunnerError) -> JobFailure {
     }
 }
 
-/// The judge data and judge version for `manifest`, from the `[[judge]]` entry `lock` records under its
-/// `[judge] version` label: the tarball's blob and [`JudgeVersion::of`] its tree and the manifest's judge spec.
+/// The judge data, judge version, and judge extent for `manifest`, from the `[[judge]]` entry `lock` records
+/// under its `[judge] version` label: the tarball's blob, [`JudgeVersion::of`] its tree and the manifest's judge
+/// spec, and the entry's recorded bytes and file count, which [`Runner::new`] checks `[environment] scratch_mib`
+/// against (review CR-01).
 ///
 /// # Errors
 ///
@@ -68,12 +70,13 @@ fn failure(error: &RunnerError) -> JobFailure {
 pub fn judge_inputs(
     lock: &Lock,
     manifest: &Manifest,
-) -> Result<(JudgeData, JudgeVersion), LockMismatch> {
+) -> Result<(JudgeData, JudgeVersion, JudgeExtent), LockMismatch> {
     let entry = lock.check_judge(manifest.judge().label())?;
     let tree = entry.tree();
     Ok((
         JudgeData::new(tree.to_blob_id()),
         JudgeVersion::of(tree, manifest.judge()),
+        JudgeExtent::new(entry.bytes(), entry.file_count()),
     ))
 }
 
@@ -87,7 +90,7 @@ mod tests {
     use minos_core::manifest::{JudgeVersion, Manifest};
     use minos_core::path::RelPath;
     use minos_loop::JobFailure;
-    use minos_runner::{ConfigCause, InfraCause, RunnerError};
+    use minos_runner::{ConfigCause, InfraCause, JudgeExtent, RunnerError};
     use minos_sandbox::JudgeData;
 
     use super::{failure, judge_inputs};
@@ -187,9 +190,11 @@ batch = 1
     fn judge_inputs_come_from_the_label_entry() -> TestResult {
         let tree = TreeId::of(b"judge data tarball");
         let manifest = manifest(1)?;
-        let (data, version) = judge_inputs(&lock(tree)?, &manifest)?;
+        let (data, version, extent) = judge_inputs(&lock(tree)?, &manifest)?;
         assert_eq!(data, JudgeData::new(tree.to_blob_id()));
         assert_eq!(version, JudgeVersion::of(&tree, manifest.judge()));
+        // The entry records 9 bytes in one file.
+        assert_eq!(extent, JudgeExtent::new(9, 1));
         Ok(())
     }
 

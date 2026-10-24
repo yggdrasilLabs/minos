@@ -25,5 +25,5 @@ pub mod usage;
 
 pub use error::{ConfigCause, InfraCause, RunnerError};
 pub use map::{Seen, Verdict, candidate_verdict, judge_verdict, judged_outcome};
-pub use pipeline::Runner;
+pub use pipeline::{JudgeExtent, Runner};
 pub use usage::{RUNNER_VCPUS, host_usage};

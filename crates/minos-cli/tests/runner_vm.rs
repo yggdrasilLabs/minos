@@ -321,7 +321,7 @@ fn project(run: &[&str], gate: u32) -> TestResult<Project> {
     let pushed = judge_push(&project, &data, JudgePushOptions::new(false))?;
     let manifest = Manifest::parse_toml(&fs::read_to_string(project.join(MANIFEST_FILE))?)?;
     let lock = read_lock(&project.join(LOCK_FILE))?.ok_or("judge push wrote no minos.lock")?;
-    let (judge_data, judge) = judge_inputs(&lock, &manifest)?;
+    let (judge_data, judge, judge_extent) = judge_inputs(&lock, &manifest)?;
     if judge != *pushed.judge_version() {
         return Err("judge_inputs disagrees with judge push on the judge version".into());
     }
@@ -377,6 +377,7 @@ fn project(run: &[&str], gate: u32) -> TestResult<Project> {
         root_image,
         judge_data,
         judge,
+        judge_extent,
     )?;
     Ok(Project {
         jobs: RunnerJobs::new(runner),

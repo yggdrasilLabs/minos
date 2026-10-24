@@ -61,7 +61,7 @@ fn infra_errors_are_retried_and_config_errors_are_not() {
     assert_eq!(infra.what(), "the sandbox VM could not be launched");
     assert_eq!(
         config.what(),
-        "the build or run filled [environment] scratch_mib; raise it"
+        "the guest's inputs filled [environment] scratch_mib; raise it"
     );
 }
 

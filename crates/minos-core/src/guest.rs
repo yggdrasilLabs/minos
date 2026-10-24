@@ -25,10 +25,11 @@ use crate::chunk::{ChunkToken, TOKEN_BYTES};
 use crate::id::{BlobId, ExperimentId, TreeId};
 use crate::job::JobRequest;
 use crate::limits::{
-    GUEST_RESERVE_MIB, MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_DIFF_BYTES, MAX_MEMORY_MIB,
-    MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES, MAX_OUTPUT_STREAM_BYTES, MAX_SCRATCH_MIB,
-    MAX_STAGE_MS, MAX_TRIALS, MAX_WRITABLE, MIN_MEMORY_MIB, MIN_SCRATCH_MIB, MIN_STAGE_MS,
-    candidate_allowance_mib,
+    DEFAULT_SCRATCH_MIB, GUEST_RESERVE_MIB, MAX_ARG_BYTES, MAX_ARGV_ENTRIES, MAX_DIFF_BYTES,
+    MAX_JUDGE_FILES, MAX_MEMORY_MIB, MAX_OUTPUT_CONTENT_BYTES, MAX_OUTPUT_ENTRIES,
+    MAX_OUTPUT_STREAM_BYTES, MAX_SCRATCH_MIB, MAX_STAGE_MS, MAX_TRIALS, MAX_WRITABLE,
+    MIN_MEMORY_MIB, MIN_SCRATCH_MIB, MIN_STAGE_MS, candidate_allowance_mib,
+    judge_scratch_needed_bytes,
 };
 use crate::manifest::{CommandArgv, JudgeVersion, Manifest};
 use crate::outcome::Stage;
@@ -948,6 +949,13 @@ const _: () = assert!(
     widen(MAX_GUEST_JOB_BYTES) + MAX_JUDGE_DATA_BYTES + MAX_CANDIDATE_OUT_BYTES
         <= MAX_GUEST_INPUT_BYTES,
     "the judge role's input sections fit half the guest reserve"
+);
+// The default scratch holds the largest judge data, in the most files, together with a full candidate output,
+// so a project on the defaults never fails the runner's judge scratch check (review CR-01).
+const _: () = assert!(
+    judge_scratch_needed_bytes(MAX_JUDGE_DATA_BYTES, MAX_JUDGE_FILES)
+        <= DEFAULT_SCRATCH_MIB as u64 * 1024 * 1024,
+    "the default scratch holds the largest judge data and a full candidate output"
 );
 
 /// A sector of zeros, for padding.

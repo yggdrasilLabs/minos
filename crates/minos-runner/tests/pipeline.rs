@@ -31,18 +31,21 @@ use minos_core::diff::Diff;
 use minos_core::diff::cumulative::CumulativeDiff;
 use minos_core::experiment::Experiment;
 use minos_core::guest::{
-    ApplyStatus, GuestRole, GuestStatus, OutputStatus, SetupStatus, SetupStep, StageEnd,
-    StageReport,
+    ApplyStatus, GuestRole, GuestStatus, MAX_JUDGE_DATA_BYTES, OutputStatus, SetupStatus,
+    SetupStep, StageEnd, StageReport,
 };
 use minos_core::id::{BlobId, ExperimentId, ImageDigest, MetricName, TreeId};
 use minos_core::job::{JobBudget, JobRequest, JobResult};
 use minos_core::ledger::{BackendKind, ConfinementLayer, Isolation};
-use minos_core::limits::{Limits, MAX_STAGE_LOG_BYTES, MAX_STAGE_MS};
+use minos_core::limits::{
+    Limits, MAX_JUDGE_FILES, MAX_STAGE_LOG_BYTES, MAX_STAGE_MS, MIN_SCRATCH_MIB,
+    judge_scratch_needed_bytes,
+};
 use minos_core::manifest::{Arch, JudgeVersion, Manifest};
 use minos_core::metric::Scorecard;
 use minos_core::outcome::{Outcome, Reason, Stage};
 use minos_core::usage::Usage;
-use minos_runner::{ConfigCause, InfraCause, RUNNER_VCPUS, Runner, RunnerError};
+use minos_runner::{ConfigCause, InfraCause, JudgeExtent, RUNNER_VCPUS, Runner, RunnerError};
 use minos_sandbox::{
     Backend, Capabilities, Cleared, Ended, Finished, InfraError, InputDisk, JudgeData, LaunchError,
     LaunchKey, Machine, Role, RoleKind, RunningVm, SpecError,
@@ -330,6 +333,11 @@ fn judge_with(card: &[u8], elapsed_ms: u64) -> Result<Script, Box<dyn Error>> {
 // ---------------------------------------------------------------------------------------------------------------
 
 fn manifest() -> Result<Manifest, Box<dyn Error>> {
+    manifest_with_environment("")
+}
+
+/// The manifest with `environment` appended to its `[environment]` table.
+fn manifest_with_environment(environment: &str) -> Result<Manifest, Box<dyn Error>> {
     let text = format!(
         r#"[project]
 name = "logparse"
@@ -346,7 +354,7 @@ exclude = ["judge/", "docs/", "target/"]
 [environment]
 dockerfile = "minos.Dockerfile"
 requires = {{ arch = "arm64" }}
-
+{environment}
 [commands]
 build = ["cargo", "build", "--release"]
 run = ["./target/release/bench", "--out", "/out/result.json"]
@@ -460,6 +468,11 @@ fn baseline_request(project: &Project) -> Result<JobRequest, Box<dyn Error>> {
     )?)
 }
 
+/// The extent of [`JUDGE_DATA`] as the lock would record it: its bytes in one file.
+fn judge_extent() -> Result<JudgeExtent, Box<dyn Error>> {
+    Ok(JudgeExtent::new(u64::try_from(JUDGE_DATA.len())?, 1))
+}
+
 fn runner(
     backend: FakeBackend,
     store: MemoryStore,
@@ -472,6 +485,7 @@ fn runner(
         project.root,
         project.judge_data,
         project.judge,
+        judge_extent()?,
     )?)
 }
 
@@ -810,6 +824,64 @@ fn judge_input_setup_failure_is_infra_despite_its_placeholder_role() -> TestResu
             }
         }
     ));
+    Ok(())
+}
+
+#[test]
+fn judge_scratch_too_small_for_the_judge_data_plus_a_full_candidate_output_is_refused_at_construction()
+-> TestResult {
+    // Arrange: the smallest scratch, 64 MiB, and 40 MiB of judge data. The data fits, but not together with the
+    // 16 MiB of output a candidate may hand the judge, so a candidate could fill the judge's scratch (CR-01).
+    let store = MemoryStore::new();
+    let mut project = project(&store, true)?;
+    project.manifest = manifest_with_environment(&format!("scratch_mib = {MIN_SCRATCH_MIB}\n"))?;
+    let judge_bytes = 40 * 1024 * 1024;
+    let backend = FakeBackend::new(passing_candidate(400)?, judge_with(SCORED, 700)?)?;
+
+    // Act
+    let result = Runner::new(
+        backend,
+        store,
+        project.manifest.clone(),
+        project.root,
+        project.judge_data,
+        project.judge,
+        JudgeExtent::new(judge_bytes, 100),
+    );
+
+    // Assert: refused as configuration, naming the scratch and the need, and nothing launched.
+    let Err(RunnerError::Config {
+        cause: ConfigCause::JudgeScratch { scratch, needed },
+    }) = result
+    else {
+        return Err("expected ConfigCause::JudgeScratch".into());
+    };
+    assert_eq!(scratch, u64::from(MIN_SCRATCH_MIB) * 1024 * 1024);
+    assert_eq!(needed, judge_scratch_needed_bytes(judge_bytes, 100));
+    assert!(needed > scratch);
+    Ok(())
+}
+
+#[test]
+fn default_scratch_holds_the_largest_judge_data_plus_a_full_candidate_output() -> TestResult {
+    // Arrange: the default scratch and judge data at both caps, 96 MiB in 10,000 files.
+    let store = MemoryStore::new();
+    let project = project(&store, true)?;
+    let backend = FakeBackend::new(passing_candidate(400)?, judge_with(SCORED, 700)?)?;
+
+    // Act
+    let result = Runner::new(
+        backend,
+        store,
+        project.manifest.clone(),
+        project.root,
+        project.judge_data,
+        project.judge,
+        JudgeExtent::new(MAX_JUDGE_DATA_BYTES, MAX_JUDGE_FILES),
+    );
+
+    // Assert
+    assert!(result.is_ok());
     Ok(())
 }
 

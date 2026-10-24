@@ -242,7 +242,9 @@ pub const MIN_CANDIDATE_ALLOWANCE_MIB: u16 = 256;
 /// MiB of judge data plus 16 MiB of candidate output for a judge), and the manifest does not refuse a scratch
 /// smaller than a project's actual inputs, because it reads no file. A scratch that fills while the guest
 /// unpacks is reported as `guest::SetupStep::ScratchFull`, a configuration error the host must report against
-/// `scratch_mib` and never retry (review WR-02).
+/// `scratch_mib` and never retry (review WR-02). For the judge VM, `minos-runner` checks the scratch against the
+/// lock's recorded judge data and the candidate output cap with [`judge_scratch_needed_bytes`] before generation
+/// 0, so a candidate's output can never be what fills it (review CR-01).
 pub const MIN_SCRATCH_MIB: u16 = 64;
 /// Largest `[environment] scratch_mib`, in MiB: the largest VM less the guest reserve and the least candidate
 /// allowance (15872).
@@ -309,6 +311,46 @@ pub const MAX_OUTPUT_ENTRIES: usize = 1024;
 /// plus the two end blocks. A stream any longer cannot be a valid output.
 pub const MAX_OUTPUT_STREAM_BYTES: u64 =
     MAX_OUTPUT_CONTENT_BYTES + (MAX_OUTPUT_ENTRIES as u64 + 2) * 1024;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Judge scratch (review CR-01)
+//
+// The judge VM unpacks the judge data and then the candidate's `out/` files into one tmpfs scratch, and PID 1
+// reports an `ENOSPC` on either unpack as `guest::SetupStep::ScratchFull`, which the runner stops the run on as a
+// configuration error. The candidate controls its output up to the `CANDIDATE_OUT` section cap, so the runner
+// refuses, before generation 0, a `scratch_mib` that a candidate's output could fill. With that held, a judge-side
+// `ScratchFull` is the project's own data filling the scratch, never a lever a candidate can pull.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The page a tmpfs allots file bytes in: a file of `n` bytes holds `ceil(n / 4096)` pages, so an unpacked file
+/// costs up to one page less a byte more than its length.
+pub const TMPFS_PAGE_BYTES: u64 = 4096;
+/// Slack the judge VM's scratch keeps beyond its unpacked inputs, in bytes (16 MiB): the unpacked directories,
+/// the stage's `HOME` and `TMP`, and the scorecard the judge writes to `/out`. A judge that writes more than this
+/// fails in its own stage, which is `Crashed { Judge }`, never a setup failure.
+pub const JUDGE_SCRATCH_SLACK_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The least scratch, in bytes, a judge VM needs to unpack judge data of `judge_bytes` content bytes in
+/// `judge_files` files together with any candidate output the runner can hand it: the judge content plus one
+/// page of rounding per judge file, the candidate output cap ([`MAX_OUTPUT_CONTENT_BYTES`] of content in at most
+/// [`MAX_OUTPUT_ENTRIES`] files, which is what the `CANDIDATE_OUT` section holds unpacked) plus one page per
+/// entry, and [`JUDGE_SCRATCH_SLACK_BYTES`]. Saturating.
+///
+/// `minos-runner` refuses a `[environment] scratch_mib` below this before generation 0, and `minos.lock` records
+/// the bytes and the file count per judge label, so the check reads no file.
+#[must_use]
+pub const fn judge_scratch_needed_bytes(judge_bytes: u64, judge_files: u64) -> u64 {
+    judge_bytes
+        .saturating_add(judge_files.saturating_mul(TMPFS_PAGE_BYTES))
+        .saturating_add(MAX_OUTPUT_CONTENT_BYTES)
+        .saturating_add((MAX_OUTPUT_ENTRIES as u64).saturating_mul(TMPFS_PAGE_BYTES))
+        .saturating_add(JUDGE_SCRATCH_SLACK_BYTES)
+}
+
+const _: () = assert!(
+    judge_scratch_needed_bytes(0, 0) <= MIN_SCRATCH_MIB as u64 * 1024 * 1024,
+    "the smallest scratch holds an empty judge data set and a full candidate output"
+);
 
 /// The caps the core applies to hostile input: diffs, scorecards, and logs.
 ///
