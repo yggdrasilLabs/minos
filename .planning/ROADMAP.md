@@ -376,7 +376,7 @@ Plans:
   4. `minos judge push <dir>` stores judge data in the local blob store as a new judge version with its hash recorded, and that data never appears in the source tarball or the image build context (JUDGE-01, CLI-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 14/17 plans executed
+**Plans**: 15/17 plans executed
 
 Plans:
 **Wave 1**
@@ -407,7 +407,7 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 07-14-PLAN.md — CLI `RunnerJobs` adapter and the ignored real-VM test of the production runner, run and recorded (wave 5)
-- [ ] 07-15-PLAN.md — Safe points, caps, the breaker, retries, session-relative stops, and the backend pin (wave 5)
+- [x] 07-15-PLAN.md — Safe points, caps, the breaker, retries, session-relative stops, and the backend pin (wave 5)
 
 **Wave 6** *(blocked on 07-14 and 07-15)*
 
@@ -450,5 +450,5 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 4. Store, Source Snapshot, and Sandbox Types | 9/9 | Complete    | 2026-10-15 |
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
-| 7. Runner and Loop | 14/17 | In Progress|  |
+| 7. Runner and Loop | 15/17 | In Progress|  |
 | 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |

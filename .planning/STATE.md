@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: runner-and-loop
 status: executing
 stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-10-24T13:46:14.354Z"
+last_updated: "2026-10-24T14:01:41.532Z"
 last_activity: 2026-10-22
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 87
-  completed_plans: 84
+  completed_plans: 85
   percent: 75
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 07 (runner-and-loop) — EXECUTING
-Plan: 15 of 17
+Plan: 16 of 17
 Status: Ready to execute
 Last activity: 2026-10-22 — Phase 07 execution started
 
@@ -144,6 +144,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P12 | 8 min | 2 tasks | 4 files |
 | Phase 07 P13 | 15 min | 2 tasks | 5 files |
 | Phase 07 P14 | 10min | 3 tasks | 6 files |
+| Phase 07 P15 | 15min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -344,6 +345,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-13: resume runs JobRunner::check before appending ManifestChanged, so neither constructor records anything before every check passes
 - [Phase 07]: 07-13: the driver completes a partly recorded batch first and re-asks next_step, so resumed sessions run trials in uninterrupted order
 - [Phase 07]: 07-14: RunnerJobs maps RunnerError onto JobFailure only through is_infra and what; the runner VM test uses KrunBackend::new (the production job root) and lives in minos-cli
+- [Phase 07]: 07-15: an append resets the infra streak only when it lands after failing, so a provider infra error that reports usage still reaches max_infra_failures
+- [Phase 07]: 07-15: generation 0 passes a generation safe point before its first pending baseline launch, keeping the one-job overshoot bound across resumes
 
 ### Pending Todos
 
@@ -374,6 +377,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-24T13:46:02.878Z
+Last session: 2026-10-24T14:01:32.103Z
 Stopped at: Completed 07-09-PLAN.md
 Resume file: None
