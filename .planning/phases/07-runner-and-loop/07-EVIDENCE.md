@@ -555,3 +555,14 @@ crates/minos-loop/Cargo.toml:16:minos-propose.workspace = true
 12. Validation targets: every `--test <name>` that 07-VALIDATION.md names (22 names: `blocks`, `compile_fail`, `contract`, `cumulative`, `driver`, `env_build`, `file_ledger`, `golden_ids`, `golden_wire`, `judge`, `judge_push`, `lock`, `manifest`, `map`, `money`, `pipeline`, `prop_fold`, `prop_policy`, `runner_vm`, `stage`, `untrusted`, `usage`) exists as `crates/*/tests/<name>.rs` or `crates/*/tests/<name>/main.rs`, and each ran in step 3. The plan's own loop, `ls crates/*/tests/$t.rs crates/*/tests/$t/main.rs`, printed `MISSING` for all 22 under bash, because `ls` exits non-zero when any one of its two arguments is absent and no target has both forms. The check was run instead with `compgen -G` on each form, an either-or test, and printed 22 `ok` lines and no `MISSING`.
 
 Result: every gate command, C-01, C-02, the LOOP-01 check, the lane check, and the test-variable check pass on the final code.
+
+## cargo clean (07-17 Task 2, GATE-06)
+
+Every step of the final gate above exited 0, and the SUMMARY, STATE, and ROADMAP were committed (`3462c6d`), so `cargo clean` ran next as the last cargo command of the phase; no cargo command ran after it. Afterwards `test ! -d target/debug` exited 0 and `target/` no longer exists.
+
+```
+$ cargo clean
+     Removed 185174 files, 19.8GiB total
+```
+
+cargo clean: exit 0, run after the final gate (GATE-06)
