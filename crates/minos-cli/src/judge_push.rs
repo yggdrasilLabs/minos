@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 
 use minos_core::guest::MAX_JUDGE_DATA_BYTES;
 use minos_core::id::{BlobId, TreeId};
+use minos_core::limits::MAX_MANIFEST_BYTES;
 use minos_core::lock::{BuilderText, Lock, LockError, LockedJudge};
 use minos_core::manifest::{JudgeVersion, Manifest, ManifestError};
 use minos_core::path::RelPath;
@@ -40,7 +41,7 @@ use minos_core::text::SafeText;
 use minos_source::{Denied, SnapshotError, pack_judge_data};
 use minos_store::{Blobs, FileStore, STORE_DIR, StoreError};
 
-use crate::env_build::{LOCK_FILE, MANIFEST_FILE, MAX_MANIFEST_BYTES};
+use crate::env_build::{LOCK_FILE, MANIFEST_FILE};
 use crate::lock_file::{LockFileError, read_lock, write_lock};
 
 /// The flags of one `judge push`.

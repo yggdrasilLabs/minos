@@ -104,6 +104,7 @@ use minos_core::experiment::Experiment;
 use minos_core::id::{BlobId, ExperimentId, ModelId, RunId};
 use minos_core::job::{JobBudget, JobRequest, JobResult};
 use minos_core::ledger::{Event, SpendSource, StopReason};
+use minos_core::limits::MAX_MANIFEST_BYTES;
 use minos_core::manifest::{JudgeVersion, Manifest, ProposerSpec};
 use minos_core::metric::Metric;
 use minos_core::money::CostError;
@@ -118,7 +119,6 @@ use minos_propose::{ModelProvider, ProposeError, ProposeInput, Proposer};
 use minos_store::{Blobs, Ledger, RunLock, StoreError};
 
 use crate::admit::{AdmitStep, admit, load_batch, missing_proposed};
-use crate::byte_cap;
 use crate::error::DriverError;
 use crate::history::{history, notes, parent_tree, recorded_diff};
 use crate::inputs::{Resume, RunInputs, check_resume, check_start};
@@ -132,10 +132,6 @@ use crate::stage::{CANDIDATE_TRIALS, Step, next_step};
 /// trial. It is one constant rather than a backoff schedule because the breaker, not the pause, bounds the
 /// retries. Tests pass zero.
 pub const RETRY_PAUSE: Duration = Duration::from_secs(5);
-
-/// The cap a recorded manifest blob is read under: the CLI's `MAX_MANIFEST_BYTES`, restated because the loop
-/// cannot link the CLI. A manifest the CLI accepted is never larger.
-const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 
 /// How a driver session behaves, apart from the run itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1108,8 +1104,9 @@ fn recorded_manifest<S: Blobs>(store: &S, state: &RunState) -> Result<Manifest, 
         .to_hex()
         .parse::<BlobId>()
         .map_err(|_| unreadable())?;
+    // The same cap the CLI read the manifest under, so an accepted manifest is never unreadable here (IN-01).
     let bytes = store
-        .get(&blob, byte_cap(MAX_MANIFEST_BYTES))
+        .get(&blob, MAX_MANIFEST_BYTES)
         .map_err(|source| match source {
             StoreError::BlobMissing { .. }
             | StoreError::BlobTooLarge { .. }

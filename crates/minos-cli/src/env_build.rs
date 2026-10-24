@@ -54,6 +54,7 @@ use minos_backend_krun::rootfs::{
 use minos_core::id::{BlobId, ImageDigest};
 use minos_core::image::{ImageError, ImageRef, base_images};
 use minos_core::ledger::BackendKind;
+use minos_core::limits::MAX_MANIFEST_BYTES;
 use minos_core::lock::{Lock, LockError, LockedImage};
 use minos_core::manifest::{Arch, Manifest, ManifestError};
 use minos_core::path::RelPath;
@@ -69,9 +70,6 @@ use crate::lock_file::{self, LockFileError, write_lock};
 /// bounds the file content, and the compressed image is smaller than that content plus `SquashFS` metadata in
 /// practice; the image is held in memory when it is stored (the D-09 limit in the [module docs](self)).
 pub const MAX_ROOT_IMAGE_BYTES: u64 = 1_073_741_824;
-
-/// The most bytes read from `minos.toml`.
-pub const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
 /// The most bytes read from the Dockerfile.
 pub const MAX_DOCKERFILE_BYTES: u64 = 1024 * 1024;

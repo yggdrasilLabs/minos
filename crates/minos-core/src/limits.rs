@@ -53,6 +53,10 @@ pub const MAX_EXCLUDES: usize = 256;
 pub const MAX_ARGV_ENTRIES: usize = 64;
 /// Longest single argv entry, in bytes. Matches the guest's own cap (`minos-guest` `job::MAX_ARG_BYTES`).
 pub const MAX_ARG_BYTES: usize = 4096;
+/// Most bytes of `minos.toml` the CLI reads, and the cap the loop reads a recorded manifest blob back under on
+/// resume (1 MiB). One constant for both, so a manifest the CLI accepted is never unreadable on resume
+/// (07-REVIEW IN-01).
+pub const MAX_MANIFEST_BYTES: u64 = 1_048_576;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Stage budgets
