@@ -372,7 +372,7 @@ fn base_surface_reads_the_prepared_base_back_from_the_store() -> TestResult {
     });
     let state = fold([&record])?;
     let surface = base_surface(prepared.store(), &state, prepared.manifest())?;
-    assert!(surface == *prepared.base());
+    assert_eq!(surface, *prepared.base());
     Ok(())
 }
 

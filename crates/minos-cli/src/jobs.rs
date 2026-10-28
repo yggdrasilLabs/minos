@@ -8,14 +8,23 @@
 //!
 //! [`judge_inputs`] turns the `[[judge]]` lock entry for the manifest's `[judge] version` label into the judge data
 //! and the [`JudgeVersion`] the runner is built with (07-CONTEXT D-02).
+//!
+//! [`krun_jobs`] is the production composition `check` and `run` share: [`KrunBackend`] over the project's
+//! [`FileBlobSource`], refused when the host probes failed (naming `minos host doctor`), and the [`Runner`] built
+//! from a [`Prepared`] project behind [`RunnerJobs`]. It is the only path from the CLI to a VM launch.
 
+use minos_backend_krun::KrunBackend;
+use minos_backend_krun::host::HostPaths;
 use minos_core::job::{JobRequest, JobResult};
 use minos_core::lock::{Lock, LockMismatch};
 use minos_core::manifest::{JudgeVersion, Manifest};
 use minos_loop::{JobFailure, JobRunner};
 use minos_runner::{JudgeExtent, Runner, RunnerError};
-use minos_sandbox::{Backend, JudgeData};
-use minos_store::FileStore;
+use minos_sandbox::{Backend, JudgeData, LaunchError};
+use minos_store::{FileStore, StoreError};
+
+use crate::blob_source::FileBlobSource;
+use crate::project::Prepared;
 
 /// The production runner over the project's file store, as the loop's [`JobRunner`].
 pub struct RunnerJobs<B: Backend> {
@@ -78,6 +87,65 @@ pub fn judge_inputs(
         JudgeVersion::of(tree, manifest.judge()),
         JudgeExtent::new(entry.bytes(), entry.file_count()),
     ))
+}
+
+/// Why the production runner could not be composed. Messages are fixed text; a runner refusal carries the
+/// cause's fixed description only.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum ComposeError {
+    /// The project's store could not be opened for the backend's blob source.
+    #[error("the store in .minos could not be opened")]
+    Store(#[source] StoreError),
+    /// The backend could not open its job root.
+    #[error("the krun backend could not start")]
+    Backend(#[source] LaunchError),
+    /// The host probes refused, so every launch would be refused (KRUN-06, KRUN-07).
+    #[error(
+        "this host refuses {count} launch checks: run `minos host doctor` to see each one and its fix"
+    )]
+    HostRefused {
+        /// How many host checks failed.
+        count: usize,
+    },
+    /// The runner refused the project's configuration, for example a `scratch_mib` too small for the judge data.
+    #[error("the runner refuses this project: {what}")]
+    Runner {
+        /// The runner cause's fixed description.
+        what: &'static str,
+    },
+}
+
+/// The production job runner for `prepared`: [`KrunBackend`] at `paths` over the project's [`FileBlobSource`],
+/// and the [`Runner`] over the project's store with the prepared manifest, root image, and judge inputs, behind
+/// [`RunnerJobs`]. The backend sweeps its job root and probes the host once, here.
+///
+/// # Errors
+///
+/// [`ComposeError::Store`] when the store cannot be opened, [`ComposeError::Backend`] when the job root cannot,
+/// [`ComposeError::HostRefused`] when any host probe failed, and [`ComposeError::Runner`] when [`Runner::new`]
+/// refuses the configuration.
+pub fn krun_jobs(
+    prepared: &Prepared,
+    paths: HostPaths,
+) -> Result<RunnerJobs<KrunBackend<FileBlobSource>>, ComposeError> {
+    let source = FileBlobSource::open(prepared.project()).map_err(ComposeError::Store)?;
+    let backend = KrunBackend::new(paths, source).map_err(ComposeError::Backend)?;
+    let count = backend.capabilities().host_refusals().len();
+    if count > 0 {
+        return Err(ComposeError::HostRefused { count });
+    }
+    let runner = Runner::new(
+        backend,
+        prepared.store().clone(),
+        prepared.manifest().clone(),
+        prepared.root_image(),
+        prepared.judge_data(),
+        prepared.judge(),
+        prepared.judge_extent(),
+    )
+    .map_err(|error| ComposeError::Runner { what: error.what() })?;
+    Ok(RunnerJobs::new(runner))
 }
 
 #[cfg(test)]

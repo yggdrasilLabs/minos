@@ -27,3 +27,4 @@ pub mod jobs;
 pub mod judge_push;
 pub mod locate;
 pub mod lock_file;
+pub mod project;

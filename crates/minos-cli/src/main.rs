@@ -41,8 +41,9 @@ its digest, the Dockerfile and guest SHA-256, the FROM digests, and the builder 
 whose image digest differs from minos.lock is refused unless --update is passed.
 
 The Dockerfile's USER is ignored: every file in the image is owned by root, and the build and run commands run as \
-uid 64000. Install toolchains into world-readable prefixes such as /usr/local, and set CARGO_HOME and RUSTUP_HOME \
-there, never under /root.";
+uid 64000 with exactly PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, HOME=/scratch/home, \
+TMPDIR=/tmp, and LANG=C, so ENV lines never reach them. Put toolchain binaries on that PATH (for example symlinks \
+in /usr/local/bin), world-readable and never under /root.";
 
 /// `minos judge push`'s long help: what is packed, where it goes, and the label rule (07-CONTEXT D-01 to D-03).
 const JUDGE_PUSH_HELP: &str = "\
