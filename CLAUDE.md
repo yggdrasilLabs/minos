@@ -105,7 +105,10 @@ crates/
                          seam: the pure stage function, record before act, the batch blob, the run lock, safe points,
                          the breaker, and retries
   minos-cli/             installs the `minos` binary; the only place concrete types meet (lib: locator, FileBlobSource,
-                         and `RunnerJobs`, the runner behind the loop's `JobRunner` seam);
+                         `RunnerJobs`, the runner behind the loop's `JobRunner` seam, and `krun_jobs`, its production
+                         composition; `project::prepare`, the preparation `check` and `run` share, whose refusals name
+                         the next command, and `open_runs`; `address`, run and experiment hex prefixes; `render`, the
+                         shared output helpers and `write_line` through `SafeText`; one module per command);
                          ships `env build`, `judge push`, `host doctor`, and `host setup`
 ```
 
