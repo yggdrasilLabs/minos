@@ -13,7 +13,7 @@ use std::error::Error;
 use minos_cli::address::{AddressError, HexPrefix, fold_run, resolve_exp, resolve_run};
 use minos_core::id::{BlobId, ExperimentId, ManifestId, RunId, TreeId};
 use minos_core::ledger::{Event, Record};
-use minos_store::{Ledger, MemoryStore};
+use minos_store::{Appended, Ledger, MemoryStore};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -37,7 +37,7 @@ fn run_started(manifest: &[u8], started_at: u64) -> (RunId, Record) {
 /// Appends a started run to `store` and returns its ID.
 fn start(store: &MemoryStore, manifest: &[u8], started_at: u64) -> Result<RunId, Box<dyn Error>> {
     let (run, record) = run_started(manifest, started_at);
-    store.append(&run, record)?;
+    assert_eq!(store.append(&run, record)?, Appended::New { seq: 0 });
     Ok(run)
 }
 
@@ -67,7 +67,10 @@ fn hex_prefixes_are_lowercase_hex_of_one_to_sixty_four_characters() -> TestResul
     assert_eq!(full.parse::<HexPrefix>()?.as_str(), full);
     for bad in ["", "AB", "xyz", "0g", " ab"] {
         assert!(
-            matches!(bad.parse::<HexPrefix>(), Err(AddressError::BadPrefix { .. })),
+            matches!(
+                bad.parse::<HexPrefix>(),
+                Err(AddressError::BadPrefix { .. })
+            ),
             "{bad:?}"
         );
     }
@@ -84,7 +87,10 @@ fn a_store_with_no_runs_names_check_and_run() {
     let store = MemoryStore::new();
     let result = resolve_run(&store, None);
     assert!(matches!(result, Err(AddressError::NoRuns)));
-    let text = result.err().map(|error| error.to_string()).unwrap_or_default();
+    let text = result
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default();
     assert!(text.contains("minos check"), "{text}");
 }
 
@@ -128,7 +134,9 @@ fn prefixes_resolve_uniquely_or_name_every_candidate() -> TestResult {
     // A two-character prefix neither run has names no run.
     let absent = (0..=255_u8)
         .map(|byte| format!("{byte:02x}"))
-        .find(|head| !first_hex.starts_with(head.as_str()) && !second_hex.starts_with(head.as_str()))
+        .find(|head| {
+            !first_hex.starts_with(head.as_str()) && !second_hex.starts_with(head.as_str())
+        })
         .ok_or("every prefix is taken")?;
     let absent: HexPrefix = absent.parse()?;
     assert!(matches!(
@@ -155,7 +163,7 @@ fn no_prefix_picks_the_latest_start_then_the_larger_run_id() -> TestResult {
 fn runs_that_do_not_fold_are_listed_and_refused_when_alone() -> TestResult {
     let store = MemoryStore::new();
     let broken = RunId::of(&ManifestId::of(b"broken"), &TreeId::of(b"t"), 5);
-    store.append(
+    let appended = store.append(
         &broken,
         Record::v1(Event::Steered {
             generation: 1,
@@ -163,6 +171,7 @@ fn runs_that_do_not_fold_are_listed_and_refused_when_alone() -> TestResult {
             note: BlobId::of(b"note"),
         }),
     )?;
+    assert_eq!(appended, Appended::New { seq: 0 });
     match resolve_run(&store, None) {
         Err(AddressError::Unreadable { runs }) => assert_eq!(runs, vec![broken]),
         other => return Err(format!("expected Unreadable, got {:?}", other.err()).into()),
