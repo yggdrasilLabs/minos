@@ -8,7 +8,9 @@ use std::str::FromStr;
 
 use minos_core::id::ModelId;
 use minos_core::manifest::Manifest;
-use minos_core::money::{ApproxCost, Cost, CostError, Prices, PricesError, Rate, RateError};
+use minos_core::money::{
+    ApproxCost, Cost, CostError, CostLine, Prices, PricesError, Rate, RateError,
+};
 use minos_core::usage::Usage;
 use proptest::prelude::*;
 
@@ -496,6 +498,29 @@ fn approx_cost_rounds_cents_half_up() {
     assert_eq!(ApproxCost::from_micro(5_000).micro(), 5_000);
     let max = ApproxCost::from_micro(u128::MAX).to_string();
     assert!(max.starts_with("approx. cost: $"), "got: {max}");
+}
+
+#[test]
+fn cost_line_shows_zero_cost_and_zero_tokens() {
+    let line = CostLine::new(ApproxCost::from_micro(0), &Usage::compute(0, 0));
+    assert_eq!(
+        line.to_string(),
+        "approx. cost: $0.00 (in 0 tokens, out 0 tokens)"
+    );
+}
+
+#[test]
+fn cost_line_sums_input_side_tokens_and_rounds_through_approx_cost() {
+    // in = 1000 input + 200 cache creation + 300 cache read = 1500; $31.395 rounds half up to $31.40.
+    let usage = Usage::tokens(1_000, 456, 200, 300);
+    let line = CostLine::new(ApproxCost::from_micro(31_395_000), &usage);
+    assert_eq!(line.input_tokens(), 1_500);
+    assert_eq!(line.output_tokens(), 456);
+    assert_eq!(line.cost(), ApproxCost::from_micro(31_395_000));
+    assert_eq!(
+        line.to_string(),
+        "approx. cost: $31.40 (in 1500 tokens, out 456 tokens)"
+    );
 }
 
 fn small_usage() -> impl Strategy<Value = Usage> {
