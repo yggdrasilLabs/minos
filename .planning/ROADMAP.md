@@ -434,7 +434,7 @@ Plans:
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 5/15 plans executed
+**Plans**: 6/15 plans executed
 
 Plans:
 **Wave 1**
@@ -447,7 +447,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 08-05-PLAN.md — The sample's manifest, Dockerfile, ignore file, and README; the host gate test; CLAUDE.md for the sample and the stage environment (wave 2)
-- [ ] 08-06-PLAN.md — CLI foundation: `prepare` and `open_runs`, `krun_jobs`, prefix addressing, the shared renderer helpers, the command module files, the `env build` help fix (wave 2)
+- [x] 08-06-PLAN.md — CLI foundation: `prepare` and `open_runs`, `krun_jobs`, prefix addressing, the shared renderer helpers, the command module files, the `env build` help fix (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -486,4 +486,4 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
 | 7. Runner and Loop | 17/17 | Complete    | 2026-10-24 |
-| 8. CLI, Sample Project, and Docs | 5/15 | In Progress|  |
+| 8. CLI, Sample Project, and Docs | 6/15 | In Progress|  |

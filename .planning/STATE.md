@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Completed 08-04-PLAN.md
-last_updated: "2026-10-28T17:56:32.091Z"
+stopped_at: Completed 08-06-PLAN.md
+last_updated: "2026-10-28T18:08:35.978Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 92
+  completed_plans: 93
   percent: 88
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 6 of 15
+Plan: 7 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -153,6 +153,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P03 | 5 min | 1 tasks | 4 files |
 | Phase 08 P04 | 8m | 2 tasks | 15 files |
 | Phase 08 P05 | 8m | 2 tasks | 6 files |
+| Phase 08 P06 | 8 min | 2 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -367,6 +368,7 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-04: the logparse visible and held-out halves mirror each other's messiness, so the baseline scores 29/96 on both and only hard-coded visible answers diverge
 - [Phase 08]: 08-05: the sample's FROM pins rust@sha256:<index digest> alone, because ImageRef refuses a tag beside a digest; 08-11's init Dockerfile template must use the same form
 - [Phase 08]: 08-05: the sample's minos.lock is gitignored (it records the local minos-guest digest); user projects commit theirs
+- [Phase 08]: 08-06: PrepareError::Lock is transparent over LockMismatch so the top-level message names the next command; render::write_line uses SafeText::new (keeps tabs, drops controls)
 
 ### Pending Todos
 
@@ -398,6 +400,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T17:56:20.442Z
-Stopped at: Completed 08-04-PLAN.md
+Last session: 2026-10-28T18:08:35.973Z
+Stopped at: Completed 08-06-PLAN.md
 Resume file: None
