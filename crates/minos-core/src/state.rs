@@ -698,6 +698,12 @@ impl RunState {
         self.proposals.get(exp)
     }
 
+    /// Every recorded proposal, of every generation, in [`ExperimentId`] order. The baseline is not a proposal, so
+    /// it never appears here.
+    pub fn proposals(&self) -> impl Iterator<Item = (&ExperimentId, &Proposal)> {
+        self.proposals.iter()
+    }
+
     /// The proposals of `generation`, in [`ExperimentId`] order.
     pub fn proposals_in(
         &self,

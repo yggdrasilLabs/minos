@@ -106,10 +106,9 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use minos_core::experiment::Experiment;
-use minos_core::id::{BlobId, ExperimentId, ModelId, RunId};
+use minos_core::id::{ExperimentId, ModelId, RunId};
 use minos_core::job::{JobBudget, JobRequest, JobResult};
 use minos_core::ledger::{Event, SpendSource, StopReason};
-use minos_core::limits::MAX_MANIFEST_BYTES;
 use minos_core::manifest::{JudgeVersion, Manifest, ProposerSpec};
 use minos_core::metric::Metric;
 use minos_core::money::CostError;
@@ -125,7 +124,7 @@ use minos_store::{Blobs, Ledger, RunLock, StoreError};
 
 use crate::admit::{AdmitStep, admit, load_batch, missing_proposed};
 use crate::error::DriverError;
-use crate::history::{history, notes, parent_tree, recorded_diff};
+use crate::history::{self, history, notes, parent_tree, recorded_diff};
 use crate::inputs::{Resume, RunInputs, check_resume, check_start};
 use crate::job::{JobFailure, JobRunner};
 use crate::observe::{LoopEvent, Observer};
@@ -429,7 +428,7 @@ where
         let state = fold(read.records()).map_err(DriverError::Fold)?;
 
         // 3. The inputs against the record (D-10, D-19).
-        let recorded = recorded_manifest(store, &state)?;
+        let recorded = history::recorded_manifest(store, &state)?;
         let resume = check_resume(&state, &recorded, &inputs)?;
 
         // 4. The baseline's plans pass preflight.
@@ -853,7 +852,7 @@ where
         let (parent, tree) = parent_tree(self.store, state, manifest, base, generation)?;
 
         // 2. The routed proposer (D-13).
-        let surface = SurfaceStats::new(surface_bytes(&self.inputs));
+        let surface = SurfaceStats::new(self.inputs.surface_bytes());
         let routed = route(manifest, state, &surface).map_err(DriverError::Route)?;
         let spec = manifest
             .proposers()
@@ -1104,38 +1103,6 @@ fn lock<'s, S: RunLock>(store: &'s S, run: &RunId) -> Result<S::Guard<'s>, Drive
     })
 }
 
-/// The manifest the run has in effect, read back from its blob.
-///
-/// A blob that is absent, over the cap, or tampered, and bytes that are not a manifest, are
-/// [`DriverError::ManifestRecordUnreadable`]: a store problem a human must look at, never reported as a manifest
-/// edit (07-REVIEW WR-03). Any other store error is [`DriverError::Store`].
-fn recorded_manifest<S: Blobs>(store: &S, state: &RunState) -> Result<Manifest, DriverError> {
-    let unreadable = || DriverError::ManifestRecordUnreadable {
-        run: *state.run(),
-        manifest: *state.manifest(),
-    };
-    // A manifest's ID is the plain SHA-256 of its bytes, so the blob of those bytes has the same digest.
-    let blob = state
-        .manifest()
-        .to_hex()
-        .parse::<BlobId>()
-        .map_err(|_| unreadable())?;
-    // The same cap the CLI read the manifest under, so an accepted manifest is never unreadable here (IN-01).
-    let bytes = store
-        .get(&blob, MAX_MANIFEST_BYTES)
-        .map_err(|source| match source {
-            StoreError::BlobMissing { .. }
-            | StoreError::BlobTooLarge { .. }
-            | StoreError::BlobTampered { .. } => unreadable(),
-            source => DriverError::Store {
-                run: *state.run(),
-                source,
-            },
-        })?;
-    let text = std::str::from_utf8(&bytes).map_err(|_| unreadable())?;
-    Manifest::parse_toml(text).map_err(|_| unreadable())
-}
-
 /// The request for baseline trial `trial` under the session's judge and the manifest's stage budgets.
 fn baseline_request(inputs: &RunInputs<'_>, trial: u32) -> Result<JobRequest, DriverError> {
     JobRequest::baseline(
@@ -1155,18 +1122,6 @@ fn check_job<J: JobRunner>(jobs: &J, request: &JobRequest) -> Result<(), DriverE
         JobFailure::Config { what } => DriverError::Job { what },
         JobFailure::Infra { what } => DriverError::Infra { what },
     })
-}
-
-/// The size a single-shot prompt must carry: the program file plus every base surface file (`SurfaceStats`).
-fn surface_bytes(inputs: &RunInputs<'_>) -> u64 {
-    let size = |len: usize| u64::try_from(len).unwrap_or(u64::MAX);
-    inputs
-        .base
-        .tree()
-        .iter()
-        .fold(size(inputs.program.len()), |total, (_, bytes)| {
-            total.saturating_add(size(bytes.len()))
-        })
 }
 
 /// `exp`'s reduced objective (every trial scored) minus the incumbent's before `generation` (scored trials only),

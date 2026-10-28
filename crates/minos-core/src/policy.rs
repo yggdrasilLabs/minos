@@ -493,8 +493,8 @@ pub enum NoiseVerdict {
 /// Compares the objective's threshold at the baseline median with the baseline's spread (D-12).
 ///
 /// The verdict is advisory and never changes the manifest: `objective` is read through a shared reference, and
-/// selection always applies the manifest's own `min_improvement`. `minos check` prints the verdict, and
-/// `minos run` refuses a [`NoiseVerdict::Refuse`] unless the user overrides it (Phase 8).
+/// selection always applies the manifest's own `min_improvement`. The verdict is advisory: `minos check` prints it
+/// with advice and `minos run` prints it at start, and neither refuses (08-CONTEXT D-07).
 #[must_use]
 pub fn noise_check(floor: Option<&NoiseFloor>, objective: &Objective) -> NoiseVerdict {
     let Some(floor) = floor.filter(|floor| floor.trials() >= MIN_NOISE_TRIALS) else {
@@ -593,6 +593,29 @@ pub enum SpendCheck {
     Stop(StopReason),
 }
 
+/// The one sum of a run's metered spend, priced exactly as the safe points price it.
+///
+/// Each [`SpendSource::ModelCall`] is priced with its model's rates, and each candidate and judge run with the
+/// compute rates alone, through [`Cost::of`], summed with checked arithmetic in the unrounded scaled unit, so the
+/// total is rounded once. [`spend_ok`] and every command that shows a run's cost call this, so the figure a user
+/// sees is the figure the cap is checked against.
+///
+/// # Errors
+///
+/// A [`CostError`] when a recorded model has no rates in `prices` (even at zero tokens), or when a cost
+/// overflows. A spend that cannot be priced is never treated as free.
+pub fn run_cost(state: &RunState, prices: &Prices) -> Result<Cost, CostError> {
+    let mut total = Cost::ZERO;
+    for (_, spend) in state.spends() {
+        let model = match spend.source() {
+            SpendSource::ModelCall { model, .. } => Some(model),
+            SpendSource::Candidate { .. } | SpendSource::Judge { .. } => None,
+        };
+        total = total.checked_add(Cost::of(prices, model, spend.usage())?)?;
+    }
+    Ok(total)
+}
+
 /// Prices every recorded spend and compares the totals with the manifest's caps (D-09, COST-01).
 ///
 /// Each [`SpendSource::ModelCall`] is priced with its model's rates, and each candidate and judge run with the
@@ -611,14 +634,7 @@ pub fn spend_ok(
     manifest: &Manifest,
     prices: &Prices,
 ) -> Result<SpendCheck, CostError> {
-    let mut total = Cost::ZERO;
-    for (_, spend) in state.spends() {
-        let model = match spend.source() {
-            SpendSource::ModelCall { model, .. } => Some(model),
-            SpendSource::Candidate { .. } | SpendSource::Judge { .. } => None,
-        };
-        total = total.checked_add(Cost::of(prices, model, spend.usage())?)?;
-    }
+    let total = run_cost(state, prices)?;
     let budget = manifest.budget();
     if total.micro_dollars() > budget.spend_cap_micro() {
         return Ok(SpendCheck::Stop(StopReason::SpendCap));

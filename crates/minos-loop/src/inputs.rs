@@ -61,6 +61,20 @@ impl RunInputs<'_> {
     pub fn manifest_id(&self) -> ManifestId {
         ManifestId::of(self.manifest_bytes)
     }
+
+    /// The size a single-shot prompt must carry, in bytes: the program file plus every base surface file,
+    /// saturating. `SurfaceStats` is built from it, so the driver's routing and `minos check`'s route table see
+    /// the same figure.
+    #[must_use]
+    pub fn surface_bytes(&self) -> u64 {
+        let size = |len: usize| u64::try_from(len).unwrap_or(u64::MAX);
+        self.base
+            .tree()
+            .iter()
+            .fold(size(self.program.len()), |total, (_, bytes)| {
+                total.saturating_add(size(bytes.len()))
+            })
+    }
 }
 
 /// How a resume relates to the manifest the run recorded.

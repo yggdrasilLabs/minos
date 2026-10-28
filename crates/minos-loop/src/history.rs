@@ -1,5 +1,5 @@
-//! What a propose step reads from the run: the parent tree, the prompt's history, and the steer notes (06-CONTEXT
-//! D-05, D-07, D-08, D-09; 07-CONTEXT D-09, D-12).
+//! What a propose step reads from the run: the parent tree, the prompt's history, the steer notes, and the
+//! recorded manifest (06-CONTEXT D-05, D-07, D-08, D-09; 07-CONTEXT D-09, D-12; 07-REVIEW WR-03).
 //!
 //! Each reader is a pure function of the ledger fold and the blob store, so a resumed run builds the same parent
 //! tree, history, and notes as an uninterrupted one at the same generation.
@@ -16,14 +16,21 @@
 //!
 //! A recorded diff is re-read through [`CumulativeDiff::recorded`], which accepts it only when it hashes to the
 //! experiment the ledger recorded it under, so a tampered or substituted diff blob never becomes a parent tree.
+//!
+//! # Recorded manifests
+//!
+//! A run's manifest is read back from the blob of its exact bytes by [`recorded_manifest`] (the one in effect
+//! now) and [`recorded_manifest_at`] (the one in effect at a generation). The driver and the CLI share this one
+//! implementation, so a missing, over-cap, or tampered blob is always [`DriverError::ManifestRecordUnreadable`]
+//! and never reported as a manifest edit.
 
 use minos_core::diff::Diff;
 use minos_core::diff::apply::{Tree, apply};
 use minos_core::diff::cumulative::{BaseTree, CumulativeDiff};
-use minos_core::id::{BlobId, ExperimentId};
+use minos_core::id::{BlobId, ExperimentId, ManifestId, RunId};
 use minos_core::ledger::DecisionKind;
 use minos_core::limits::{
-    Limits, MAX_LOG_EXCERPT_BYTES, MAX_STAGE_LOG_BYTES, MAX_STEER_NOTE_BYTES,
+    Limits, MAX_LOG_EXCERPT_BYTES, MAX_MANIFEST_BYTES, MAX_STAGE_LOG_BYTES, MAX_STEER_NOTE_BYTES,
 };
 use minos_core::manifest::{JudgeVersion, Manifest};
 use minos_core::outcome::{Outcome, Reason, Stage};
@@ -240,4 +247,57 @@ pub fn notes<S: Blobs>(
             Ok(SteerNote::new(ordinal, &String::from_utf8_lossy(&bytes)))
         })
         .collect()
+}
+
+/// The manifest the run has in effect now, read back from its blob.
+///
+/// # Errors
+///
+/// [`DriverError::ManifestRecordUnreadable`] when the blob of [`RunState::manifest`] is absent, over
+/// [`MAX_MANIFEST_BYTES`], or tampered, or its bytes are not a manifest: a store problem a human must look at,
+/// never reported as a manifest edit (07-REVIEW WR-03). [`DriverError::Store`] for any other store error.
+pub fn recorded_manifest<S: Blobs>(store: &S, state: &RunState) -> Result<Manifest, DriverError> {
+    manifest_blob(store, state.run(), state.manifest())
+}
+
+/// The manifest the run had in effect at `generation`, read back from its blob: the latest `ManifestChanged`
+/// from that generation or earlier, else the manifest the run started with.
+///
+/// # Errors
+///
+/// As [`recorded_manifest`], for the blob of [`RunState::manifest_at`] `generation`.
+pub fn recorded_manifest_at<S: Blobs>(
+    store: &S,
+    state: &RunState,
+    generation: u32,
+) -> Result<Manifest, DriverError> {
+    manifest_blob(store, state.run(), state.manifest_at(generation))
+}
+
+/// The manifest whose exact bytes are the blob with `manifest`'s digest, read under [`MAX_MANIFEST_BYTES`].
+fn manifest_blob<S: Blobs>(
+    store: &S,
+    run: &RunId,
+    manifest: &ManifestId,
+) -> Result<Manifest, DriverError> {
+    let unreadable = || DriverError::ManifestRecordUnreadable {
+        run: *run,
+        manifest: *manifest,
+    };
+    // A manifest's ID is the plain SHA-256 of its bytes, so the blob of those bytes has the same digest.
+    let blob = manifest
+        .to_hex()
+        .parse::<BlobId>()
+        .map_err(|_| unreadable())?;
+    // The same cap the CLI read the manifest under, so an accepted manifest is never unreadable here (IN-01).
+    let bytes = store
+        .get(&blob, MAX_MANIFEST_BYTES)
+        .map_err(|source| match source {
+            StoreError::BlobMissing { .. }
+            | StoreError::BlobTooLarge { .. }
+            | StoreError::BlobTampered { .. } => unreadable(),
+            source => DriverError::Store { run: *run, source },
+        })?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| unreadable())?;
+    Manifest::parse_toml(text).map_err(|_| unreadable())
 }
