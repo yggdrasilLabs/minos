@@ -14,11 +14,16 @@
 //!
 //! The guards are public and tested on their own: [`denylist`], [`scan`], and [`clean`]. None of them produces a
 //! tarball, so exposing them opens no path around the scan.
+//!
+//! [`read_files`] is the strict in-memory read-back of a snapshot tarball, the counterpart of the packer:
+//! [`Snapshot::surface`] uses it at `check` and `run` for the run's base surface and program bytes, and the CLI
+//! uses it on the stored base blob at `report`, `show`, and `adopt`, so neither needs the working tree.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 
+use minos_core::diff::apply::Tree;
 use minos_core::id::{BlobId, TreeId};
 use minos_core::manifest::Manifest;
 use minos_core::path::RelPath;
@@ -28,12 +33,14 @@ pub mod clean;
 pub mod denylist;
 pub mod judge;
 mod pack;
+mod read;
 pub mod scan;
 mod walk;
 
 pub use clean::{CleanPolicy, Dirty, check_clean};
 pub use denylist::{DenyRule, deny_component};
 pub use judge::{JudgePack, pack_judge_data};
+pub use read::{ReadError, read_files};
 pub use scan::{ScanError, Scanner, SecretHit};
 
 /// One entry the hard denylist dropped from the snapshot. Every drop is reported, so nothing the user can see in
@@ -199,6 +206,45 @@ impl Snapshot {
     #[must_use]
     pub const fn report(&self) -> &PackReport {
         &self.report
+    }
+
+    /// The run's base surface and program bytes, read back from this snapshot's own tarball with [`read_files`].
+    ///
+    /// The tree holds every `[surface]` path of `manifest`, writable and readable, and is the run's base surface:
+    /// `BaseTree::new(snap.tree(), tree)`. The bytes are the program file's, `RunInputs.program`. Both come from the
+    /// bytes that were packed, so a file edited after the pack can never reach the prompt or the base.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadError`] if the tarball does not read back or lacks a surface or program path. Neither happens for a
+    /// snapshot built against the same manifest, which [`snapshot`] refuses when a surface or program path is
+    /// missing.
+    pub fn surface(&self, manifest: &Manifest) -> Result<(Tree, Vec<u8>), ReadError> {
+        let program = manifest.program();
+        let surface: BTreeSet<RelPath> = manifest
+            .writable()
+            .iter()
+            .chain(manifest.readable())
+            .cloned()
+            .collect();
+        let mut wanted = surface.clone();
+        wanted.insert(program.clone());
+        let files = read_files(&self.tarball, &wanted)?;
+
+        let mut tree = Tree::new();
+        let mut program_bytes = None;
+        for (path, bytes) in files.iter() {
+            if surface.contains(path) {
+                tree.insert(path.clone(), bytes.to_vec());
+            }
+            if path == program {
+                program_bytes = Some(bytes.to_vec());
+            }
+        }
+        let program_bytes = program_bytes.ok_or_else(|| ReadError::Missing {
+            paths: vec![program.clone()],
+        })?;
+        Ok((tree, program_bytes))
     }
 }
 

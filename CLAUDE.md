@@ -88,7 +88,8 @@ crates/
   minos-store/           Ledger and Blobs traits; file-backed and in-memory impls
   minos-sandbox/         roles, specs, sealed plans, Untrusted<T>, Backend trait
   minos-source/          the deterministic source snapshot: walk, denylist, secret scan, clean check, ustar tarball,
-                         and the judge data pack (`pack_judge_data`)
+                         the judge data pack (`pack_judge_data`), and the strict read-back of a snapshot tarball
+                         (`read_files`, `Snapshot::surface`) for the base surface and program bytes
   minos-backend-krun/    LaunchPlan -> libkrun VM, driven through the minos-vmm process: KrunBackend, the host probes,
                          job directories and the sweep, the supervisor, the chunk receiver, the embedded Seatbelt
                          profile, the input disk writer, and the root image packer
