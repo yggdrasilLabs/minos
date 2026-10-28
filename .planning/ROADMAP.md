@@ -434,12 +434,12 @@ Plans:
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 15 plans
+**Plans**: 1/15 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 08-01-PLAN.md — Core and loop seams: `CostLine` with token counts, `run_cost`, the D-08 constants, `RunState::proposals`, the advisory `noise_check` rustdoc, public `recorded_manifest_at` and `surface_bytes` (wave 1)
+- [x] 08-01-PLAN.md — Core and loop seams: `CostLine` with token counts, `run_cost`, the D-08 constants, `RunState::proposals`, the advisory `noise_check` rustdoc, public `recorded_manifest_at` and `surface_bytes` (wave 1)
 - [ ] 08-02-PLAN.md — `Ledger::runs` on both stores with contract cases; a lock probe never creates a listed run (wave 1)
 - [ ] 08-03-PLAN.md — `minos_source::read_files` and `Snapshot::surface`: the strict read-back of a snapshot or stored base tarball (wave 1)
 - [ ] 08-04-PLAN.md — The sample's Rust crates: the `logparse` candidate, the `logparse-judge` judge, the data and answer key, `program.md`, the improved-parser fixture, `exclude = ["examples"]` (wave 1)
@@ -486,4 +486,4 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
 | 7. Runner and Loop | 17/17 | Complete    | 2026-10-24 |
-| 8. CLI, Sample Project, and Docs | 0/15 | Planned | - |
+| 8. CLI, Sample Project, and Docs | 1/15 | In Progress|  |

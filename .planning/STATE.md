@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 8
-current_phase_name: CLI, Sample Project, and Docs
+current_phase: 08
+current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Phase 8 context gathered
-last_updated: "2026-10-28T17:16:02.429Z"
-last_activity: 2026-10-24
-last_activity_desc: "Completed quick task 261024-i81: WR-01 optional ordinal on StopRequested"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-10-28T17:27:12.613Z"
+last_activity: 2026-10-28
+last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
-  total_plans: 87
-  completed_plans: 87
-  percent: 88
+  total_plans: 102
+  completed_plans: 88
+  percent: 86
 ---
 
 # Project State
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-09)
 
 **Core value:** Untrusted experiment code runs in a hardware-virtualized sandbox with no network, cannot touch the judge that scores it, and nothing it produces reaches the user's machine without an acknowledged report.
-**Current focus:** Phase 07 — runner-and-loop
+**Current focus:** Phase 08 — cli-sample-project-and-docs
 
 ## Current Position
 
-Phase: 8 — CLI, Sample Project, and Docs
-Plan: Not started
+Phase: 08 (cli-sample-project-and-docs) — EXECUTING
+Plan: 2 of 15
 Status: Ready to execute
-Last activity: 2026-10-24 - Completed quick task 261024-i81: WR-01 optional ordinal on StopRequested
+Last activity: 2026-10-28 — Phase 08 execution started
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -148,6 +148,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P15 | 15min | 2 tasks | 8 files |
 | Phase 07 P16 | 9 min | 3 tasks | 6 files |
 | Phase 07 P17 | 12min | 2 tasks | 5 files |
+| Phase 08 P01 | 6 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -353,6 +354,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-16: the crash-point resume test re-measures a re-run trial's candidate usage, so the first-measurement rule (Pitfall 1) is exercised, not hidden by an equal duplicate
 - [Phase 07]: 07-17: the test-variable check's one hit was a doc comment in locate.rs; it was reworded with the same meaning and the whole gate rerun, never narrowing the check
 - [Phase 07]: 07-17: cargo clean runs after the SUMMARY/STATE/ROADMAP commit, then a git-only commit records it (the 06-10 pattern)
+- [Phase 08]: 08-01: batch_output_tokens is exact when it fits and saturates otherwise (q*batch + ceil(r*batch/d)), avoiding a truncating u128 cast
+- [Phase 08]: 08-01: run_cost returns the unrounded Cost; spend_ok and every CLI cost figure share it
 
 ### Pending Todos
 
@@ -384,6 +387,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T14:43:33.696Z
-Stopped at: Phase 8 context gathered
-Resume file: .planning/phases/08-cli-sample-project-and-docs/08-CONTEXT.md
+Last session: 2026-10-28T17:27:12.607Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None
