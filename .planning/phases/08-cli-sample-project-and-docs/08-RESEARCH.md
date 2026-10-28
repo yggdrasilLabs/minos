@@ -480,16 +480,24 @@ The proxy used Docker Desktop's arm64 Linux VM, not libkrunfw's 6.12.109 kernel,
 | A4 | The in-VM `RLIMIT_AS` threshold matches the proxy within about ±64 MiB | Pitfall 5 | If higher, a 768 MiB allowance could still be close for larger crates; the planned in-VM bisection settles it |
 | A5 | `--directory=<prefix>` is the right git form to print for a project in a repository subdirectory | Pitfall 1 | A user copies a command that does nothing; the golden test covers the printed form |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+Each question below is decided in the plan named on its RESOLVED line; the planner recorded the decisions at planning time (2026-10-28), and the plans carry the tests that hold them.
 
 1. **How does `minos run` choose between start and resume?**
    - What we know: CLI-06 says "starts or resumes". 07-CONTEXT D-06 says `check` "never creates the run that `run` later resumes". D-10's default "latest run" will often be a `check` run. Nothing in the ledger marks a diagnostic run, and no wire change is allowed.
    - Recommendation: `minos run --generations N` always starts a new run (`Driver::start`); `minos run --run <prefix> --generations N` resumes that run (`Driver::resume`, absolute target). `status`/`log` default to the latest run whatever created it. Confirm with the user. A CLI-side marker outside the ledger (for example a `check` sidecar file) is possible but is unhashed state in `.minos`.
+   - RESOLVED: `minos run --generations N` starts a new run by default and `--run <prefix>` resumes that run; N is the absolute generation in both cases, a new run whose `RunId` already exists is refused naming `--run`, and no sidecar marker is added (08-08).
 2. **Does `run` refuse a `NoiseVerdict::Refuse`?** `policy.rs:497` says yes "unless the user overrides it (Phase 8)"; D-07 says advisory only. Recommendation: `run` prints the verdict at start and does not refuse (D-07), and the rustdoc is corrected. Confirm.
+   - RESOLVED: the verdict is advisory only. `noise_check`'s rustdoc is corrected to say so (08-01), `check` prints it with advice and never changes its exit code for it (08-07), and `run` prints it at start and never refuses (08-08).
 3. **Is the sample's `minos.lock` committed?** It records the `minos-guest` SHA-256 and the root image digest, which change with every guest rebuild, and `Lock::check` refuses a guest that no longer matches. Recommendation: ignore it in `examples/logparse/.gitignore` and have the README walk through `env build` then `judge push`. User projects commit theirs.
+   - RESOLVED: the sample's `minos.lock` is gitignored (`/minos.lock` in `examples/logparse/.gitignore`) and its README walks through `env build` then `judge push` (08-05); the `.gitignore` that `minos init` writes for a user project does not ignore the lock, so user projects commit theirs (08-11).
 4. **D-07's boot-to-boot variance cannot be measured on a deterministic objective.** The planner should record a zero spread for the sample and keep the default of 3 as an assumption, or add a measurement-only run of a timing probe (no new trusted path, numbers not used for scoring) if the user wants the blocker closed now.
+   - RESOLVED: the sample's objective is deterministic, so its spread is 0 by construction, and the default of 3 trials is kept as a recorded assumption (08-05). 08-13 records five baseline boots with their objective values and host-measured VM times, and writes a "Decision for the user" paragraph in 08-EVIDENCE.md stating that D-07 was met partially; the user answers it at 08-13's checkpoint. 08-15 restates the STATE.md Phase 8 blocker with that outcome rather than closing it. No timing probe is added in this phase.
 5. **"exact" in docs.** CONTEXT bans the word "exact". Does that include "exactly"? Recommendation: ban the whole word `\bexact\b` in README, SECURITY, and CLI output, and allow "exactly". Confirm.
+   - RESOLVED: only the whole word `exact` is banned and `exactly` is allowed; `docs_words` enforces it on README.md, SECURITY.md, and the sample's README (08-14), and the CLI output tests apply the same whole-word rule plus the substring `estimate` (08-07 to 08-12).
 6. **The sample's proposer ladder for the model-free VM test.** `Proposer::without_provider()` routes only the sweep tier. A sweep needs a `[[param]]` whose anchored line's remainder is rewritten whole (sweep.rs module docs), which drops a Rust line's trailing `;`. Use string `choices` that include the terminator (`["4;", "8;", "16;"]`) or an `include_str!` text file as a second writable file. Alternatively the VM test injects `FakeProvider` with a scripted single_shot reply. Either works through Pattern 1.
+   - RESOLVED: the VM test injects `FakeProvider` with scripted single_shot replies (the improved-parser fixture for generation 1); the sample keeps one `single_shot` proposer and no `[[param]]` (08-13).
 
 ## Environment Availability
 
