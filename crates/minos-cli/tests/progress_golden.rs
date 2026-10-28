@@ -58,9 +58,30 @@ fn lines() -> Vec<String> {
             Some(65_000),
         ),
         trial_line(0, "0a1b2c3d4e5f", "baseline", "scored", None, Some(41_000)),
-        trial_line(12, "5e5e5e5e5e5e", "sweep", "rejected:gate_failed", None, None),
-        trial_line(4, "1111aaaa2222", "sweep", "crashed:build", None, Some(5_000)),
-        trial_line(4, "3333bbbb4444", "sweep", "timed_out:run", None, Some(300_000)),
+        trial_line(
+            12,
+            "5e5e5e5e5e5e",
+            "sweep",
+            "rejected:gate_failed",
+            None,
+            None,
+        ),
+        trial_line(
+            4,
+            "1111aaaa2222",
+            "sweep",
+            "crashed:build",
+            None,
+            Some(5_000),
+        ),
+        trial_line(
+            4,
+            "3333bbbb4444",
+            "sweep",
+            "timed_out:run",
+            None,
+            Some(300_000),
+        ),
         trial_line(
             5,
             "9999cccc8888",
@@ -112,7 +133,14 @@ fn the_documented_examples_hold() -> TestResult {
     let baseline = trial_line(0, "0a1b2c3d4e5f", "baseline", "scored", None, Some(41_000));
     let tier = baseline.get(17..28).ok_or("the baseline line is short")?;
     assert_eq!(tier, "baseline   ");
-    let gate = trial_line(12, "5e5e5e5e5e5e", "sweep", "rejected:gate_failed", None, None);
+    let gate = trial_line(
+        12,
+        "5e5e5e5e5e5e",
+        "sweep",
+        "rejected:gate_failed",
+        None,
+        None,
+    );
     assert!(gate.starts_with("g12 "), "{gate}");
     assert!(gate.ends_with("n/a     n/a"), "{gate}");
     Ok(())
