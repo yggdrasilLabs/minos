@@ -1,6 +1,6 @@
 //! `minos_cli::status::status`, `minos_cli::log::log`, and `minos_cli::show::show` over a temporary project's
 //! `FileStore`, on runs driven by `minos_cli::run::run` with a fake job runner and either the sweep tier or a
-//! scripted single_shot provider, so no test boots a VM or calls a model (CLI-07, COST-02; 08-CONTEXT D-10, D-15,
+//! scripted `single_shot` provider, so no test boots a VM or calls a model (CLI-07, COST-02; 08-CONTEXT D-10, D-15,
 //! D-16, D-17).
 //!
 //! - `status` on a run driven to generation 2 prints its ID and start, `generations concluded: 2`,
@@ -17,7 +17,7 @@
 //! - `show` of a generation-1 experiment prints its header, one line per trial with its outcome, percent, and
 //!   elapsed time, the lineage from the baseline, the rationale, and the cumulative diff of the writable file.
 //! - `show` of the baseline marks it `(baseline)` and prints its trials and no diff.
-//! - A single_shot rationale holding an ESC sequence and U+202E reaches the output with neither.
+//! - A `single_shot` rationale holding an ESC sequence and U+202E reaches the output with neither.
 //! - Stage logs holding an ESC sequence print only with `--logs`, one block per stored stage, with no ESC byte.
 //! - An experiment prefix that names two experiments is `AddressError::Ambiguous`.
 //!
@@ -119,7 +119,7 @@ step = 1
 /// The sweep proposer.
 const SWEEP: &str = "\n[[proposer]]\nkind = \"sweep\"\nbatch = 2\n";
 
-/// A single_shot proposer of one proposal per call.
+/// A `single_shot` proposer of one proposal per call.
 const SINGLE_SHOT: &str = "\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"haiku\"\nbatch = 1\n";
 
 /// The Dockerfile the lock image entry is written for.
@@ -744,7 +744,7 @@ fn show_text<S: Ledger + Blobs>(
     store: &S,
     exp: &HexPrefix,
     logs: bool,
-) -> Fallible<(Result<(), ShowError>, Vec<u8>)> {
+) -> (Result<(), ShowError>, Vec<u8>) {
     let mut out = Vec::new();
     let result = show(
         store,
@@ -753,12 +753,12 @@ fn show_text<S: Ledger + Blobs>(
         ShowOptions::new(logs, IdStyle::Short),
         &mut out,
     );
-    Ok((result, out))
+    (result, out)
 }
 
 /// `show` that must succeed: its output as text.
 fn shown<S: Ledger + Blobs>(store: &S, exp: &ExperimentId, logs: bool) -> Fallible<String> {
-    let (result, out) = show_text(store, &prefix_of(&exp.to_hex(), 12)?, logs)?;
+    let (result, out) = show_text(store, &prefix_of(&exp.to_hex(), 12)?, logs);
     result?;
     Ok(String::from_utf8(out)?)
 }
@@ -868,7 +868,7 @@ fn a_hostile_rationale_reaches_the_output_with_no_escape_or_override() -> TestRe
     let state = state_of(prepared.store(), &run)?;
     let exp = first_of_generation_one(&state)?;
 
-    let (result, out) = show_text(prepared.store(), &prefix_of(&exp.to_hex(), 12)?, false)?;
+    let (result, out) = show_text(prepared.store(), &prefix_of(&exp.to_hex(), 12)?, false);
     result?;
 
     let text = String::from_utf8(out.clone())?;
@@ -907,7 +907,7 @@ fn stage_logs_print_only_with_logs_and_without_escapes() -> TestResult {
     let exp = first_of_generation_one(&state)?;
 
     let quiet = shown(store, &exp, false)?;
-    let (result, out) = show_text(store, &prefix_of(&exp.to_hex(), 12)?, true)?;
+    let (result, out) = show_text(store, &prefix_of(&exp.to_hex(), 12)?, true);
     result?;
     let loud = String::from_utf8(out.clone())?;
 
@@ -953,7 +953,7 @@ fn an_ambiguous_experiment_prefix_is_refused() -> TestResult {
         prepared.store(),
         &HexPrefix::from_str(&shared.to_string())?,
         false,
-    )?;
+    );
 
     let Err(error) = result else {
         return Err("an ambiguous prefix was accepted".into());
