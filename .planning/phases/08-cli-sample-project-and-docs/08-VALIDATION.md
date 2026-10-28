@@ -68,7 +68,7 @@ created: 2026-10-28
 | 08-14-T1 | 08-14 | 5 | DOCS-03 | T-08-14-01, T-08-14-02, T-08-14-04 | Trust base, preflight, and exceptions stated; candidate path corrected | doc check | `test -f SECURITY.md && grep -n 'KRUN_BOOT_START_NS' SECURITY.md && grep -n '/scratch/candidate/out' CLAUDE.md crates/minos-sandbox/src/untrusted.rs && cargo doc -p minos-sandbox --no-deps` | ✅ created (`SECURITY.md`) | ✅ green |
 | 08-14-T2 | 08-14 | 5 | DOCS-03, DOCS-04, COST-02 | T-08-14-01, T-08-14-03 | No overclaim; provider terms and required names present | text scan | `cargo test -p minos-cli --test docs_words && cargo clippy -p minos-cli --all-targets -- -D warnings` | ✅ created (`docs_words`, `README.md`) | ✅ green |
 | 08-15-T1 | 08-15 | 6 | all phase requirements | T-08-15-01, T-08-15-02, T-08-15-03, T-08-15-04, T-08-15-05 | Full gate, sample gate, C-01, C-02, LOOP-01 grep, and test-variable grep on the final code; the D-07 blocker restated, never closed | full gate | the Full suite command above plus the sample gate, C-01, C-02 over `crates` and `examples`, the LOOP-01 grep, and the test-variable grep over `crates/*/src` (08-EVIDENCE.md "Final gate") | ✅ | ✅ green |
-| 08-15-T2 | 08-15 | 6 | GATE-06 | n/a | cargo clean last | structural | `test ! -d target/debug && test ! -d target/examples` | n/a | ⬜ pending |
+| 08-15-T2 | 08-15 | 6 | GATE-06 | n/a | cargo clean last | structural | `test ! -d target/debug && test ! -d target/examples` (08-EVIDENCE.md "cargo clean": exit 0, 168360 files removed) | n/a | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

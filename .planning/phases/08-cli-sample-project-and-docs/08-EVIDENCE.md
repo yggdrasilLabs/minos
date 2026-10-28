@@ -1969,3 +1969,17 @@ was run instead with `compgen -G` on each form, an either-or test, and printed 2
 
 Result: every gate command, every sample gate command, C-01, C-02, the LOOP-01 check, the test-variable check, and
 the validation-target check pass on the final code.
+
+## cargo clean (08-15 Task 2, GATE-06)
+
+Every step of the final gate above passed, and the gate record, the requirements, the restated STATE.md blocker, and
+the filled validation contract were committed (`1cee0a4`), so `cargo clean` ran next as the last cargo command of the
+phase; no cargo command ran after it. It removed `target/`, including `target/examples` and `target/examples-improved`.
+Afterwards `test ! -d target/debug` and `test ! -d target/examples` exited 0, and `target/` no longer exists.
+
+```
+$ cargo clean
+     Removed 168360 files, 18.1GiB total
+```
+
+cargo clean: exit 0, run after the final gate (GATE-06)
