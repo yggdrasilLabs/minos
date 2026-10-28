@@ -96,43 +96,148 @@ fn main() -> ExitCode {
 
 /// Scores the output named by `args` against the key and writes the scorecard.
 fn run(args: &[OsString]) -> Result<(), Failure> {
-    let _ = args;
-    Err(Failure::Usage)
+    let [answers, output, scorecard] = args else {
+        return Err(Failure::Usage);
+    };
+    let key_text = std::fs::read_to_string(answers).map_err(|_| Failure::KeyUnreadable)?;
+    let key = parse_key(&key_text).ok_or(Failure::KeyMalformed)?;
+    let output = read_output(Path::new(output));
+    let card = score(&key, output.as_deref());
+    std::fs::write(scorecard, card.to_json()).map_err(|_| Failure::ScorecardUnwritable)
 }
 
 /// The key rows, in line order; `None` when the key is malformed.
+///
+/// Lines starting with `#` are comments. Every other line is `<N>\t<split>\t<4 fields>`, numbered from 1 with
+/// no gap, and both splits must be present.
 fn parse_key(text: &str) -> Option<Vec<Answer>> {
-    let _ = (text, MAX_KEY_ROWS, FIELDS);
-    None
+    let mut key: Vec<Answer> = Vec::new();
+    for line in text.lines().filter(|line| !line.starts_with('#')) {
+        if key.len() >= MAX_KEY_ROWS {
+            return None;
+        }
+        let mut columns = line.split('\t');
+        let number: usize = columns.next()?.parse().ok()?;
+        if number != key.len().checked_add(1)? {
+            return None;
+        }
+        let split = match columns.next()? {
+            "visible" => Split::Visible,
+            "held_out" => Split::HeldOut,
+            _ => return None,
+        };
+        let fields: Vec<String> = columns.map(str::to_owned).collect();
+        if fields.len() != FIELDS {
+            return None;
+        }
+        key.push(Answer { split, fields });
+    }
+    let has = |split: Split| key.iter().any(|answer| answer.split == split);
+    (has(Split::Visible) && has(Split::HeldOut)).then_some(key)
 }
 
 /// The candidate's output, or `None` when it is missing, unreadable, over the cap, or not UTF-8.
 fn read_output(path: &Path) -> Option<String> {
-    let _ = (path, MAX_OUTPUT_BYTES);
-    None
+    let file = File::open(path).ok()?;
+    let mut text = String::new();
+    file.take(MAX_OUTPUT_BYTES.checked_add(1)?)
+        .read_to_string(&mut text)
+        .ok()?;
+    let within_cap = u64::try_from(text.len()).is_ok_and(|len| len <= MAX_OUTPUT_BYTES);
+    within_cap.then_some(text)
 }
 
 /// Scores the candidate's output text against the key.
 fn score(key: &[Answer], output: Option<&str>) -> Scorecard {
-    let _ = (
-        key,
-        output,
-        BTreeMap::<u8, u8>::new(),
-        File::open::<&Path>,
-        Split::Visible,
-        Split::HeldOut,
-    );
+    let rows: Vec<&str> = output
+        .map(|text| text.split_terminator('\n').collect())
+        .unwrap_or_default();
+
+    let rows_match = rows.len() == key.len()
+        && (1_usize..).zip(&rows).all(|(number, row)| {
+            let mut columns = row.split('\t');
+            columns.next() == Some(number.to_string().as_str()) && columns.count() == FIELDS
+        });
+
+    // Each row's fields after its line number, by line number; a number written twice is ambiguous and matches
+    // nothing.
+    let mut by_number: BTreeMap<&str, Option<&str>> = BTreeMap::new();
+    for row in &rows {
+        let (number, fields) = row.split_once('\t').unwrap_or((row, ""));
+        by_number
+            .entry(number)
+            .and_modify(|seen| *seen = None)
+            .or_insert(Some(fields));
+    }
+
+    let mut visible = Tally::default();
+    let mut held_out = Tally::default();
+    for (number, answer) in (1_usize..).zip(key) {
+        let tally = match answer.split {
+            Split::Visible => &mut visible,
+            Split::HeldOut => &mut held_out,
+        };
+        let candidate = by_number
+            .get(number.to_string().as_str())
+            .copied()
+            .flatten();
+        let matched = candidate.map_or(0, |fields| {
+            fields
+                .split('\t')
+                .zip(&answer.fields)
+                .filter(|(given, expected)| given == expected)
+                .count()
+        });
+        tally.add(matched);
+    }
+
     Scorecard {
-        rows_match: -1.0,
-        accuracy: -1.0,
-        accuracy_held_out: -1.0,
+        rows_match: if rows_match { 1.0 } else { 0.0 },
+        accuracy: visible.fraction(),
+        accuracy_held_out: held_out.fraction(),
+    }
+}
+
+/// Matched fields over total fields for one split.
+#[derive(Default)]
+struct Tally {
+    matched: u32,
+    total: u32,
+}
+
+impl Tally {
+    /// Counts one key row, of which `matched` fields were right.
+    fn add(&mut self, matched: usize) {
+        // The key holds at most MAX_KEY_ROWS rows of FIELDS fields, so neither count can overflow a u32.
+        self.matched = self
+            .matched
+            .saturating_add(u32::try_from(matched).unwrap_or(u32::MAX));
+        self.total = self
+            .total
+            .saturating_add(u32::try_from(FIELDS).unwrap_or(u32::MAX));
+    }
+
+    /// The fraction in `[0, 1]`; 0 for a split with no rows, so the result is always finite.
+    fn fraction(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            f64::from(self.matched) / f64::from(self.total)
+        }
     }
 }
 
 impl Scorecard {
-    /// The scorecard in Minos's wire form.
+    /// The scorecard in Minos's wire form. Every value is a finite fraction, and Rust's `f64` `Display` writes it
+    /// as a plain decimal JSON number.
     fn to_json(&self) -> String {
-        String::new()
+        format!(
+            "{{\"v\":1,\"metrics\":[\
+             {{\"name\":\"rows_match\",\"value\":{},\"held_out\":false}},\
+             {{\"name\":\"accuracy\",\"value\":{},\"held_out\":false}},\
+             {{\"name\":\"accuracy_held_out\",\"value\":{},\"held_out\":true}}]}}",
+            self.rows_match, self.accuracy, self.accuracy_held_out
+        )
     }
 }
 
@@ -161,11 +266,10 @@ mod tests {
         key_text
             .lines()
             .filter(|line| !line.starts_with('#'))
-            .map(|line| {
-                let mut columns = line.split('\t');
-                let number = columns.next().unwrap_or_default();
-                let fields: Vec<&str> = columns.skip(1).collect();
-                format!("{number}\t{}\n", fields.join("\t"))
+            .flat_map(|line| {
+                let (number, rest) = line.split_once('\t').unwrap_or((line, ""));
+                let (_split, fields) = rest.split_once('\t').unwrap_or((rest, ""));
+                [number, "\t", fields, "\n"]
             })
             .collect()
     }
@@ -199,7 +303,7 @@ mod tests {
         let output: String = perfect_output(SMALL_KEY)
             .lines()
             .take(3)
-            .map(|row| format!("{row}\n"))
+            .flat_map(|row| [row, "\n"])
             .collect();
 
         // Act
