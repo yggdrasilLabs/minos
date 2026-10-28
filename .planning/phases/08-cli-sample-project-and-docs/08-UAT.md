@@ -1,18 +1,14 @@
 ---
-status: testing
+status: partial
 phase: 08-cli-sample-project-and-docs
 source: [08-VERIFICATION.md]
 started: 2026-10-28T20:55:23Z
-updated: 2026-10-28T20:55:23Z
+updated: 2026-10-28T22:38:02Z
 ---
 
 ## Current Test
 
-number: 1
-name: README quick start with the real binary and a real model call
-expected: |
-  From examples/logparse, `minos env build`, `judge push judge`, `check`, `run --generations 3`, `status`, `report <exp>`, and `adopt <exp> --reviewed <hash>` each work as the README says, with the real single_shot haiku provider (not the scripted stand-in), `approx. cost` shows real token counts, and the patch applies with `patch -p1` and with the printed `git apply --directory` form.
-awaiting: user response
+[testing paused — 3 items outstanding; deferred by the user on 2026-10-28, resume with /gsd-verify-work 8]
 
 ## Tests
 
