@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-10-28T17:38:22.184Z"
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-10-28T17:47:27.261Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 90
+  completed_plans: 91
   percent: 88
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 4 of 15
+Plan: 5 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -151,6 +151,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P01 | 6 min | 2 tasks | 9 files |
 | Phase 08 P02 | 4min | 1 tasks | 7 files |
 | Phase 08 P03 | 5 min | 1 tasks | 4 files |
+| Phase 08 P04 | 8m | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -361,6 +362,8 @@ Recent decisions affecting current work:
 - [Phase 08]: FileStore::runs lists a run only when its ledger's first line is complete or over the line cap; lock-only, empty, and torn-only ledgers are not runs, and a ledger read would refuse is still listed (08-02)
 - [Phase 08]: Listing runs takes no ledger lock and creates nothing, so probing a run never invents one (08-02)
 - [Phase 08]: 08-03: read_files checks every snapshot tarball entry (requested or not) under the snapshot caps and keeps only the requested bytes; Snapshot::surface builds the base surface and program bytes from the packed tarball
+- [Phase 08]: 08-04: the logparse judge matches candidate rows by their line-number field; a duplicated number scores no fields; output over 16 MiB, unreadable, or non-UTF-8 scores 0 with exit 0
+- [Phase 08]: 08-04: the logparse visible and held-out halves mirror each other's messiness, so the baseline scores 29/96 on both and only hard-coded visible answers diverge
 
 ### Pending Todos
 
@@ -392,6 +395,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T17:38:18.365Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-10-28T17:47:27.257Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None
