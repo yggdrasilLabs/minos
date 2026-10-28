@@ -1,0 +1,67 @@
+# The Minos sample project: improve a log parser so it extracts four fields from messy log lines.
+# README.md walks through building, pushing the judge, checking, running, reviewing, and adopting.
+
+[project]
+name = "logparse"
+kind = "optimize"
+program = "program.md"
+
+[surface]
+# The one file a proposer may change, and the context it sees beside program.md.
+writable = ["src/parse.rs"]
+readable = ["src/main.rs", "src/record.rs", "data/input.log", "data/examples.tsv"]
+
+[source]
+# `judge/` holds the judge's source and its answer key. The judge argv below names no project path (every
+# argument is an absolute path or a bare word), so this exclude is what keeps the key out of the source snapshot
+# and the image build context. `minos judge push judge` also requires the judge directory to lie under an exclude.
+exclude = ["judge/", "target/"]
+
+[environment]
+dockerfile = "minos.Dockerfile"
+requires = { arch = "arm64" }
+# memory_mib and scratch_mib stay at their defaults (2048 and 1024).
+
+[commands]
+# Std only and a committed Cargo.lock, so the build runs offline in the VM with --frozen.
+build = ["cargo", "build", "--release", "--frozen"]
+run = ["./target/release/logparse", "data/input.log", "/out/fields.tsv"]
+
+[budget]
+build = "5m"
+run = "1m"
+judge = "5m"
+spend_usd = 5
+
+[judge]
+version = 1
+# The judge VM unpacks the pushed `judge/` directory into its working directory, /scratch/judge, which is
+# read-only to the judge, so cargo builds into /tmp. It reads its key relative to that directory, reads the
+# candidate's output at /scratch/candidate/out/fields.tsv, and writes the scorecard to /out/scorecard.json.
+command = [
+  "cargo", "run", "--release", "--frozen", "--quiet", "--target-dir", "/tmp/judge-target",
+  "--", "answers.tsv", "/scratch/candidate/out/fields.tsv", "/out/scorecard.json",
+]
+# trials stays at its default of 3. The objective is a pure function of the output, so every baseline trial
+# scores the same and the noise floor is zero.
+
+[[judge.gate]]
+# 1 only when the output has one well-formed row per input line, in order.
+metric = "rows_match"
+
+[[judge.objective]]
+# Fields matched on the visible lines, whose answers data/examples.tsv shows.
+metric = "accuracy"
+goal = "maximize"
+min_improvement = "5%"
+# The same measure on the held-out lines, whose answers only the judge has.
+held_out = "accuracy_held_out"
+
+[policy]
+kind = "greedy"
+width = 2
+
+[[proposer]]
+kind = "single_shot"
+model = "haiku"
+batch = 2

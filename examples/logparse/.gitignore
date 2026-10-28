@@ -1,0 +1,9 @@
+# Files Minos writes into this project. They must stay out of git so the clean check passes after
+# `minos env build` and `minos adopt`.
+/.minos/
+/target/
+# The lock records this machine's minos-guest digest, so it changes whenever the guest is rebuilt.
+# `minos env build` writes it and `minos judge push` adds the judge entry. A project made by `minos init`
+# commits its lock; this sample does not.
+/minos.lock
+/minos-*.patch
