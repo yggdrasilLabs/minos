@@ -275,9 +275,14 @@ fn the_prices_template_is_written_when_none_exists_and_fails_closed() -> TestRes
     );
     assert_eq!(fs::read_to_string(&fixture.prices)?, PRICES_TEMPLATE);
     assert_eq!(mode_of(&fixture.prices)?, 0o600);
-    let parent = fixture.prices.parent().ok_or("the prices path has no parent")?;
+    let parent = fixture
+        .prices
+        .parent()
+        .ok_or("the prices path has no parent")?;
     assert_eq!(mode_of(parent)?, 0o700);
-    let grandparent = parent.parent().ok_or("the prices path has no grandparent")?;
+    let grandparent = parent
+        .parent()
+        .ok_or("the prices path has no grandparent")?;
     assert_eq!(mode_of(grandparent)?, 0o700);
 
     // The template parses, prices compute above zero, and prices no model, so a model proposer fails closed.
@@ -295,7 +300,10 @@ fn the_prices_template_is_written_when_none_exists_and_fails_closed() -> TestRes
 fn a_present_price_table_is_kept_unchanged() -> TestResult {
     // Arrange
     let fixture = Fixture::new()?;
-    let parent = fixture.prices.parent().ok_or("the prices path has no parent")?;
+    let parent = fixture
+        .prices
+        .parent()
+        .ok_or("the prices path has no parent")?;
     fs::create_dir_all(parent)?;
     fs::write(&fixture.prices, b"my own rates\n")?;
 
