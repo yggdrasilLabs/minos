@@ -520,7 +520,7 @@ impl Cost {
 ///
 /// This is the only type in the workspace that formats a dollar amount, so no command prints a bare dollar
 /// figure. It always says "approx." because the price table is the user's own and may lag the provider; it never
-/// prints an estimate and never uses the word "exact". COST-02 adds token counts beside it in Phase 8.
+/// prints an estimate and never uses the word "exact". [`CostLine`] puts the token counts beside it (COST-02).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ApproxCost {
     micro: u128,
@@ -548,5 +548,65 @@ impl fmt::Display for ApproxCost {
             cents += 1;
         }
         write!(f, "approx. cost: ${}.{:02}", cents / 100, cents % 100)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// CostLine
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The one cost line every command prints (COST-02): `approx. cost: $31.40 (in 1500 tokens, out 456 tokens)`.
+///
+/// The dollar figure is written by [`ApproxCost`]'s own `Display`, so `ApproxCost` stays the only type that
+/// formats a dollar amount; this type only adds the token counts beside it. "in" counts every input-side token
+/// the provider metered, cached or not (input, cache creation, and cache read), and "out" counts output tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CostLine {
+    cost: ApproxCost,
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+impl CostLine {
+    /// The line for `cost` and the tokens of `usage`. The input-side sum saturates rather than wraps.
+    #[must_use]
+    pub const fn new(cost: ApproxCost, usage: &Usage) -> Self {
+        Self {
+            cost,
+            input_tokens: usage
+                .input_tokens()
+                .saturating_add(usage.cache_creation_input_tokens())
+                .saturating_add(usage.cache_read_input_tokens()),
+            output_tokens: usage.output_tokens(),
+        }
+    }
+
+    /// The dollar figure.
+    #[must_use]
+    pub const fn cost(&self) -> ApproxCost {
+        self.cost
+    }
+
+    /// Every input-side token: input, cache creation, and cache read, saturating.
+    #[must_use]
+    pub const fn input_tokens(&self) -> u64 {
+        self.input_tokens
+    }
+
+    /// Output tokens.
+    #[must_use]
+    pub const fn output_tokens(&self) -> u64 {
+        self.output_tokens
+    }
+}
+
+impl fmt::Display for CostLine {
+    /// Writes the [`ApproxCost`] through its own `Display`, then ` (in N tokens, out M tokens)`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} (in {} tokens, out {} tokens)",
+            self.cost, self.input_tokens, self.output_tokens
+        )
     }
 }

@@ -220,6 +220,48 @@ pub const SINGLE_SHOT_SURFACE_MAX_BYTES: u64 = 262_144;
 pub const MAX_STEER_NOTE_BYTES: usize = 4096;
 
 // ---------------------------------------------------------------------------------------------------------------
+// Single-shot output advisory (08-CONTEXT D-08)
+//
+// `minos check` warns when a single-shot proposer's `batch` full-file proposals may not fit the `claude` CLI's
+// output cap (06-RESEARCH Pitfall 5). The advisory never refuses; integers only.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The `claude` CLI's default output token cap. Source: code.claude.com/docs/en/env-vars, where
+/// `CLAUDE_CODE_MAX_OUTPUT_TOKENS` defaults to 32,000 for model IDs the CLI cannot resolve; per-model defaults may
+/// be higher, so this figure is conservative (06-RESEARCH Pitfall 5; 08-RESEARCH A2).
+pub const CLI_DEFAULT_OUTPUT_TOKENS: u64 = 32_000;
+
+/// A conservative bytes-per-token figure for full-file proposals.
+///
+/// No official figure exists. Code, and the JSON escaping of `{files:[{path,content}]}` proposals, tokenize
+/// denser than prose, so the value is deliberately low and the advisory fires early. It feeds an advisory only,
+/// never a refusal (08-RESEARCH A1; 08-CONTEXT D-08).
+pub const BYTES_PER_TOKEN_CONSERVATIVE: u64 = 2;
+
+/// The estimated output tokens of one single-shot call that returns `batch` full copies of `writable_bytes` of
+/// writable files: the ceiling of `writable_bytes * batch / BYTES_PER_TOKEN_CONSERVATIVE`, saturating at
+/// `u64::MAX`.
+///
+/// With `writable_bytes = q * d + r` for the divisor `d`, the ceiling is `q * batch + ceil(r * batch / d)`. The
+/// second term is below `d * 2^32` and cannot overflow, and the first saturates, so the result is exact whenever
+/// it fits.
+#[must_use]
+pub const fn batch_output_tokens(writable_bytes: u64, batch: u32) -> u64 {
+    let batch = batch as u64;
+    let whole = (writable_bytes / BYTES_PER_TOKEN_CONSERVATIVE).saturating_mul(batch);
+    let rest = (writable_bytes % BYTES_PER_TOKEN_CONSERVATIVE * batch)
+        .div_ceil(BYTES_PER_TOKEN_CONSERVATIVE);
+    whole.saturating_add(rest)
+}
+
+/// Whether `tokens` reach 80 % of [`CLI_DEFAULT_OUTPUT_TOKENS`], the D-08 advisory threshold. The multiply
+/// saturates, so a huge estimate is always near the cap.
+#[must_use]
+pub const fn near_output_cap(tokens: u64) -> bool {
+    tokens.saturating_mul(10) >= CLI_DEFAULT_OUTPUT_TOKENS * 8
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // VM machine and memory budget (05-CONTEXT D-05, D-06)
 //
 // The machine bounds live here, not in `minos-sandbox`, because `Manifest::try_from` range-checks

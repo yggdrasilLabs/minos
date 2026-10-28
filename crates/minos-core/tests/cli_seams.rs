@@ -2,13 +2,9 @@
 //! (`batch_output_tokens`, `near_output_cap`), the one run-cost sum `policy::run_cost`, and
 //! `RunState::proposals`.
 
-use std::error::Error;
-
 use minos_core::limits::{
     BYTES_PER_TOKEN_CONSERVATIVE, CLI_DEFAULT_OUTPUT_TOKENS, batch_output_tokens, near_output_cap,
 };
-
-type TestResult = Result<(), Box<dyn Error>>;
 
 // ---------------------------------------------------------------------------------------------------------------
 // D-08 advisory arithmetic
@@ -21,12 +17,11 @@ fn d08_constants_are_pinned() {
 }
 
 #[test]
-fn batch_output_tokens_is_the_ceiling_of_bytes_over_two() -> TestResult {
+fn batch_output_tokens_is_the_ceiling_of_bytes_over_two() {
     assert_eq!(batch_output_tokens(10, 1), 5);
     assert_eq!(batch_output_tokens(11, 1), 6);
     assert_eq!(batch_output_tokens(0, 4), 0);
     assert_eq!(batch_output_tokens(10, 4), 20);
-    Ok(())
 }
 
 #[test]
