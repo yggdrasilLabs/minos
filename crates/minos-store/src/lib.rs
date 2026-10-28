@@ -38,6 +38,8 @@
 pub mod file;
 pub mod memory;
 
+use std::collections::BTreeSet;
+
 use minos_core::id::{BlobId, RunId};
 use minos_core::ledger::{Line, Record};
 
@@ -278,6 +280,19 @@ pub trait Ledger {
     /// [`StoreError::LedgerTooLarge`] when it is refused, [`StoreError::Unsafe`] when a store path is not the
     /// expected file, and [`StoreError::Poisoned`] when an in-memory lock was poisoned.
     fn read(&self, run: &RunId) -> Result<LedgerRead, StoreError>;
+
+    /// Every run with at least one appended line, in [`RunId`] order (08-CONTEXT D-05, D-10). A run that was
+    /// only locked with [`RunLock::lock_run`], or whose ledger [`Ledger::read`] reads as zero lines (missing,
+    /// empty, or only a torn tail), is not a run, so probing a run never invents one. A ledger that `read` would
+    /// refuse is still listed, so the refusal reaches a human. Listing creates and writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Io`] when the store cannot be listed or a ledger cannot be inspected,
+    /// [`StoreError::Unsafe`] when an entry where runs are kept is a symlink, is not a directory, or is not
+    /// named by a [`RunId`], or when a run's ledger is not a regular file, and [`StoreError::Poisoned`] when an
+    /// in-memory lock was poisoned.
+    fn runs(&self) -> Result<BTreeSet<RunId>, StoreError>;
 }
 
 /// A whole-run exclusive lock (LOOP-06): at most one driver acts on a run at a time.

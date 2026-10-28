@@ -82,6 +82,14 @@ impl Ledger for MemoryStore {
         let lines = lock(&self.runs)?.get(run).cloned().unwrap_or_default();
         Ok(LedgerRead::new(lines, 0))
     }
+
+    fn runs(&self) -> Result<BTreeSet<RunId>, StoreError> {
+        Ok(lock(&self.runs)?
+            .iter()
+            .filter(|(_run, lines)| !lines.is_empty())
+            .map(|(run, _lines)| *run)
+            .collect())
+    }
 }
 
 impl RunLock for MemoryStore {

@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{PermissionsExt, symlink};
 
 use minos_core::id::{BlobId, ExperimentId, ManifestId, RunId, TreeId};
@@ -185,7 +185,7 @@ fn runs_lists_appended_runs<L: Ledger>(ledger: &L) -> TestResult {
 
     // Assert
     assert_eq!(runs, BTreeSet::from([first, second]));
-    let mut sorted = vec![first, second];
+    let mut sorted = [first, second];
     sorted.sort();
     assert!(runs.iter().eq(sorted.iter()), "runs come in RunId order");
     Ok(())
@@ -588,6 +588,16 @@ fn expect_unsafe(result: Result<BTreeSet<RunId>, StoreError>, what: &str) -> Tes
     }
 }
 
+/// Creates the file at `path`, which must not exist, holding `bytes`: a planted entry the store did not write.
+fn plant(path: impl AsRef<std::path::Path>, bytes: &[u8]) -> TestResult {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?
+        .write_all(bytes)?;
+    Ok(())
+}
+
 /// The names of the entries directly under `path`, sorted.
 fn entry_names(path: &std::path::Path) -> Result<BTreeSet<std::ffi::OsString>, Box<dyn Error>> {
     let mut names = BTreeSet::new();
@@ -645,24 +655,63 @@ fn listing_a_locked_run_creates_nothing_in_it() -> TestResult {
 
 #[test]
 fn a_ledger_without_a_complete_line_is_not_listed() -> TestResult {
-    // Arrange: one run whose ledger is empty and one whose ledger holds only a torn tail.
+    // Arrange: one run whose ledger is empty and one whose ledger holds only a torn tail, which `read` reads as
+    // zero lines.
     let dir = tempfile::tempdir()?;
     let (store, runs_dir) = store_with_one_run(&dir)?;
     let (listed, _record) = run_started(1_760_000_000);
-    for (run, bytes) in [
-        (run(), b"".as_slice()),
-        (other_run(), b"{\"seq\":0".as_slice()),
-    ] {
+    let (empty, _record) = run_started(1_760_000_003);
+    let (torn, _record) = run_started(1_760_000_004);
+    for (run, bytes) in [(empty, b"".as_slice()), (torn, b"{\"seq\":0".as_slice())] {
         let run_dir = runs_dir.join(run.to_hex());
         fs::create_dir(&run_dir)?;
-        fs::write(run_dir.join("ledger.jsonl"), bytes)?;
+        plant(run_dir.join("ledger.jsonl"), bytes)?;
     }
 
     // Act
     let runs = store.runs()?;
 
     // Assert
+    assert!(store.read(&empty)?.lines().is_empty());
+    assert_eq!(store.read(&torn)?.torn_tail(), 1);
     assert_eq!(runs, BTreeSet::from([listed]));
+    Ok(())
+}
+
+#[test]
+fn a_ledger_read_would_refuse_is_listed() -> TestResult {
+    // Arrange: one run whose complete first line is not a ledger line, and one whose unterminated first line is
+    // over the line cap, so neither can be a torn append; `read` refuses both, and listing them lets the refusal
+    // reach a human.
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    let (listed, _record) = run_started(1_760_000_000);
+    let (garbled, _record) = run_started(1_760_000_003);
+    let (oversized, _record) = run_started(1_760_000_004);
+    let over_cap =
+        vec![b'x'; usize::try_from(minos_store::file::MAX_LEDGER_LINE_BYTES)?.saturating_add(1)];
+    for (run, bytes) in [
+        (garbled, b"not a line\n".as_slice()),
+        (oversized, over_cap.as_slice()),
+    ] {
+        let run_dir = runs_dir.join(run.to_hex());
+        fs::create_dir(&run_dir)?;
+        plant(run_dir.join("ledger.jsonl"), bytes)?;
+    }
+
+    // Act
+    let runs = store.runs()?;
+
+    // Assert
+    assert!(matches!(
+        store.read(&garbled),
+        Err(StoreError::Corrupt { .. })
+    ));
+    assert!(matches!(
+        store.read(&oversized),
+        Err(StoreError::Corrupt { .. })
+    ));
+    assert_eq!(runs, BTreeSet::from([listed, garbled, oversized]));
     Ok(())
 }
 
@@ -673,7 +722,7 @@ fn a_symlink_under_runs_is_refused() -> TestResult {
     let (store, runs_dir) = store_with_one_run(&dir)?;
     let target = dir.path().join("elsewhere");
     fs::create_dir(&target)?;
-    fs::write(target.join("ledger.jsonl"), b"")?;
+    plant(target.join("ledger.jsonl"), b"")?;
     symlink(&target, runs_dir.join(other_run().to_hex()))?;
 
     // Act
@@ -688,7 +737,7 @@ fn a_regular_file_under_runs_is_refused() -> TestResult {
     // Arrange
     let dir = tempfile::tempdir()?;
     let (store, runs_dir) = store_with_one_run(&dir)?;
-    fs::write(runs_dir.join(other_run().to_hex()), b"not a directory")?;
+    plant(runs_dir.join(other_run().to_hex()), b"not a directory")?;
 
     // Act
     let result = store.runs();
@@ -731,7 +780,7 @@ fn a_symlinked_ledger_is_refused() -> TestResult {
     let dir = tempfile::tempdir()?;
     let (store, runs_dir) = store_with_one_run(&dir)?;
     let target = dir.path().join("elsewhere.jsonl");
-    fs::write(&target, b"")?;
+    plant(&target, b"")?;
     let run_dir = runs_dir.join(other_run().to_hex());
     fs::create_dir(&run_dir)?;
     symlink(&target, run_dir.join("ledger.jsonl"))?;

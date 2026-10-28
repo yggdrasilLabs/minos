@@ -14,7 +14,7 @@
 //! it compares, so `batch_v1_bytes_pinned` also pins the exact bytes with one SHA-256 literal.
 
 use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::str::FromStr;
 
@@ -276,6 +276,10 @@ impl Ledger for Counting {
 
     fn read(&self, run: &RunId) -> Result<LedgerRead, StoreError> {
         self.inner.read(run)
+    }
+
+    fn runs(&self) -> Result<BTreeSet<RunId>, StoreError> {
+        self.inner.runs()
     }
 }
 

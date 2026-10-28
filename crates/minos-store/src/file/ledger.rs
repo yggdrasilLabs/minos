@@ -31,8 +31,11 @@
 //!
 //! The ledger file is never opened with truncation and never rewritten.
 
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::collections::BTreeSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::Path;
+use std::str::FromStr;
 
 use minos_core::id::RunId;
 use minos_core::ledger::{Line, Record};
@@ -176,7 +179,40 @@ fn lock_options() -> OpenOptions {
     options
 }
 
+/// Whether the ledger at `path` lists its run: true when its first line is complete (newline-terminated) or is
+/// over [`MAX_LEDGER_LINE_BYTES`]. Only a missing or empty ledger, or one holding a short unterminated tail (a
+/// torn first append), is not a run, because [`Ledger::read`] reads each of those as zero lines without an error;
+/// a ledger `read` would refuse is still listed, so the refusal reaches a human. No lock is taken or created: an
+/// append writes its line and newline in one `write_all`, and only bytes after the last newline are ever
+/// truncated, so a newline once seen stays.
+fn lists_its_run(path: &Path) -> Result<bool, StoreError> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    let Some(file) = open_existing(path, "ledger file", &options)? else {
+        return Ok(false);
+    };
+    let cap = MAX_LEDGER_LINE_BYTES.saturating_add(1);
+    let mut first = Vec::new();
+    BufReader::new(file.take(cap))
+        .read_until(b'\n', &mut first)
+        .map_err(io_error("reading the ledger"))?;
+    Ok(first.last() == Some(&b'\n') || len_u64(first.len()) >= cap)
+}
+
 impl FileStore {
+    /// The run named by the entry at `path` under `runs/`: a real directory named by 64 lowercase hex, else
+    /// [`StoreError::Unsafe`]. Checked with `symlink_metadata`, so a symlink is never followed.
+    fn run_entry(path: &Path, name: &std::ffi::OsStr) -> Result<RunId, StoreError> {
+        const WHAT: &str = "run directory";
+        let meta = fs::symlink_metadata(path).map_err(io_error("inspecting a run directory"))?;
+        if !meta.file_type().is_dir() {
+            return Err(StoreError::Unsafe { what: WHAT });
+        }
+        name.to_str()
+            .and_then(|text| RunId::from_str(text).ok())
+            .ok_or(StoreError::Unsafe { what: WHAT })
+    }
+
     /// Opens the run's lock file, creating it when it is missing. The lock is released when the handle drops.
     fn open_lock(&self, run: &RunId) -> Result<File, StoreError> {
         open_or_create(&self.lock_path(run), "ledger lock file", &lock_options())
@@ -266,5 +302,22 @@ impl Ledger for FileStore {
         let parsed = parse(run, &bytes)?;
         let torn_tail = u64::from(parsed.torn_start.is_some());
         Ok(LedgerRead::new(parsed.lines, torn_tail))
+    }
+
+    fn runs(&self) -> Result<BTreeSet<RunId>, StoreError> {
+        let runs_dir = self.runs_dir();
+        let mut runs = BTreeSet::new();
+        if !dir_exists(&runs_dir, "runs directory")? {
+            return Ok(runs);
+        }
+        let entries = fs::read_dir(&runs_dir).map_err(io_error("listing the runs directory"))?;
+        for entry in entries {
+            let entry = entry.map_err(io_error("listing the runs directory"))?;
+            let run = Self::run_entry(&entry.path(), &entry.file_name())?;
+            if lists_its_run(&self.ledger_path(&run))? {
+                runs.insert(run);
+            }
+        }
+        Ok(runs)
     }
 }

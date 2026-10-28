@@ -10,7 +10,7 @@
 //! - A test that needs a scripted job runner (fail the first N calls, append a stop mid-launch, report another
 //!   backend class) captures its own counter or store in the [`FakeJobs`] closure.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
@@ -451,6 +451,10 @@ impl<S: Ledger> Ledger for FaultStore<S> {
 
     fn read(&self, run: &RunId) -> Result<LedgerRead, StoreError> {
         self.inner.read(run)
+    }
+
+    fn runs(&self) -> Result<BTreeSet<RunId>, StoreError> {
+        self.inner.runs()
     }
 }
 
