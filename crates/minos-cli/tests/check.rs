@@ -461,7 +461,8 @@ fn the_project_facts_name_the_base_image_judge_and_denylist_drops() -> TestResul
 
 #[test]
 fn the_memory_budget_is_the_reserve_the_scratch_and_the_allowance() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     let (_, text) = checked(&prepared)?;
     assert!(
         has_line(
@@ -475,7 +476,8 @@ fn the_memory_budget_is_the_reserve_the_scratch_and_the_allowance() -> TestResul
 
 #[test]
 fn the_judge_scratch_need_comes_from_the_lock_extent_in_whole_mib() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     let (_, text) = checked(&prepared)?;
     let extent = prepared.judge_extent();
     let needed = judge_scratch_needed_bytes(extent.bytes(), extent.files()).div_ceil(1024 * 1024);
@@ -495,7 +497,8 @@ fn the_route_table_shows_each_proposer_with_its_model_and_eligibility() -> TestR
         "{SWEEP}\n{}\n[[proposer]]\nkind = \"planned\"\nmodel = \"haiku\"\nbatch = 1\n",
         single_shot(2)
     );
-    let prepared = Fixture::with(&manifest(&tail, "5%"), VALUE)?.prepare()?;
+    let fixture = Fixture::with(&manifest(&tail, "5%"), VALUE)?;
+    let prepared = fixture.prepare()?;
     let (_, text) = checked(&prepared)?;
     let lines: Vec<&str> = text.lines().collect();
     let at = lines
@@ -517,7 +520,8 @@ fn the_route_table_shows_each_proposer_with_its_model_and_eligibility() -> TestR
 
 #[test]
 fn a_large_single_shot_batch_prints_an_advisory_and_refuses_nothing() -> TestResult {
-    let prepared = Fixture::with(&manifest(&single_shot(16), "5%"), &padded_value())?.prepare()?;
+    let fixture = Fixture::with(&manifest(&single_shot(16), "5%"), &padded_value())?;
+    let prepared = fixture.prepare()?;
     let (outcome, text) = checked(&prepared)?;
     let advisories: Vec<&str> = text
         .lines()
@@ -536,7 +540,8 @@ fn a_large_single_shot_batch_prints_an_advisory_and_refuses_nothing() -> TestRes
 
 #[test]
 fn a_small_single_shot_batch_prints_no_advisory() -> TestResult {
-    let prepared = Fixture::with(&manifest(&single_shot(1), "5%"), &padded_value())?.prepare()?;
+    let fixture = Fixture::with(&manifest(&single_shot(1), "5%"), &padded_value())?;
+    let prepared = fixture.prepare()?;
     let (_, text) = checked(&prepared)?;
     assert!(
         !text.lines().any(|line| line.starts_with("advisory:")),
@@ -547,7 +552,8 @@ fn a_small_single_shot_batch_prints_no_advisory() -> TestResult {
 
 #[test]
 fn the_provider_line_reports_each_status_and_only_a_refusal_refuses() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
 
     let (outcome, text) = checked(&prepared)?;
     assert!(
@@ -604,7 +610,8 @@ fn trial_lines(text: &str) -> Vec<&str> {
 
 #[test]
 fn a_first_check_calibrates_a_new_run_with_the_manifest_trials() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     let jobs = FakeJobs::steady();
     let (result, text) = run_check(
         &prepared,
@@ -666,7 +673,8 @@ fn a_first_check_calibrates_a_new_run_with_the_manifest_trials() -> TestResult {
 
 #[test]
 fn a_second_check_reuses_the_calibrated_run_and_launches_nothing() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     let (first, first_text) = checked(&prepared)?;
     let run = *first.run().ok_or("no run")?;
 
@@ -698,7 +706,8 @@ fn a_second_check_reuses_the_calibrated_run_and_launches_nothing() -> TestResult
 
 #[test]
 fn fresh_starts_a_new_run_and_refuses_one_started_in_the_same_second() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     checked(&prepared)?;
 
     let jobs = FakeJobs::steady();
@@ -753,7 +762,8 @@ fn an_edited_writable_file_changes_the_base_so_nothing_is_reused() -> TestResult
 
 #[test]
 fn a_noisy_baseline_prints_refuse_with_advice_and_refuses_nothing() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     let jobs = FakeJobs::scoring(&[1.0, 1.2, 0.9]);
     let (result, text) = run_check(
         &prepared,
@@ -784,7 +794,8 @@ fn a_noisy_baseline_prints_refuse_with_advice_and_refuses_nothing() -> TestResul
 
 #[test]
 fn a_baseline_that_never_scores_is_baseline_unscored() -> TestResult {
-    let prepared = Fixture::new()?.prepare()?;
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
     let (result, text) = run_check(
         &prepared,
         &FakeJobs::gate_fails(),

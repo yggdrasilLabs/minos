@@ -12,30 +12,48 @@
 //! 3. the route table, one row per declared proposer with its model and its eligibility or reason (D-09);
 //! 4. for each eligible `single_shot` proposer whose `batch` full-file proposals may reach the `claude` CLI's
 //!    default output cap, an advisory (D-08);
-//! 5. the provider status; only a refusal makes [`CheckOutcome::refused`] true (D-06).
+//! 5. the provider status; only a refusal makes [`CheckOutcome::refused`] true (D-06);
+//! 6. the baseline's diagnostic run (D-05). Without `--fresh`, the latest run by `(started_at, RunId)` whose
+//!    generation-0 manifest, base tree, root image, and baseline judge version equal the current ones, whose
+//!    `[judge] trials` baseline trials are all judged, and whose baseline is [`baseline_ready`], is reused and no VM
+//!    is launched. Otherwise, or with `--fresh`, a new run is named by `RunId::of(manifest, base, started_at)`; a
+//!    run of that ID already in the store is refused ([`CheckError::RunExists`]) rather than silently rejoined,
+//!    because [`Driver::start`] rejoins a run its inputs name. The new run is started with [`Driver::start`] and
+//!    calibrated with [`Driver::calibrate`], which judges exactly `[judge] trials` baseline trials (07-CONTEXT D-05,
+//!    D-06); a calibration that stops at a safe point is a refusal;
+//! 7. from that run's fold, one code path for reuse and for a new run: each baseline trial's objective value or its
+//!    outcome word, the noise floor ([`noise_floor`]), `min_improvement` as written with its threshold at the
+//!    median, [`noise_check`]'s verdict with advice when it is `warn` or `refuse`, and the run's cost through
+//!    [`CostLine`] (D-07, D-09; COST-02).
 //!
-//! Every advisory, the D-08 batch advisory and the noise verdict alike, is printed and never refuses (D-09).
+//! Every advisory, the D-08 batch advisory and the noise verdict alike, is printed and never refuses (D-09; 08-RESEARCH
+//! Open Question 2, decided: the verdict is advisory only). Numbers print with `f64`'s `Display`, and dollars only
+//! through [`CostLine`], never as an estimate.
 //!
 //! [`write_line`]: crate::render::write_line
+//! [`CostLine`]: minos_core::money::CostLine
 
 use std::io::{self, Write};
 
 use minos_core::id::RunId;
 use minos_core::limits::{
-    CLI_DEFAULT_OUTPUT_TOKENS, GUEST_RESERVE_MIB, batch_output_tokens, judge_scratch_needed_bytes,
-    near_output_cap,
+    CLI_DEFAULT_OUTPUT_TOKENS, GUEST_RESERVE_MIB, MIN_NOISE_TRIALS, batch_output_tokens,
+    judge_scratch_needed_bytes, near_output_cap,
 };
 use minos_core::manifest::{Eligibility, Tier};
 use minos_core::money::CostError;
+use minos_core::policy::{NoiseVerdict, baseline_ready, noise_check, noise_floor};
 use minos_core::route::{SurfaceStats, route_table};
 use minos_core::text::SafeText;
-use minos_loop::{DriverError, DriverOptions, JobRunner, RETRY_PAUSE};
+use minos_loop::{
+    Calibrated, Driver, DriverError, DriverOptions, JobRunner, NoopObserver, RETRY_PAUSE,
+};
 use minos_propose::{ModelProvider, Proposer};
-use minos_store::StoreError;
+use minos_store::{Ledger, StoreError};
 
-use crate::address::AddressError;
+use crate::address::{AddressError, fold_run};
 use crate::project::Prepared;
-use crate::render::{IdStyle, id_text, write_line};
+use crate::render::{IdStyle, cost_line, id_text, outcome_word, stop_reason_name, write_line};
 
 /// Bytes in a MiB.
 const MIB: u64 = 1024 * 1024;
@@ -163,11 +181,15 @@ pub enum CheckError {
 /// Checks the prepared project and writes the report to `out`, in the order the [module docs](self) give.
 ///
 /// The caller passes `Proposer::without_provider()`, because generation 0 never calls a model, and has already run
-/// the provider preflight, whose result is `provider`. `jobs` runs the baseline trials of a new diagnostic run.
+/// the provider preflight, whose result is `provider`. `jobs` runs the baseline trials of a new diagnostic run; a
+/// reused run launches nothing.
 ///
 /// # Errors
 ///
-/// [`CheckError::Output`] when `out` cannot be written; the calibration errors are listed on each variant.
+/// [`CheckError::RunExists`] when a new run's ID is already in the store; [`CheckError::Store`] when the store's
+/// runs cannot be listed; [`CheckError::Driver`] when the driver refuses to start or calibration fails, for
+/// example [`DriverError::BaselineUnscored`]; [`CheckError::Address`] when the run's ledger does not fold;
+/// [`CheckError::Cost`] when its spend cannot be priced; and [`CheckError::Output`] when `out` cannot be written.
 pub fn check<P: ModelProvider, J: JobRunner, W: Write>(
     prepared: &Prepared,
     proposer: &Proposer<P>,
@@ -176,13 +198,174 @@ pub fn check<P: ModelProvider, J: JobRunner, W: Write>(
     options: CheckOptions,
     out: &mut W,
 ) -> Result<CheckOutcome, CheckError> {
-    let refused = report_facts(prepared, provider, out)?;
-    let _ = (proposer, jobs, options);
+    let mut refused = report_facts(prepared, provider, out)?;
+
+    // 6. The diagnostic run: reused when its frame matches and it is calibrated, else new (D-05).
+    let reusable = if options.fresh {
+        None
+    } else {
+        reusable_run(prepared)?
+    };
+    let reused = reusable.is_some();
+    let run = if let Some(run) = reusable {
+        say(
+            out,
+            &format!(
+                "baseline: reused run {} (no VM launched)",
+                id_text(&run.to_hex(), IdStyle::Short)
+            ),
+        )?;
+        run
+    } else {
+        let run = RunId::of(
+            &prepared.manifest_id(),
+            &prepared.base().id(),
+            options.started_at,
+        );
+        if prepared
+            .store()
+            .runs()
+            .map_err(CheckError::Store)?
+            .contains(&run)
+        {
+            return Err(CheckError::RunExists { run });
+        }
+        say(
+            out,
+            &format!(
+                "baseline: run {}, {} trials (each boots a candidate VM and then a judge VM)",
+                id_text(&run.to_hex(), IdStyle::Short),
+                prepared.manifest().judge().trials()
+            ),
+        )?;
+        let mut driver = Driver::start(
+            prepared.store(),
+            proposer,
+            jobs,
+            NoopObserver,
+            prepared.run_inputs(),
+            options.driver,
+            options.started_at,
+        )
+        .map_err(CheckError::Driver)?;
+        if let Calibrated::Stopped { reason } = driver.calibrate().map_err(CheckError::Driver)? {
+            say(
+                out,
+                &format!("calibration stopped: {}", stop_reason_name(reason)),
+            )?;
+            refused = true;
+        }
+        run
+    };
+
+    // 7. The calibration, from the run's fold.
+    report_calibration(prepared, &run, out)?;
     Ok(CheckOutcome {
-        run: None,
-        reused: false,
+        run: Some(run),
+        reused,
         refused,
     })
+}
+
+/// The latest run, by `(started_at, RunId)`, whose generation-0 manifest, base tree, root image, and baseline judge
+/// version equal the prepared ones, whose `[judge] trials` baseline trials are all judged, and whose baseline is
+/// [`baseline_ready`]. A run whose ledger cannot be read or folded is skipped: it cannot be reused.
+fn reusable_run(prepared: &Prepared) -> Result<Option<RunId>, CheckError> {
+    let store = prepared.store();
+    let manifest = prepared.manifest();
+    let manifest_id = prepared.manifest_id();
+    let base = prepared.base().id();
+    let root_image = prepared.root_image();
+    let judge = prepared.judge();
+    let mut latest: Option<(u64, RunId)> = None;
+    for run in store.runs().map_err(CheckError::Store)? {
+        let Ok(state) = fold_run(store, &run) else {
+            continue;
+        };
+        let matches = *state.manifest_at(0) == manifest_id
+            && *state.base() == base
+            && state.root_image() == Some(&root_image)
+            && (0..manifest.judge().trials())
+                .all(|trial| state.judged(state.baseline(), &judge, trial))
+            && baseline_ready(&state, manifest, &judge);
+        let key = (state.started_at(), run);
+        if matches && latest.is_none_or(|best| key > best) {
+            latest = Some(key);
+        }
+    }
+    Ok(latest.map(|(_, run)| run))
+}
+
+/// Writes step 7 of the [module docs](self) from the fold of `run`.
+fn report_calibration<W: Write>(
+    prepared: &Prepared,
+    run: &RunId,
+    out: &mut W,
+) -> Result<(), CheckError> {
+    let state = fold_run(prepared.store(), run).map_err(CheckError::Address)?;
+    let judge = prepared.judge();
+    let objective = prepared.manifest().objective();
+    let metric = objective.metric();
+
+    for (trial, judgment) in state.trials(state.baseline(), &judge) {
+        let outcome = judgment.outcome();
+        let line = match outcome.scorecard().and_then(|card| card.value(metric)) {
+            Some(value) => format!("trial {trial}: scored {metric} {}", value.value()),
+            None => format!("trial {trial}: {}", outcome_word(outcome)),
+        };
+        say(out, &line)?;
+    }
+
+    let floor = noise_floor(&state, &judge, metric);
+    match floor.filter(|floor| floor.trials() >= MIN_NOISE_TRIALS) {
+        Some(floor) => say(
+            out,
+            &format!(
+                "noise floor: median {}, spread {} over {} trials ({} skipped)",
+                floor.median().value(),
+                floor.spread(),
+                floor.trials(),
+                floor.skipped()
+            ),
+        )?,
+        None => say(
+            out,
+            &format!("noise floor: not measured (fewer than {MIN_NOISE_TRIALS} scored trials)"),
+        )?,
+    }
+
+    let min_improvement = objective.min_improvement();
+    let threshold = match floor {
+        None => "no baseline median to apply it at".to_owned(),
+        Some(floor) => min_improvement
+            .threshold_at(floor.median().value())
+            .map_or_else(
+                || "the threshold at the median is not finite".to_owned(),
+                |threshold| format!("threshold {threshold} at the median"),
+            ),
+    };
+    say(
+        out,
+        &format!("min_improvement: {min_improvement} ({threshold})"),
+    )?;
+
+    let verdict = noise_check(floor.as_ref(), objective);
+    let word = match verdict {
+        NoiseVerdict::Ok => "ok",
+        NoiseVerdict::Warn => "warn",
+        NoiseVerdict::Refuse => "refuse",
+    };
+    say(out, &format!("noise verdict: {word}"))?;
+    if verdict != NoiseVerdict::Ok {
+        say(
+            out,
+            "advice: raise min_improvement above the spread, or raise [judge] trials so the floor is measured over \
+             more boots",
+        )?;
+    }
+
+    let cost = cost_line(&state, prepared.prices()).map_err(CheckError::Cost)?;
+    say(out, &cost.to_string())
 }
 
 /// Writes `line` through [`write_line`].
