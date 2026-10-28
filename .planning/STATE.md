@@ -6,14 +6,14 @@ current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
 stopped_at: Completed 08-10-PLAN.md
-last_updated: "2026-10-28T18:50:36.404Z"
+last_updated: "2026-10-28T18:59:17.194Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 97
+  completed_plans: 98
   percent: 88
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 11 of 15
+Plan: 12 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -158,6 +158,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P08 | 8min | 2 tasks | 4 files |
 | Phase 08 P09 | 11 min | 2 tasks | 6 files |
 | Phase 08 P10 | 8 min | 2 tasks | 4 files |
+| Phase 08 P11 | 9 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -381,6 +382,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-09: show renders rationale and stage logs only through LogExcerpt, indented two spaces, and logs only with --logs; log --json re-encodes each verified Line, equal to ledger.jsonl
 - [Phase 08]: 08-10: adopt rebuilds the report with report::build, compares the hash before any append, appends ReportAcknowledged, then creates the patch with create_new; a failed write removes the file it created
 - [Phase 08]: 08-10: ReportCmdError boxes DriverError and PrepareError (result_large_err); AdoptError::Report is transparent over it
+- [Phase 08]: 08-11: minos stop probes driver.lock and refuses with no driver; it appends a UserStop under the next free ordinal through the ledger append lock only, and reports a Duplicate as already recorded
+- [Phase 08]: 08-11: minos init scaffolds with symlink_metadata plus create_new and never overwrites; the Dockerfile is digest-only and the starter prices.toml has non-zero compute rates and an empty [models] table
 
 ### Pending Todos
 
@@ -412,6 +415,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T18:50:36.399Z
+Last session: 2026-10-28T18:59:08.612Z
 Stopped at: Completed 08-10-PLAN.md
 Resume file: None
