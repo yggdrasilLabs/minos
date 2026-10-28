@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Completed 08-09-PLAN.md
-last_updated: "2026-10-28T18:42:02.141Z"
+stopped_at: Completed 08-10-PLAN.md
+last_updated: "2026-10-28T18:50:36.404Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 96
+  completed_plans: 97
   percent: 88
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 10 of 15
+Plan: 11 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -157,6 +157,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P07 | 11 min | 2 tasks | 2 files |
 | Phase 08 P08 | 8min | 2 tasks | 4 files |
 | Phase 08 P09 | 11 min | 2 tasks | 6 files |
+| Phase 08 P10 | 8 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -378,6 +379,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-08: run and its driver-owned ProgressObserver share one writer through a RefCell handle borrowed per write
 - [Phase 08]: 08-09: status reports a corrupt, oversized, or non-folding ledger as a health line saying it needs a human and returns unhealthy; the ledger records no target, so status shows the concluded count and the generation in progress
 - [Phase 08]: 08-09: show renders rationale and stage logs only through LogExcerpt, indented two spaces, and logs only with --logs; log --json re-encodes each verified Line, equal to ledger.jsonl
+- [Phase 08]: 08-10: adopt rebuilds the report with report::build, compares the hash before any append, appends ReportAcknowledged, then creates the patch with create_new; a failed write removes the file it created
+- [Phase 08]: 08-10: ReportCmdError boxes DriverError and PrepareError (result_large_err); AdoptError::Report is transparent over it
 
 ### Pending Todos
 
@@ -409,6 +412,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T18:41:41.383Z
-Stopped at: Completed 08-09-PLAN.md
+Last session: 2026-10-28T18:50:36.399Z
+Stopped at: Completed 08-10-PLAN.md
 Resume file: None
