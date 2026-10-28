@@ -50,7 +50,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Guest, krun Backend, and Environment Build** - Experiments run in no-network libkrun VMs from disk images, with `env build` and `host doctor` (completed 2026-10-19)
 - [x] **Phase 6: Proposers** - Seeded sweep and a locked-down `claude -p` single_shot behind the `ModelProvider` abstraction (completed 2026-10-20)
 - [x] **Phase 7: Runner and Loop** - Candidate-then-judge VMs and a resumable generation driver with caps and a circuit breaker (completed 2026-10-24)
-- [ ] **Phase 8: CLI, Sample Project, and Docs** - The full loop on the sample project, hash-gated adopt, measured cost, and honest docs
+- [x] **Phase 8: CLI, Sample Project, and Docs** - The full loop on the sample project, hash-gated adopt, measured cost, and honest docs (completed 2026-10-28)
 
 ## Phase Details
 
@@ -434,7 +434,7 @@ Plans:
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 14/15 plans executed
+**Plans**: 15/15 plans complete
 
 Plans:
 **Wave 1**
@@ -468,7 +468,7 @@ Plans:
 
 **Wave 6** *(blocked on all prior plans)*
 
-- [ ] 08-15-PLAN.md — Final gate, requirements, the validation contract, then `cargo clean` (wave 6)
+- [x] 08-15-PLAN.md — Final gate, requirements, the validation contract, then `cargo clean` (wave 6)
 
 **Research**: A research pass ran on 2026-10-28 after the discuss session (08-RESEARCH.md, experiments E1 to E8)
 
@@ -486,4 +486,4 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
 | 7. Runner and Loop | 17/17 | Complete    | 2026-10-24 |
-| 8. CLI, Sample Project, and Docs | 14/15 | In Progress|  |
+| 8. CLI, Sample Project, and Docs | 15/15 | Complete   | 2026-10-28 |

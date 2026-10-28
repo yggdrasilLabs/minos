@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
-status: executing
-stopped_at: Completed 08-14-PLAN.md
-last_updated: "2026-10-28T20:32:48.962Z"
+status: verifying
+stopped_at: Completed 08-15-PLAN.md
+last_updated: "2026-10-28T20:47:57.872Z"
 last_activity: 2026-10-28
-last_activity_desc: 08-14 complete (SECURITY.md, README.md, the docs_words overclaim test, CLAUDE.md Phase 8 sections)
+last_activity_desc: 08-15 complete (Phase 8 final gate, requirements marked, validation contract filled, cargo clean)
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 102
-  completed_plans: 101
-  percent: 99
+  completed_plans: 102
+  percent: 100
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 ## Current Position
 
-Phase: 08 (cli-sample-project-and-docs) — EXECUTING
+Phase: 08 (cli-sample-project-and-docs) — COMPLETE
 Plan: 15 of 15
-Status: Ready to execute
-Last activity: 2026-10-28 — 08-14 complete (SECURITY.md, README.md, the docs_words overclaim test, CLAUDE.md Phase 8 sections)
+Status: Phase complete — ready for verification
+Last activity: 2026-10-28 — 08-15 complete (Phase 8 final gate, requirements marked, validation contract filled, cargo clean)
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -162,6 +162,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P12 | 15min | 2 tasks | 3 files |
 | Phase 08 P13 | 67 min | 3 tasks | 5 files |
 | Phase 08 P14 | 6min | 2 tasks | 5 files |
+| Phase 08 P15 | 10 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -396,6 +397,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-13: the live provider suite passed on claude 2.1.312 (3 passed, run by the user), so 08-14 may cite the provider's live behavior on the installed CLI
 - [Phase 08]: 08-14: docs_words bans ironclad (substring), exact (whole word), and cannot be escaped (phrase, whitespace collapsed) in README.md, SECURITY.md, and the sample README; exactly stays allowed
 - [Phase 08]: 08-14: SECURITY.md states the zero-day escape target as a goal tested against, not a guarantee, and lists side channels and concurrent VMs as unaddressed
+- [Phase 08]: 08-15: the final gate's test-variable check covers every crate's src/, so the ignored host probe test moved from host.rs's cfg(test) module to tests/vm.rs (assertions unchanged); the check was not narrowed
+- [Phase 08]: 08-15: CLI-01, CLI-05 to CLI-10, JUDGE-02, COST-02, DOCS-01 to DOCS-04 marked Complete on 08-13's VM run, the live rerun, and the final gate; JUDGE-02 carries the D-07 partial note and CLI-05 the D-06 no-build note; GATE-06 stays cross-cutting
 
 ### Pending Todos
 
@@ -427,6 +430,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T20:32:48.957Z
-Stopped at: Completed 08-14-PLAN.md
+Last session: 2026-10-28T20:47:52.006Z
+Stopped at: Completed 08-15-PLAN.md
 Resume file: None
