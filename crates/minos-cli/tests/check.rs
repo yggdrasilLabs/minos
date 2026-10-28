@@ -10,6 +10,17 @@
 //! - the single-shot batch advisory at batch 16 over a 4,000-byte writable file, and none at batch 1;
 //! - the provider line for each status, where only a refusal sets `refused`.
 //!
+//! Calibration (D-05, D-07):
+//!
+//! - a first check starts one run with exactly `[judge] trials` (3) trials, prints each trial's objective, the
+//!   noise floor, `min_improvement`, the verdict, and the cost line, and records trials 0 to 2 only;
+//! - a second check reuses that run and launches nothing, and prints the same trial lines;
+//! - `--fresh` starts a second run with three more trials, and `--fresh` in the first run's second is
+//!   `RunExists`;
+//! - an edited writable file changes the base, so nothing is reused;
+//! - baseline scores 1.0, 1.2, and 0.9 against `5%` print `noise verdict: refuse` with advice, and refuse nothing;
+//! - a baseline whose every trial fails its gate is `BaselineUnscored`.
+//!
 //! Every test also checks that no line contains the word `estimate` or the whole word `exact` (COST-02).
 
 use std::error::Error;
@@ -19,6 +30,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use minos_cli::address::fold_run;
 use minos_cli::check::{CheckError, CheckOptions, CheckOutcome, ProviderStatus, check};
 use minos_cli::env_build::{LOCK_FILE, MANIFEST_FILE};
 use minos_cli::judge_push::{JudgePushOptions, judge_push};
@@ -31,13 +43,13 @@ use minos_core::limits::judge_scratch_needed_bytes;
 use minos_core::lock::{BuilderId, BuilderText, LockedImage};
 use minos_core::manifest::Arch;
 use minos_core::metric::{Metric, Scorecard};
-use minos_core::outcome::Outcome;
+use minos_core::outcome::{Outcome, Reason};
 use minos_core::text::SafeText;
 use minos_core::usage::Usage;
-use minos_loop::{DriverOptions, JobFailure, JobRunner};
+use minos_loop::{DriverError, DriverOptions, JobFailure, JobRunner};
 use minos_propose::{FakeProvider, Proposer};
 use minos_source::CleanPolicy;
-use minos_store::{Blobs, FileStore, STORE_DIR};
+use minos_store::{Blobs, FileStore, Ledger, STORE_DIR};
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -236,6 +248,8 @@ fn write(dir: &Path, rel: &str, bytes: &[u8]) -> TestResult {
 enum Script {
     /// The gate passes and the objective is the next value, cycling through the list.
     Scores(Vec<f64>),
+    /// The gate fails.
+    GateFails,
 }
 
 /// A [`JobRunner`] that answers trials from a script and counts them; its preflight always passes.
@@ -256,6 +270,19 @@ impl FakeJobs {
     /// A runner whose every trial scores 1.
     fn steady() -> Self {
         Self::scoring(&[1.0])
+    }
+
+    /// A runner whose every trial fails the gate.
+    const fn gate_fails() -> Self {
+        Self {
+            script: Script::GateFails,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    /// How many trials ran.
+    fn requests(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
     }
 }
 
@@ -287,6 +314,9 @@ impl JobRunner for FakeJobs {
                 .map_err(|_| invalid)?;
                 Outcome::Scored(card)
             }
+            Script::GateFails => Outcome::Rejected(Reason::GateFailed {
+                gate: name("identical_output")?,
+            }),
         };
         JobResult::new(
             request,
@@ -558,5 +588,215 @@ fn the_provider_line_reports_each_status_and_only_a_refusal_refuses() -> TestRes
         "{text}"
     );
     assert!(result?.refused());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Calibration
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The trial lines of `text`, in order.
+fn trial_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| line.starts_with("trial "))
+        .collect()
+}
+
+#[test]
+fn a_first_check_calibrates_a_new_run_with_the_manifest_trials() -> TestResult {
+    let prepared = Fixture::new()?.prepare()?;
+    let jobs = FakeJobs::steady();
+    let (result, text) = run_check(
+        &prepared,
+        &jobs,
+        &ProviderStatus::NotNeeded,
+        options(false, STARTED_AT),
+    )?;
+    let outcome = result?;
+
+    assert_eq!(jobs.requests(), 3);
+    assert!(!outcome.reused());
+    assert!(!outcome.refused());
+    let run = *outcome.run().ok_or("no run")?;
+    assert_eq!(prepared.store().runs()?.len(), 1);
+    assert!(
+        has_line(
+            &text,
+            &format!(
+                "baseline: run {}, 3 trials (each boots a candidate VM and then a judge VM)",
+                run.to_hex().get(..12).ok_or("short")?
+            )
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        trial_lines(&text),
+        [
+            "trial 0: scored probe_score 1",
+            "trial 1: scored probe_score 1",
+            "trial 2: scored probe_score 1",
+        ],
+        "{text}"
+    );
+    assert!(
+        has_line(
+            &text,
+            "noise floor: median 1, spread 0 over 3 trials (0 skipped)"
+        ),
+        "{text}"
+    );
+    assert!(
+        has_line(&text, "min_improvement: 5% (threshold 0.05 at the median)"),
+        "{text}"
+    );
+    assert!(has_line(&text, "noise verdict: ok"), "{text}");
+    assert!(
+        text.lines().any(|line| line.starts_with("approx. cost: $")),
+        "{text}"
+    );
+
+    let state = fold_run(prepared.store(), &run)?;
+    let trials: Vec<u32> = state
+        .trials(state.baseline(), &prepared.judge())
+        .map(|(trial, _)| trial)
+        .collect();
+    assert_eq!(trials, [0, 1, 2]);
+    Ok(())
+}
+
+#[test]
+fn a_second_check_reuses_the_calibrated_run_and_launches_nothing() -> TestResult {
+    let prepared = Fixture::new()?.prepare()?;
+    let (first, first_text) = checked(&prepared)?;
+    let run = *first.run().ok_or("no run")?;
+
+    let jobs = FakeJobs::steady();
+    let (result, text) = run_check(
+        &prepared,
+        &jobs,
+        &ProviderStatus::NotNeeded,
+        options(false, STARTED_AT + 60),
+    )?;
+    let outcome = result?;
+    assert_eq!(jobs.requests(), 0);
+    assert!(outcome.reused());
+    assert_eq!(outcome.run(), Some(&run));
+    assert_eq!(prepared.store().runs()?.len(), 1);
+    assert!(
+        has_line(
+            &text,
+            &format!(
+                "baseline: reused run {} (no VM launched)",
+                run.to_hex().get(..12).ok_or("short")?
+            )
+        ),
+        "{text}"
+    );
+    assert_eq!(trial_lines(&text), trial_lines(&first_text));
+    Ok(())
+}
+
+#[test]
+fn fresh_starts_a_new_run_and_refuses_one_started_in_the_same_second() -> TestResult {
+    let prepared = Fixture::new()?.prepare()?;
+    checked(&prepared)?;
+
+    let jobs = FakeJobs::steady();
+    let (result, _) = run_check(
+        &prepared,
+        &jobs,
+        &ProviderStatus::NotNeeded,
+        options(true, STARTED_AT + 60),
+    )?;
+    let outcome = result?;
+    assert!(!outcome.reused());
+    assert_eq!(jobs.requests(), 3);
+    assert_eq!(prepared.store().runs()?.len(), 2);
+
+    let jobs = FakeJobs::steady();
+    let (result, _) = run_check(
+        &prepared,
+        &jobs,
+        &ProviderStatus::NotNeeded,
+        options(true, STARTED_AT),
+    )?;
+    assert!(
+        matches!(result, Err(CheckError::RunExists { .. })),
+        "{result:?}"
+    );
+    assert_eq!(jobs.requests(), 0);
+    assert_eq!(prepared.store().runs()?.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn an_edited_writable_file_changes_the_base_so_nothing_is_reused() -> TestResult {
+    let fixture = Fixture::new()?;
+    checked(&fixture.prepare()?)?;
+
+    write(&fixture.project, "src/value.txt", b"value = 6\n")?;
+    let prepared = fixture.prepare()?;
+    let jobs = FakeJobs::steady();
+    let (result, text) = run_check(
+        &prepared,
+        &jobs,
+        &ProviderStatus::NotNeeded,
+        options(false, STARTED_AT + 60),
+    )?;
+    let outcome = result?;
+    assert!(!outcome.reused());
+    assert_eq!(jobs.requests(), 3);
+    assert_eq!(prepared.store().runs()?.len(), 2);
+    assert!(!text.contains("reused"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn a_noisy_baseline_prints_refuse_with_advice_and_refuses_nothing() -> TestResult {
+    let prepared = Fixture::new()?.prepare()?;
+    let jobs = FakeJobs::scoring(&[1.0, 1.2, 0.9]);
+    let (result, text) = run_check(
+        &prepared,
+        &jobs,
+        &ProviderStatus::NotNeeded,
+        options(false, STARTED_AT),
+    )?;
+    let outcome = result?;
+    assert!(!outcome.refused());
+    let lines: Vec<&str> = text.lines().collect();
+    let at = lines
+        .iter()
+        .position(|line| *line == "noise verdict: refuse")
+        .ok_or("no refuse verdict")?;
+    assert!(
+        lines
+            .get(at + 1)
+            .is_some_and(|line| line.starts_with("advice: ")),
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("noise floor: median 1, spread ")),
+        "{text}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_baseline_that_never_scores_is_baseline_unscored() -> TestResult {
+    let prepared = Fixture::new()?.prepare()?;
+    let (result, text) = run_check(
+        &prepared,
+        &FakeJobs::gate_fails(),
+        &ProviderStatus::NotNeeded,
+        options(false, STARTED_AT),
+    )?;
+    assert!(
+        matches!(
+            result,
+            Err(CheckError::Driver(DriverError::BaselineUnscored { .. }))
+        ),
+        "{result:?}\n{text}"
+    );
     Ok(())
 }
