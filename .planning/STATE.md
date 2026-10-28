@@ -5,8 +5,8 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Completed 08-10-PLAN.md
-last_updated: "2026-10-28T19:09:41.848Z"
+stopped_at: "08-13 Task 3 checkpoint: awaiting the user's live provider rerun and D-07 answer"
+last_updated: "2026-10-28T20:12:03.080Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
@@ -387,6 +387,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-11: minos init scaffolds with symlink_metadata plus create_new and never overwrites; the Dockerfile is digest-only and the starter prices.toml has non-zero compute rates and an empty [models] table
 - [Phase 08]: 08-12: check and run run ClaudeCli::preflight before krun_jobs, so a refused run starts and sweeps nothing; run exits 2 for a cap, breaker, or provider stop
 - [Phase 08]: 08-12: status warns and passes None when HOME or prices.toml is missing, so progress still prints
+- [Phase 08]: 08-13: sample [budget] build and judge set to 1m from measured VM times (candidate max 1358 ms, judge max 1434 ms at the default [environment])
+- [Phase 08]: 08-13: DEFAULT_MEMORY_MIB and DEFAULT_SCRATCH_MIB unchanged; the sample's in-VM release build passed at a 448 MiB allowance and above and failed at 384 MiB, so the default 768 MiB allowance has 320 MiB of headroom
+- [Phase 08]: 08-13: D-07 met partially (objective spread 0 by construction; default of 3 trials stays a recorded assumption; VM wall-time variance recorded instead); awaiting the user's answer at the Task 3 checkpoint; the Phase 8 blocker stays open
 
 ### Pending Todos
 
@@ -418,6 +421,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T19:09:34.176Z
-Stopped at: Completed 08-10-PLAN.md
-Resume file: None
+Last session: 2026-10-28T20:12:03.075Z
+Stopped at: 08-13 Task 3 checkpoint: awaiting the user's live provider rerun and D-07 answer
+Resume file: .planning/phases/08-cli-sample-project-and-docs/08-13-SUMMARY.md

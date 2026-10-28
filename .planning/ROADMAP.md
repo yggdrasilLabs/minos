@@ -434,7 +434,7 @@ Plans:
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 12/15 plans executed
+**Plans**: 12/15 plans executed (08-13 at its Task 3 checkpoint: Tasks 1 and 2 done)
 
 Plans:
 **Wave 1**
