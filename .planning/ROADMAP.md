@@ -434,7 +434,7 @@ Plans:
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: 7/15 plans executed
+**Plans**: 8/15 plans executed
 
 Plans:
 **Wave 1**
@@ -452,7 +452,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 08-07-PLAN.md — `minos check`: facts, routes, the batch advisory, provider status, calibration reuse or a fresh run, the noise floor beside `min_improvement` (wave 3)
-- [ ] 08-08-PLAN.md — `minos run`: start or `--run` resume to an absolute target, the progress observer and its golden format (wave 3)
+- [x] 08-08-PLAN.md — `minos run`: start or `--run` resume to an absolute target, the progress observer and its golden format (wave 3)
 - [ ] 08-09-PLAN.md — `minos status`, `log` (with `--json`), and `show` through the sanitizing renderer (wave 3)
 - [ ] 08-10-PLAN.md — `minos report` and `adopt` with the hash gate and `create_new` patch, and the `git apply`/`patch -p1` golden (wave 3)
 - [ ] 08-11-PLAN.md — `minos stop` (refused without a driver, fresh ordinal) and `minos init` with a fail-closed price table (wave 3)
@@ -486,4 +486,4 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
 | 7. Runner and Loop | 17/17 | Complete    | 2026-10-24 |
-| 8. CLI, Sample Project, and Docs | 7/15 | In Progress|  |
+| 8. CLI, Sample Project, and Docs | 8/15 | In Progress|  |

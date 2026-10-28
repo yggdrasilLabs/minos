@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Completed 08-07-PLAN.md
-last_updated: "2026-10-28T18:20:03.415Z"
+stopped_at: Completed 08-08-PLAN.md
+last_updated: "2026-10-28T18:29:22.566Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 94
+  completed_plans: 95
   percent: 88
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 8 of 15
+Plan: 9 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -155,6 +155,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P05 | 8m | 2 tasks | 6 files |
 | Phase 08 P06 | 8 min | 2 tasks | 18 files |
 | Phase 08 P07 | 11 min | 2 tasks | 2 files |
+| Phase 08 P08 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -372,6 +373,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-06: PrepareError::Lock is transparent over LockMismatch so the top-level message names the next command; render::write_line uses SafeText::new (keeps tabs, drops controls)
 - [Phase 08]: 08-07: check takes six arguments; started_at and DriverOptions live in CheckOptions (clippy too_many_arguments)
 - [Phase 08]: 08-07: check refuses a new run whose RunId already exists (RunExists) before Driver::start, which would rejoin it
+- [Phase 08]: 08-08: minos run takes N as the absolute generation for new and --run resumed runs; the noise verdict prints as advice only
+- [Phase 08]: 08-08: run and its driver-owned ProgressObserver share one writer through a RefCell handle borrowed per write
 
 ### Pending Todos
 
@@ -403,6 +406,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T18:20:03.409Z
-Stopped at: Completed 08-07-PLAN.md
+Last session: 2026-10-28T18:29:22.561Z
+Stopped at: Completed 08-08-PLAN.md
 Resume file: None
