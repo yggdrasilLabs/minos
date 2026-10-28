@@ -6,14 +6,14 @@ current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
 stopped_at: Completed 08-04-PLAN.md
-last_updated: "2026-10-28T17:47:27.261Z"
+last_updated: "2026-10-28T17:56:32.091Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 91
+  completed_plans: 92
   percent: 88
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 5 of 15
+Plan: 6 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -152,6 +152,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P02 | 4min | 1 tasks | 7 files |
 | Phase 08 P03 | 5 min | 1 tasks | 4 files |
 | Phase 08 P04 | 8m | 2 tasks | 15 files |
+| Phase 08 P05 | 8m | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -364,6 +365,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-03: read_files checks every snapshot tarball entry (requested or not) under the snapshot caps and keeps only the requested bytes; Snapshot::surface builds the base surface and program bytes from the packed tarball
 - [Phase 08]: 08-04: the logparse judge matches candidate rows by their line-number field; a duplicated number scores no fields; output over 16 MiB, unreadable, or non-UTF-8 scores 0 with exit 0
 - [Phase 08]: 08-04: the logparse visible and held-out halves mirror each other's messiness, so the baseline scores 29/96 on both and only hard-coded visible answers diverge
+- [Phase 08]: 08-05: the sample's FROM pins rust@sha256:<index digest> alone, because ImageRef refuses a tag beside a digest; 08-11's init Dockerfile template must use the same form
+- [Phase 08]: 08-05: the sample's minos.lock is gitignored (it records the local minos-guest digest); user projects commit theirs
 
 ### Pending Todos
 
@@ -395,6 +398,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T17:47:27.257Z
+Last session: 2026-10-28T17:56:20.442Z
 Stopped at: Completed 08-04-PLAN.md
 Resume file: None
