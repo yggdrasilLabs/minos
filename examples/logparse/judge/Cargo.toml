@@ -1,0 +1,37 @@
+[package]
+name = "logparse-judge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The Minos sample judge: scores the candidate's output file against a private answer key"
+
+# No [dependencies]: the judge is std only, so `cargo run --release --frozen` builds it offline in the judge VM.
+# No [workspace]: the repository's root workspace excludes `examples`, and inside the VM there is no parent.
+
+# The repository's [workspace.lints] levels, copied literally, because the VM build has no workspace to inherit
+# them from. Change both tables together.
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious  = { level = "warn", priority = -1 }
+complexity  = { level = "warn", priority = -1 }
+perf        = { level = "warn", priority = -1 }
+style       = { level = "warn", priority = -1 }
+pedantic    = { level = "warn", priority = -1 }
+cargo       = { level = "warn", priority = -1 }
+unwrap_used = "forbid"
+expect_used = "forbid"
+indexing_slicing = "forbid"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"
+too_many_lines = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+multiple_crate_versions = "allow"
+
+[profile.release]
+overflow-checks = true
