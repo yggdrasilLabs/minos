@@ -10,21 +10,40 @@
 //!   (KRUN-09, CLI-02; [`minos_cli::env_build`]).
 //! - `minos judge push <dir> [--update]`: register judge data under the manifest's `[judge] version` label in
 //!   `minos.lock` (JUDGE-01, CLI-04; [`minos_cli::judge_push`]).
+//! - `minos init --kind <tune|optimize|explore>`: scaffold a project and a price table (CLI-01;
+//!   [`minos_cli::init`]).
+//! - `minos check [--fresh] [--allow-dirty]`: validate the project, calibrate the baseline, and print the routes
+//!   and advisories (CLI-05; [`minos_cli::check`]).
+//! - `minos run --generations <N> [--run <prefix>] [--allow-dirty]`: start or resume a run (CLI-06;
+//!   [`minos_cli::run`]).
+//! - `minos stop [<run>]`: ask the driver holding a run to stop (CLI-10; [`minos_cli::stop`]).
+//! - `minos status`, `minos log`, `minos show <exp>`: read a run's ledger and blobs (CLI-07; [`minos_cli::status`],
+//!   [`minos_cli::log`], [`minos_cli::show`]).
+//! - `minos report <exp>` and `minos adopt <exp> --reviewed <hash>`: the review gate (CLI-08, CLI-09;
+//!   [`minos_cli::report`], [`minos_cli::adopt`]).
 //!
-//! Phase 8 adds the rest of the tree CLAUDE.md lists. `anyhow` appears
-//! only here, at the binary boundary (rules/err-anyhow-app); the library half is in `minos_cli`.
+//! This file is the only place the concrete types meet: it picks [`minos_propose::ClaudeCli`] and the krun backend
+//! ([`minos_cli::jobs::krun_jobs`]), reads the clock and `HOME`, and maps each command's outcome to an exit code.
+//! Every command's logic lives in the library. `anyhow` appears only here, at the binary boundary
+//! (rules/err-anyhow-app).
 
 mod host;
 
 use std::env;
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::str::FromStr;
 
 use anyhow::{Context, anyhow};
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Arg, ArgAction, ArgMatches, Command};
+use minos_cli::address::HexPrefix;
 use minos_cli::builder::DockerBuildx;
 use minos_cli::env_build::{EnvBuildError, EnvBuildOptions, env_build};
+use minos_cli::init::InitKind;
 use minos_cli::judge_push::{JudgePushOptions, judge_push};
 use minos_cli::locate::locate;
+use minos_core::id::ReportHash;
 use minos_core::text::SafeText;
 use minos_sandbox::Refusal;
 
@@ -59,6 +78,85 @@ The tarball is stored in .minos/blobs, and minos.lock records the label, its tre
 bytes, and each file's path and SHA-256, never the data. Committing minos.lock exposes the judge file paths, and \
 a low-entropy file can be guessed from its digest. A fresh clone must push again. Different data under a label \
 minos.lock already records is refused unless --update is passed; bump [judge] version for new data instead.";
+
+/// `minos init`'s long help.
+const INIT_HELP: &str = "\
+Scaffold a project of the given kind in the current directory: minos.toml, program.md, minos.Dockerfile, and a \
+.gitignore for the files Minos writes. Nothing is overwritten: if any of the four exists, init refuses, names \
+every one, and writes nothing. It also writes a price table at ~/.config/minos/prices.toml when none is there, \
+with the compute rates and a commented model table; a run that names a model refuses to start until that model \
+is priced, so no run is ever priced at zero. An existing price table is kept unchanged.";
+
+/// `minos check`'s long help (08-CONTEXT D-05 to D-09).
+const CHECK_HELP: &str = "\
+Validate the project and calibrate its baseline before a run.
+
+check reads minos.toml, requires minos.lock, the root image, and the pushed judge data (naming minos env build or \
+minos judge push when one is missing or stale), packs the source snapshot, and runs the claude CLI preflight when \
+a proposer names a model. It prints the manifest's facts, the memory budget, the judge-scratch requirement, the \
+route table with its reasons, and an advisory when a single_shot batch may reach the CLI's output cap.
+
+It runs the baseline [judge] trials times in a diagnostic run and prints each trial, the noise floor, and \
+min_improvement beside the noise verdict. A diagnostic run already calibrated for the same manifest, base, root \
+image, and judge is reused, launching no VM, unless --fresh is passed. The noise verdict is advice: check never \
+refuses on noise. It exits 1 only when something refuses.";
+
+/// `minos run`'s long help (08-CONTEXT D-14; 07-CONTEXT D-14, D-19).
+const RUN_HELP: &str = "\
+Start a run, or resume one with --run, and drive it to a generation.
+
+--generations is the absolute generation to reach, not a count to add, so a resumed run ends where an \
+uninterrupted one would. Every run calibrates its own baseline as generation 0 first. A proposer that names a \
+model needs the claude CLI preflight to pass before anything starts. A resume is refused when the base, the root \
+image, the judge version, or the experiment frame changed; that needs a new run.
+
+Progress is one line per recorded trial, one per generation's decision, and one approx. cost line per generation. \
+The exit status is 0 when the target generation is reached or a minos stop ended the session, and 2 when a spend \
+or token cap, the circuit breaker, or the model provider stopped it.";
+
+/// `minos stop`'s long help (08-CONTEXT D-13).
+const STOP_HELP: &str = "\
+Ask the driver holding a run (the latest run when none is named) to stop.
+
+A stop is recorded only while a driver holds the run; with none, stop exits 1 and records nothing, because a stop \
+recorded with no session running would never take effect. The driver stops at its next safe point. It never \
+kills a VM, so a trial already running finishes and is recorded first.";
+
+/// `minos status`'s long help (08-CONTEXT D-15).
+const STATUS_HELP: &str = "\
+Print a run's progress (the latest run when --run is not given): when it started, the generations concluded, the \
+incumbent against the baseline and the noise floor, the approx. cost with token counts, the recorded stops, and \
+whether a driver holds the run now. It appends nothing to the ledger. Its liveness probe takes and at once \
+releases the run's driver lock, which creates the run's empty driver.lock if no driver has locked the run \
+before. A ledger that is corrupt or does not fold is reported, and status exits 1: it needs a human.";
+
+/// `minos log`'s long help (08-CONTEXT D-16).
+const LOG_HELP: &str = "\
+Print a run's ledger, one line per event in order (the latest run when --run is not given), with IDs as 12-hex \
+prefixes. --generation and --exp keep only the events of one generation or one experiment. --json prints each \
+stored line as the ledger holds it.";
+
+/// `minos show`'s long help (08-CONTEXT D-17).
+const SHOW_HELP: &str = "\
+Print one experiment: its parent, generation, tier, and origin; every trial's outcome; the lineage from the \
+baseline; the rationale; and the cumulative diff from the run's base. Stage logs print only with --logs, so a \
+hostile log never prints unasked. Every string from a sandbox or a model is sanitized before it is printed.";
+
+/// `minos report`'s long help (08-CONTEXT D-11).
+const REPORT_HELP: &str = "\
+Build the review report for one experiment from the ledger and blobs and print it with its report hash and the \
+minos adopt command that accepts that hash. It appends nothing. Read the report before adopting: its flags direct \
+attention, they are not verdicts.";
+
+/// `minos adopt`'s long help (08-CONTEXT D-11, D-12).
+const ADOPT_HELP: &str = "\
+Accept a reviewed experiment and write its patch file.
+
+--reviewed must be the report hash minos report printed for that experiment. adopt rebuilds the report now and \
+refuses when it hashes to anything else, so a report that changed since it was read must be read again. It \
+records the acknowledgment in the ledger, then writes the cumulative diff from the run's base to \
+minos-<experiment prefix>.patch in the project, or to --out, creating a new file and never overwriting one. It \
+never applies the patch: it prints the git apply and patch -p1 commands that would.";
 
 fn main() -> ExitCode {
     match run() {
@@ -136,6 +234,206 @@ fn cli() -> Command {
                                 .help("replace the judge data already recorded for this label"),
                         ),
                 ),
+        )
+        .subcommand(init_command())
+        .subcommand(check_command())
+        .subcommand(run_command())
+        .subcommand(stop_command())
+        .subcommand(status_command())
+        .subcommand(log_command())
+        .subcommand(show_command())
+        .subcommand(report_command())
+        .subcommand(adopt_command())
+}
+
+/// Parses a run or experiment prefix: 1 to 64 lowercase hex characters.
+fn hex_prefix(text: &str) -> Result<HexPrefix, minos_cli::address::AddressError> {
+    HexPrefix::from_str(text)
+}
+
+/// Parses a report hash: 64 lowercase hex characters.
+fn report_hash(text: &str) -> Result<ReportHash, minos_core::id::IdParseError> {
+    ReportHash::from_str(text)
+}
+
+/// A boolean flag.
+fn flag(name: &'static str, help: &'static str) -> Arg {
+    Arg::new(name)
+        .long(name)
+        .action(ArgAction::SetTrue)
+        .help(help)
+}
+
+/// `--run <prefix>`: the run to read, by unique hex prefix; the latest run when absent.
+fn run_arg() -> Arg {
+    Arg::new("run")
+        .long("run")
+        .value_name("PREFIX")
+        .value_parser(hex_prefix)
+        .help("the run, by unique hex prefix of its ID; the latest run when absent")
+}
+
+/// `<exp>`: the experiment, by unique hex prefix within the run.
+fn exp_arg() -> Arg {
+    Arg::new("exp")
+        .required(true)
+        .value_name("EXP")
+        .value_parser(hex_prefix)
+        .help("the experiment, by unique hex prefix of its ID within the run")
+}
+
+/// `--full-ids`: print whole IDs instead of 12-hex prefixes.
+fn full_ids_arg() -> Arg {
+    flag("full-ids", "print whole IDs instead of 12-hex prefixes")
+}
+
+/// `--allow-dirty`: skip only the clean check.
+fn allow_dirty_arg() -> Arg {
+    flag(
+        "allow-dirty",
+        "skip only the clean check; the denylist and the secret scan still run",
+    )
+}
+
+/// `minos init`.
+fn init_command() -> Command {
+    Command::new("init")
+        .about("Scaffold a project and a price table")
+        .long_about(INIT_HELP)
+        .arg(
+            Arg::new("kind")
+                .long("kind")
+                .required(true)
+                .value_parser(
+                    PossibleValuesParser::new(["tune", "optimize", "explore"])
+                        .try_map(|kind| InitKind::from_str(&kind)),
+                )
+                .help("the kind of project: tune, optimize, or explore"),
+        )
+}
+
+/// `minos check`.
+fn check_command() -> Command {
+    Command::new("check")
+        .about("Validate the project, calibrate the baseline, and print the routes")
+        .long_about(CHECK_HELP)
+        .arg(flag(
+            "fresh",
+            "start a new diagnostic run instead of reusing a calibrated one",
+        ))
+        .arg(allow_dirty_arg())
+}
+
+/// `minos run`.
+fn run_command() -> Command {
+    Command::new("run")
+        .about("Start or resume a run")
+        .long_about(RUN_HELP)
+        .arg(
+            Arg::new("generations")
+                .long("generations")
+                .required(true)
+                .value_name("N")
+                .value_parser(clap::value_parser!(u32).range(1..))
+                .help("the absolute generation to reach, at least 1"),
+        )
+        .arg(
+            Arg::new("run")
+                .long("run")
+                .value_name("PREFIX")
+                .value_parser(hex_prefix)
+                .help("resume the run with this unique hex prefix instead of starting a new one"),
+        )
+        .arg(allow_dirty_arg())
+}
+
+/// `minos stop`.
+fn stop_command() -> Command {
+    Command::new("stop")
+        .about("Ask the driver holding a run to stop at its next safe point")
+        .long_about(STOP_HELP)
+        .arg(
+            Arg::new("run")
+                .value_name("RUN")
+                .value_parser(hex_prefix)
+                .help("the run, by unique hex prefix of its ID; the latest run when absent"),
+        )
+}
+
+/// `minos status`.
+fn status_command() -> Command {
+    Command::new("status")
+        .about("Print a run's progress, liveness, and ledger health")
+        .long_about(STATUS_HELP)
+        .arg(run_arg())
+        .arg(full_ids_arg())
+}
+
+/// `minos log`.
+fn log_command() -> Command {
+    Command::new("log")
+        .about("Print a run's ledger events")
+        .long_about(LOG_HELP)
+        .arg(run_arg())
+        .arg(
+            Arg::new("generation")
+                .long("generation")
+                .value_name("N")
+                .value_parser(clap::value_parser!(u32))
+                .help("keep only this generation's events"),
+        )
+        .arg(
+            Arg::new("exp")
+                .long("exp")
+                .value_name("PREFIX")
+                .value_parser(hex_prefix)
+                .help("keep only the events naming this experiment, by unique hex prefix"),
+        )
+        .arg(flag("json", "print each stored ledger line as JSON"))
+        .arg(full_ids_arg())
+}
+
+/// `minos show`.
+fn show_command() -> Command {
+    Command::new("show")
+        .about("Print one experiment: trials, lineage, rationale, and diff")
+        .long_about(SHOW_HELP)
+        .arg(exp_arg())
+        .arg(run_arg())
+        .arg(flag("logs", "also print each stage's stored log tail"))
+        .arg(full_ids_arg())
+}
+
+/// `minos report`.
+fn report_command() -> Command {
+    Command::new("report")
+        .about("Print the review report for one experiment and its hash")
+        .long_about(REPORT_HELP)
+        .arg(exp_arg())
+        .arg(run_arg())
+}
+
+/// `minos adopt`.
+fn adopt_command() -> Command {
+    Command::new("adopt")
+        .about("Acknowledge a reviewed report and write its patch file")
+        .long_about(ADOPT_HELP)
+        .arg(exp_arg())
+        .arg(
+            Arg::new("reviewed")
+                .long("reviewed")
+                .required(true)
+                .value_name("HASH")
+                .value_parser(report_hash)
+                .help("the report hash minos report printed for this experiment"),
+        )
+        .arg(run_arg())
+        .arg(
+            Arg::new("out")
+                .long("out")
+                .value_name("PATH")
+                .value_parser(clap::value_parser!(PathBuf))
+                .help("write the patch here instead of minos-<experiment prefix>.patch in the project"),
         )
 }
 
