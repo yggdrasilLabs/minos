@@ -109,7 +109,7 @@ crates/
                          composition; `project::prepare`, the preparation `check` and `run` share, whose refusals name
                          the next command, and `open_runs`; `address`, run and experiment hex prefixes; `render`, the
                          shared output helpers and `write_line` through `SafeText`; one module per command);
-                         ships `env build`, `judge push`, `host doctor`, and `host setup`
+                         ships `env build`, `judge push`, `host doctor`, `host setup`, and the Phase 8 commands
 ```
 
 `examples/logparse/` is the shipped `optimize` sample: two std-only crates, the candidate `logparse` and its judge `logparse-judge` in `examples/logparse/judge/`, each with a committed `Cargo.lock`. The root `Cargo.toml` excludes them with `exclude = ["examples"]`, because the sample builds standalone in the VM, where there is no parent workspace and `[lints] workspace = true` cannot be inherited. Each crate carries a literal copy of `[workspace.lints]` in its own `[lints]` tables (change them together) and has its own gate commands (Commands). `crates/minos-cli/tests/sample_manifest.rs` checks the sample in the workspace gate: the manifest validates, the snapshot holds no judge file, and the judge scores the baseline below 1 and the improved parser at 1 on the host.
@@ -512,7 +512,7 @@ minos init --kind <tune|optimize|explore>   scaffold minos.toml, program.md, min
 minos env build | env shell                 build images and write minos.lock; debug shell with no network
 minos host setup | host doctor              one-time local setup; run preflight and explain refusals
 minos judge push <dir> [--update]           register judge data under the manifest's [judge] version label; --update replaces a label's data
-minos check                                 validate, build, judge the baseline several times, print routes
+minos check [--fresh] [--allow-dirty]       validate, judge the baseline several times, print routes; never builds
 minos run --generations N [--run <prefix>]  start a run, or resume one; N is the absolute generation to reach
 minos status | log | show <exp>             progress, ledger, one experiment
 minos steer <run> "<note>"                  add a note the next propose step reads
@@ -521,8 +521,10 @@ minos params add <names...>                 declare sweep knobs; produces a new 
 minos rejudge <run> --judge <v>             re-score the archive under another judge version
 minos report <exp>                          the review artifact
 minos adopt <exp> --reviewed <hash>         write a patch file
-minos stop <run>
+minos stop [<run>]                          ask the driver holding the run to stop at its next safe point
 ```
+
+Exit codes: `check` exits 1 only for a refusal, never for an advisory; `run` exits 0 when it reaches the target or a `minos stop` ended the session, and 2 when a cap, the circuit breaker, or the provider stopped it; `stop` exits 1 when no driver holds the run; `status` exits 1 for an unhealthy ledger; any error exits 1, and clap's usage errors exit 2. `check` and `run` run `ClaudeCli::preflight` once per command, only when a proposer names a model; `check` reports a refusal, `run` refuses to start. The binary reads the clock and `HOME` (`~/.config/minos/prices.toml`); no library crate does.
 
 ### Report and adopt
 

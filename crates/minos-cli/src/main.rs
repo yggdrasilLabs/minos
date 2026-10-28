@@ -22,7 +22,7 @@
 //! - `minos report <exp>` and `minos adopt <exp> --reviewed <hash>`: the review gate (CLI-08, CLI-09;
 //!   [`minos_cli::report`], [`minos_cli::adopt`]).
 //!
-//! This file is the only place the concrete types meet: it picks [`minos_propose::ClaudeCli`] and the krun backend
+//! This file is the only place the concrete types meet: it picks [`ClaudeCli`] and the krun backend
 //! ([`minos_cli::jobs::krun_jobs`]), reads the clock and `HOME`, and maps each command's outcome to an exit code.
 //! Every command's logic lives in the library. `anyhow` appears only here, at the binary boundary
 //! (rules/err-anyhow-app).
@@ -30,22 +30,42 @@
 mod host;
 
 use std::env;
+use std::io::{self, StdoutLock};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
 use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Arg, ArgAction, ArgMatches, Command};
+use minos_backend_krun::KrunBackend;
 use minos_cli::address::HexPrefix;
+use minos_cli::adopt::{AdoptOptions, adopt};
+use minos_cli::blob_source::FileBlobSource;
 use minos_cli::builder::DockerBuildx;
+use minos_cli::check::{CheckOptions, ProviderStatus, check};
 use minos_cli::env_build::{EnvBuildError, EnvBuildOptions, env_build};
-use minos_cli::init::InitKind;
+use minos_cli::init::{InitKind, InitOptions, PricesFile, init};
+use minos_cli::jobs::{RunnerJobs, krun_jobs};
 use minos_cli::judge_push::{JudgePushOptions, judge_push};
-use minos_cli::locate::locate;
+use minos_cli::locate::{Located, host_paths, locate};
+use minos_cli::log::{LogOptions, log};
+use minos_cli::project::{Prepared, open_runs, prepare, prices_path, read_prices};
+use minos_cli::render::{IdStyle, write_line};
+use minos_cli::report::report;
+use minos_cli::run::{RunEnded, RunOptions};
+use minos_cli::show::{ShowOptions, show};
+use minos_cli::status::{StatusOptions, status};
+use minos_cli::stop::stop;
 use minos_core::id::ReportHash;
+use minos_core::ledger::StopReason;
+use minos_core::money::Prices;
 use minos_core::text::SafeText;
+use minos_loop::DriverOptions;
+use minos_propose::{ClaudeCli, ParentEnv, PreflightError, Proposer};
 use minos_sandbox::Refusal;
+use minos_source::CleanPolicy;
 
 /// `minos env build`'s long help: what it does, and the uid rule a Dockerfile must be written for (05-CONTEXT
 /// D-08; 05-RESEARCH Pitfall 9).
@@ -454,8 +474,332 @@ fn run() -> anyhow::Result<ExitCode> {
             Some(("push", push)) => judge_push_command(push),
             _ => Err(anyhow!("unknown judge command")),
         },
+        Some(("init", init)) => init_cmd(init),
+        Some(("check", check)) => check_cmd(check),
+        Some(("run", run)) => run_cmd(run),
+        Some(("stop", stop)) => stop_cmd(stop),
+        Some(("status", status)) => status_cmd(status),
+        Some(("log", log)) => log_cmd(log),
+        Some(("show", show)) => show_cmd(show),
+        Some(("report", report)) => report_cmd(report),
+        Some(("adopt", adopt)) => adopt_cmd(adopt),
         _ => Err(anyhow!("unknown command")),
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// What the Phase 8 commands share
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The production job runner: the krun backend over the project's blob store, behind the loop's seam.
+type ProductionJobs = RunnerJobs<KrunBackend<FileBlobSource>>;
+
+/// The current directory, which is the project every Phase 8 command works on.
+fn current_dir() -> anyhow::Result<PathBuf> {
+    env::current_dir().context("reading the current directory")
+}
+
+/// The price table's path, `$HOME/.config/minos/prices.toml`. `HOME` must be set to an absolute path.
+fn prices_file() -> anyhow::Result<PathBuf> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .ok_or_else(|| {
+            anyhow!(
+                "HOME is not set to an absolute path; minos reads its price table from ~/.config/minos/prices.toml"
+            )
+        })?;
+    Ok(prices_path(&home))
+}
+
+/// The wall clock in whole Unix seconds. The clock is read here, at the binary boundary, never in a library
+/// crate; a new run is named by it.
+fn started_at() -> anyhow::Result<u64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("the system clock reads before 1970")?
+        .as_secs())
+}
+
+/// Standard output, locked once for the whole command.
+fn stdout() -> StdoutLock<'static> {
+    io::stdout().lock()
+}
+
+/// The ID style `--full-ids` asks for.
+fn id_style(matches: &ArgMatches) -> IdStyle {
+    if matches.get_flag("full-ids") {
+        IdStyle::Full
+    } else {
+        IdStyle::Short
+    }
+}
+
+/// The `--run` prefix (or `stop`'s positional run), if given.
+fn run_prefix(matches: &ArgMatches) -> Option<&HexPrefix> {
+    matches.get_one::<HexPrefix>("run")
+}
+
+/// The required `<exp>` prefix.
+fn exp_prefix(matches: &ArgMatches) -> anyhow::Result<&HexPrefix> {
+    matches
+        .get_one::<HexPrefix>("exp")
+        .ok_or_else(|| anyhow!("the experiment is required"))
+}
+
+/// Prepares the project in the current directory for `check` or `run`: the guest at its fixed location, the price
+/// table under `$HOME`, and the clean check unless `--allow-dirty` (08-CONTEXT D-06).
+fn prepare_project(matches: &ArgMatches) -> anyhow::Result<(Prepared, Located)> {
+    let cwd = current_dir()?;
+    let prices = prices_file()?;
+    let exe = env::current_exe().context("finding the running minos binary")?;
+    let located = locate(&exe);
+    let guest = located
+        .guest()
+        .ok_or_else(|| anyhow!("{}", Refusal::GuestMissing))?;
+    let policy = if matches.get_flag("allow-dirty") {
+        CleanPolicy::AllowDirty
+    } else {
+        CleanPolicy::RequireClean
+    };
+    let prepared = prepare(&cwd, guest, &prices, policy)?;
+    Ok((prepared, located))
+}
+
+/// Whether any `[[proposer]]` names a model, so the `claude` CLI provider is needed.
+fn needs_model(prepared: &Prepared) -> bool {
+    prepared
+        .manifest()
+        .proposers()
+        .iter()
+        .any(|spec| spec.model().is_some())
+}
+
+/// The provider preflight against this process's environment (06-CONTEXT D-01 to D-04). It runs once per command,
+/// so once per run, and is never cached; it refuses credential and redirect variables by name only.
+fn preflight() -> Result<ClaudeCli, PreflightError> {
+    ClaudeCli::preflight(&ParentEnv::from_vars(env::vars_os()))
+}
+
+/// The production job runner at the located paths. [`krun_jobs`] refuses a host whose probes failed (KRUN-06,
+/// KRUN-07), naming `minos host doctor`.
+fn production_jobs(prepared: &Prepared, located: &Located) -> anyhow::Result<ProductionJobs> {
+    let paths = host_paths(located).ok_or_else(|| {
+        anyhow!(
+            "the minos-vmm helper was not found; run minos host doctor to see every path it checked"
+        )
+    })?;
+    Ok(krun_jobs(prepared, paths)?)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Phase 8 commands
+// ---------------------------------------------------------------------------------------------------------------
+
+/// `minos init`: scaffolds the project in the current directory and the price table under `$HOME`, then prints
+/// what it wrote and the next steps. Every line goes through [`write_line`], so every path through [`SafeText`].
+fn init_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let kind = *matches
+        .get_one::<InitKind>("kind")
+        .ok_or_else(|| anyhow!("--kind is required"))?;
+    let report = init(&current_dir()?, &prices_file()?, InitOptions::new(kind))?;
+    let mut out = stdout();
+    for path in report.written() {
+        write_line(
+            &mut out,
+            &format!("wrote {}", SafeText::inline(&path.to_string_lossy())),
+        )?;
+    }
+    let prices = match report.prices() {
+        PricesFile::Written(path) => format!(
+            "wrote the price table {}; check its rates, and price every model a proposer names",
+            SafeText::inline(&path.to_string_lossy())
+        ),
+        PricesFile::Kept(path) => format!(
+            "kept the existing price table {}",
+            SafeText::inline(&path.to_string_lossy())
+        ),
+    };
+    write_line(&mut out, &prices)?;
+    write_line(
+        &mut out,
+        &format!(
+            "next steps for this {kind} project: create the writable files and write judge/, then run minos env \
+             build, minos judge push judge, and minos check"
+        ),
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `minos check`: prepares the project, runs the provider preflight when a proposer names a model, composes the
+/// production runner, and calibrates. A preflight refusal is reported, not raised, so the rest of the report
+/// still prints; the exit is 1 only when something refused (08-CONTEXT D-06, D-09).
+fn check_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let (prepared, located) = prepare_project(matches)?;
+    let provider = if needs_model(&prepared) {
+        match preflight() {
+            Ok(cli) => ProviderStatus::Ready {
+                description: SafeText::inline(&cli.version().map_or_else(
+                    || "the claude CLI passed its preflight".to_owned(),
+                    |version| format!("the claude CLI {version} passed its preflight"),
+                )),
+            },
+            Err(error) => ProviderStatus::Refused {
+                message: SafeText::inline(&error.to_string()),
+            },
+        }
+    } else {
+        ProviderStatus::NotNeeded
+    };
+    let jobs = production_jobs(&prepared, &located)?;
+    let outcome = check(
+        &prepared,
+        &Proposer::<ClaudeCli>::without_provider(),
+        &jobs,
+        &provider,
+        CheckOptions::new(matches.get_flag("fresh"), started_at()?),
+        &mut stdout(),
+    )?;
+    Ok(if outcome.refused() {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `minos run`: prepares the project, requires a passing provider preflight when a proposer names a model (its
+/// refusal is returned, so nothing starts), composes the production runner, and drives the run. The exit is 0
+/// when the target is reached or a user stop ended the session, and 2 when a cap, the breaker, or the provider
+/// stopped it.
+fn run_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let generations = *matches
+        .get_one::<u32>("generations")
+        .ok_or_else(|| anyhow!("--generations is required"))?;
+    let resume = run_prefix(matches).cloned();
+    let (prepared, located) = prepare_project(matches)?;
+    let proposer = if needs_model(&prepared) {
+        Proposer::with_provider(
+            preflight().context("the claude CLI preflight refused, so the run did not start")?,
+        )
+    } else {
+        Proposer::without_provider()
+    };
+    let jobs = production_jobs(&prepared, &located)?;
+    let outcome = minos_cli::run::run(
+        &prepared,
+        &proposer,
+        &jobs,
+        RunOptions::new(generations, resume),
+        started_at()?,
+        DriverOptions::default(),
+        &mut stdout(),
+    )?;
+    Ok(match outcome.ended() {
+        RunEnded::Reached { .. }
+        | RunEnded::Stopped {
+            reason: StopReason::UserStop,
+            ..
+        } => ExitCode::SUCCESS,
+        RunEnded::Stopped { .. } => ExitCode::from(2),
+    })
+}
+
+/// `minos stop`: records a user stop while a driver holds the run. With none, `stop`'s error reaches `main`,
+/// which exits 1 (08-CONTEXT D-13).
+fn stop_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let store = open_runs(&current_dir()?)?;
+    stop(&store, run_prefix(matches), &mut stdout())?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The price table for `status`, or `None` after a warning on stderr: the run's progress still prints, and only
+/// its cost line does not.
+fn status_prices() -> Option<Prices> {
+    match prices_file().and_then(|path| Ok(read_prices(&path)?)) {
+        Ok(prices) => Some(prices),
+        Err(error) => {
+            eprintln!("minos: warning: {}", SafeText::new(&format!("{error:#}")));
+            None
+        }
+    }
+}
+
+/// `minos status`: exits 1 when the run's ledger is unhealthy (08-CONTEXT D-15).
+fn status_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let store = open_runs(&current_dir()?)?;
+    let prices = status_prices();
+    let outcome = status(
+        &store,
+        run_prefix(matches),
+        prices.as_ref(),
+        StatusOptions::new(id_style(matches)),
+        &mut stdout(),
+    )?;
+    Ok(if outcome.is_healthy() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
+/// `minos log` (08-CONTEXT D-16).
+fn log_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let store = open_runs(&current_dir()?)?;
+    let options = LogOptions::new(
+        matches.get_one::<u32>("generation").copied(),
+        matches.get_one::<HexPrefix>("exp").cloned(),
+        matches.get_flag("json"),
+        id_style(matches),
+    );
+    log(&store, run_prefix(matches), options, &mut stdout())?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `minos show <exp>` (08-CONTEXT D-17).
+fn show_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let store = open_runs(&current_dir()?)?;
+    let options = ShowOptions::new(matches.get_flag("logs"), id_style(matches));
+    show(
+        &store,
+        run_prefix(matches),
+        exp_prefix(matches)?,
+        options,
+        &mut stdout(),
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `minos report <exp>`: prints the report and its hash, and appends nothing (08-CONTEXT D-11).
+fn report_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let store = open_runs(&current_dir()?)?;
+    report(
+        &store,
+        run_prefix(matches),
+        exp_prefix(matches)?,
+        &mut stdout(),
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `minos adopt <exp> --reviewed <hash>`: records the acknowledgment and writes the patch file in the current
+/// directory or at `--out`, never applying it (08-CONTEXT D-11, D-12).
+fn adopt_cmd(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
+    let cwd = current_dir()?;
+    let store = open_runs(&cwd)?;
+    let reviewed = matches
+        .get_one::<ReportHash>("reviewed")
+        .copied()
+        .ok_or_else(|| anyhow!("--reviewed is required"))?;
+    let options = AdoptOptions::new(reviewed, matches.get_one::<PathBuf>("out").cloned());
+    adopt(
+        &store,
+        &cwd,
+        run_prefix(matches),
+        exp_prefix(matches)?,
+        options,
+        &mut stdout(),
+    )?;
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Runs `minos env build` for the project in the current directory, with the guest at its fixed location and
