@@ -839,7 +839,11 @@ unchanged and remain a recorded assumption. The boot-to-boot variance recorded i
 1259 to 1434 ms) over five boots. The options are to accept this outcome for the milestone, or to ask for a
 measurement-only timing probe in a later phase. The STATE.md Phase 8 blocker is not closed by this data.
 
-User answer: pending (Task 3 checkpoint)
+User answer (08-13 checkpoint, 2026-10-28): Accept for this milestone. D-07 is accepted as met partially for this
+milestone: the objective is deterministic with spread 0, the default of 3 trials stays a recorded assumption, VM
+wall-time variance was recorded instead, and no timing probe is scheduled in v1.
+
+The STATE.md Phase 8 blocker is not closed by this answer; it stays open and is restated by 08-15.
 
 ## Sample end to end with the final budgets (08-13)
 
@@ -1449,3 +1453,89 @@ ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 205.86s
 
 ```
+
+## Live provider tests rerun (08-13)
+
+Run by the user at the 08-13 checkpoint. The live suite makes three real `haiku` calls on the user's own subscription,
+which CLAUDE.md reserves for the user to run by hand (06-CONTEXT D-17), so no agent ran it, set `MINOS_CLAUDE_LIVE`,
+or ran the user's `claude`. The format follows 06-EVIDENCE.md "Live provider tests (06-09)".
+
+- Date: 2026-10-28
+- Who ran it: the user, by hand, in their own logged-in terminal at the repository root (branch `main`), and pasted
+  the output back at the 08-13 Task 3 checkpoint
+- `claude --version`: `2.1.312 (Claude Code)`, exit 0
+- Link target of `~/.local/bin/claude`, as the suite printed it: `~/.local/share/claude/versions/2.1.312`
+- Exit code of the live suite: 0
+
+Commands, in order:
+
+```
+~/.local/bin/claude --version; echo "exit: $?"
+MINOS_CLAUDE_LIVE=1 cargo test -p minos-propose --test live -- --ignored --nocapture --test-threads=1; echo "exit: $?"
+```
+
+Redactions: the home path is shown as `~`. The output held no email, organization, or account value. The suite
+prints no `auth status` field and discards the CLI's stderr (06-08), and no cost figure is printed. Nothing else is
+altered.
+
+Output of the first command:
+
+```text
+2.1.312 (Claude Code)
+exit: 0
+```
+
+Output of the second command:
+
+```text
+   Compiling minos-propose v0.1.0 (~/Repos/minos/crates/minos-propose)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.41s
+     Running tests/live.rs (target/debug/deps/live-93d7155bccd12a21)
+
+running 3 tests
+test live_golden_argv_in_hostile_cwd ... == claude: 2.1.312 (~/.local/share/claude/versions/2.1.312)
+== (b) exit: exit status: 0, stdout bytes: 2993
+== (b) marker in the envelope: false
+== (b): canary-session-start: absent
+== (b): canary-user-prompt: absent
+== (b): canary-mcp: absent
+== (b) valid proposals: 2, dropped: 0
+ok
+test live_positive_control_fixture_is_live ... == claude: 2.1.312 (~/.local/share/claude/versions/2.1.312)
+== (c) exit: exit status: 0, stdout bytes: 3057
+== (c) marker in the envelope: true
+== (c): canary-session-start: FIRED
+== (c): canary-user-prompt: FIRED
+== (c): canary-mcp: FIRED
+ok
+test live_production_provider_ignores_hostile_project ... == (a) claude version: 2.1.312
+== (a) proposals: 2, dropped: 0
+== (a) usage: input 2, output 441, cache creation 1119, cache read 2976
+== (a) origin model: claude-haiku-5-5, prompt hash: 291e3bd22b6eb0b8e4f84064aac1af71feba5f8107bbab8a0870d58f40bab55c
+== (a): canary-session-start: absent
+== (a): canary-user-prompt: absent
+== (a): canary-mcp: absent
+ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 18.78s
+
+exit: 0
+```
+
+Under `--nocapture` each test's printed lines sit between its name and its `ok`. Read together, the three results are
+`test live_production_provider_ignores_hostile_project ... ok`, `test live_golden_argv_in_hostile_cwd ... ok`, and
+`test live_positive_control_fixture_is_live ... ok`, and the summary line is
+`test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 18.78s`, then `exit: 0`.
+The `1 filtered out` is `the_fixture_and_the_control_argv_are_well_formed`, the suite's one test that is not ignored.
+
+| Case | `canary-session-start` | `canary-user-prompt` | `canary-mcp` | fixture marker |
+|---|---|---|---|---|
+| (a) production provider, process cwd = fixture | absent | absent | absent | in no proposal rationale (asserted; the envelope is not printed for this case) |
+| (b) golden argv, CLI cwd = fixture | absent | absent | absent | not in the envelope (`false`) |
+| (c) positive control, without `--safe-mode`, `--strict-mcp-config`, and the empty `--mcp-config` | FIRED | FIRED | FIRED | in the envelope (`true`) |
+
+Reading: on `claude` 2.1.312 the production provider's preflight passed and case (a) returned 2 proposals with 0
+dropped, recording the resolved model `claude-haiku-5-5`; with the fixture as the CLI's own working directory, no
+hook or MCP canary fired and the fixture's marker did not reach the envelope (case b, 2 valid proposals, 0 dropped);
+and the positive control fired all three canaries (case c), so the fixture was live. This matches the 2.1.304 run
+(06-EVIDENCE.md) for this version and this fixture; a later CLI version needs a rerun.
