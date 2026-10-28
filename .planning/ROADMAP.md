@@ -434,8 +434,43 @@ Plans:
   4. `minos report <exp>` prints the report and its hash. `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test) and never applies it. `SECURITY.md` states the threat model, the trust base, and what preflight checks without claiming ironclad isolation, and the README states that the `claude` CLI provider only execs the user's own install under their own login and that shared or hosted use goes through an API key or Bedrock (CLI-08, CLI-09, DOCS-03, DOCS-04)
   5. `cargo clean` has been run after verification passes (GATE-06)
 
-**Plans**: TBD
-**Research**: Standard patterns; skip research-phase
+**Plans**: 15 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 08-01-PLAN.md — Core and loop seams: `CostLine` with token counts, `run_cost`, the D-08 constants, `RunState::proposals`, the advisory `noise_check` rustdoc, public `recorded_manifest_at` and `surface_bytes` (wave 1)
+- [ ] 08-02-PLAN.md — `Ledger::runs` on both stores with contract cases; a lock probe never creates a listed run (wave 1)
+- [ ] 08-03-PLAN.md — `minos_source::read_files` and `Snapshot::surface`: the strict read-back of a snapshot or stored base tarball (wave 1)
+- [ ] 08-04-PLAN.md — The sample's Rust crates: the `logparse` candidate, the `logparse-judge` judge, the data and answer key, `program.md`, the improved-parser fixture, `exclude = ["examples"]` (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08-05-PLAN.md — The sample's manifest, Dockerfile, ignore file, and README; the host gate test; CLAUDE.md for the sample and the stage environment (wave 2)
+- [ ] 08-06-PLAN.md — CLI foundation: `prepare` and `open_runs`, `krun_jobs`, prefix addressing, the shared renderer helpers, the command module files, the `env build` help fix (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08-07-PLAN.md — `minos check`: facts, routes, the batch advisory, provider status, calibration reuse or a fresh run, the noise floor beside `min_improvement` (wave 3)
+- [ ] 08-08-PLAN.md — `minos run`: start or `--run` resume to an absolute target, the progress observer and its golden format (wave 3)
+- [ ] 08-09-PLAN.md — `minos status`, `log` (with `--json`), and `show` through the sanitizing renderer (wave 3)
+- [ ] 08-10-PLAN.md — `minos report` and `adopt` with the hash gate and `create_new` patch, and the `git apply`/`patch -p1` golden (wave 3)
+- [ ] 08-11-PLAN.md — `minos stop` (refused without a driver, fresh ordinal) and `minos init` with a fail-closed price table (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08-12-PLAN.md — The `minos` binary: the full clap builder tree, the concrete provider and backend, exit codes, binary-level tests (wave 4)
+- [ ] 08-13-PLAN.md — The sample end to end on real VMs, the `RLIMIT_AS`, judge-compile, and boot-variance measurements, and the user's live provider rerun, recorded in 08-EVIDENCE.md (wave 4; checkpoint)
+
+**Wave 5** *(blocked on 08-12 and 08-13)*
+
+- [ ] 08-14-PLAN.md — `SECURITY.md`, `README.md`, the overclaim test, the `/scratch/candidate/out` correction, CLAUDE.md's Phase 8 sections (wave 5)
+
+**Wave 6** *(blocked on all prior plans)*
+
+- [ ] 08-15-PLAN.md — Final gate, requirements, the validation contract, then `cargo clean` (wave 6)
+
+**Research**: A research pass ran on 2026-10-28 after the discuss session (08-RESEARCH.md, experiments E1 to E8)
 
 ## Progress
 
@@ -451,4 +486,4 @@ Phases execute in numeric order, using the parallel windows above: 1, then 2 and
 | 5. Guest, krun Backend, and Environment Build | 22/22 | Complete    | 2026-10-19 |
 | 6. Proposers | 10/10 | Complete    | 2026-10-20 |
 | 7. Runner and Loop | 17/17 | Complete    | 2026-10-24 |
-| 8. CLI, Sample Project, and Docs | 0/TBD | Not started | - |
+| 8. CLI, Sample Project, and Docs | 0/15 | Planned | - |
