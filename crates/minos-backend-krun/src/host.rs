@@ -1051,10 +1051,10 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{
-        Check, HostPaths, KRUNFW_PATH, KRUNFW_SHA256, Probe, ProbeOutcome, REQUIRED_ENTITLEMENTS,
-        entitlements_present, longest_socket_path, max_machine, parse_hv_support, parse_sysctl,
-        parse_u64, probe_entitlements, probe_guest, probe_host, probe_kernel, probe_sandbox_exec,
-        probe_seatbelt, probe_socket_path, probe_vmm, report,
+        Check, KRUNFW_SHA256, Probe, ProbeOutcome, REQUIRED_ENTITLEMENTS, entitlements_present,
+        longest_socket_path, max_machine, parse_hv_support, parse_sysctl, parse_u64,
+        probe_entitlements, probe_guest, probe_kernel, probe_sandbox_exec, probe_seatbelt,
+        probe_socket_path, probe_vmm, report,
     };
 
     type TestResult = Result<(), Box<dyn Error>>;
@@ -1350,43 +1350,6 @@ mod tests {
         };
         assert!(!detail.as_str().contains('\u{1b}'));
         assert!(!detail.as_str().contains('\n'));
-        Ok(())
-    }
-
-    /// Runs every probe on this Mac. Build first: `cargo build -p minos-vmm`, sign it with the CLAUDE.md codesign
-    /// argv, and `cargo build -p minos-guest --release --target aarch64-unknown-linux-musl`.
-    #[test]
-    #[ignore = "needs MINOS_VMM (a signed minos-vmm) and MINOS_GUEST (the static musl minos-guest); MINOS_KRUNFW is optional"]
-    fn probe_host_on_this_mac() -> TestResult {
-        let vmm = std::env::var_os("MINOS_VMM").ok_or("set MINOS_VMM to the signed minos-vmm")?;
-        let guest =
-            std::env::var_os("MINOS_GUEST").ok_or("set MINOS_GUEST to the musl minos-guest")?;
-        let krunfw = std::env::var_os("MINOS_KRUNFW")
-            .map_or_else(|| PathBuf::from(KRUNFW_PATH), PathBuf::from);
-        let host = probe_host(
-            &HostPaths::new(vmm, guest, krunfw),
-            Path::new("/private/tmp"),
-        );
-        for probe in host.probes() {
-            println!(
-                "{:<32} {:?} {:?}",
-                probe.check().name(),
-                probe.paths(),
-                probe.outcome()
-            );
-        }
-        let caps = host.capabilities();
-        assert!(
-            caps.host_refusals().is_empty(),
-            "refusals: {:?}",
-            caps.host_refusals()
-        );
-        assert_eq!(
-            caps.layers(),
-            &BTreeSet::from([ConfinementLayer::Seatbelt, ConfinementLayer::Rlimits])
-        );
-        assert!(caps.kernel().is_some());
-        assert_eq!(host.probes().len(), 9);
         Ok(())
     }
 

@@ -11,9 +11,13 @@
 
 mod harness;
 
+use std::collections::BTreeSet;
+use std::path::Path;
 use std::time::Duration;
 
+use minos_backend_krun::host::{HostPaths, probe_host};
 use minos_core::guest::{ApplyStatus, GuestRole, OutputStatus, SetupStatus, StageEnd};
+use minos_core::ledger::ConfinementLayer;
 use minos_core::limits::Limits;
 use minos_core::manifest::Manifest;
 use minos_core::metric::Metric;
@@ -24,7 +28,8 @@ use serde_json::Value;
 
 use harness::{
     PROBE, PROBE_NAME, PROBE_SETUID, PROBE_SETUID_MODE, TestResult, VALUE_PATH, base_tar,
-    candidate, diff_text, drop_logs, exited, judge, manifest, metric, probe_json, stage_end, vm,
+    candidate, diff_text, drop_logs, env_path, exited, judge, manifest, metric, probe_json,
+    stage_end, vm,
 };
 
 /// Bytes in a MiB.
@@ -512,5 +517,40 @@ fn stage_timeout_is_reported_by_the_guest() -> TestResult {
     );
     assert_eq!(stage_end(&status, Stage::Run)?, StageEnd::TimedOut);
     println!("== a 2 s run budget: the launch took {elapsed:?}");
+    Ok(())
+}
+
+/// Runs every host probe on this Mac (moved here from `host.rs`'s unit tests by 08-15, so no file under `src/`
+/// names the test variables). Build first: `cargo build -p minos-vmm`, sign it with the CLAUDE.md codesign argv,
+/// and `cargo build -p minos-guest --release --target aarch64-unknown-linux-musl`.
+#[test]
+#[ignore = "needs a signed MINOS_VMM, MINOS_GUEST, MINOS_KRUNFW; see harness::SETUP"]
+fn probe_host_on_this_mac() -> TestResult {
+    let paths = HostPaths::new(
+        env_path("MINOS_VMM")?,
+        env_path("MINOS_GUEST")?,
+        env_path("MINOS_KRUNFW")?,
+    );
+    let host = probe_host(&paths, Path::new("/private/tmp"));
+    for probe in host.probes() {
+        println!(
+            "{:<32} {:?} {:?}",
+            probe.check().name(),
+            probe.paths(),
+            probe.outcome()
+        );
+    }
+    let caps = host.capabilities();
+    assert!(
+        caps.host_refusals().is_empty(),
+        "refusals: {:?}",
+        caps.host_refusals()
+    );
+    assert_eq!(
+        caps.layers(),
+        &BTreeSet::from([ConfinementLayer::Seatbelt, ConfinementLayer::Rlimits])
+    );
+    assert!(caps.kernel().is_some());
+    assert_eq!(host.probes().len(), 9);
     Ok(())
 }
