@@ -15,6 +15,10 @@ members = [
   "crates/minos-guest",
   "crates/minos-cli",
 ]
+# The sample projects build standalone inside the VM, where the snapshot has no parent workspace to inherit
+# `[lints] workspace = true` from (08-RESEARCH E8). They carry their own literal lint tables and are checked with
+# their own `--manifest-path` gate commands.
+exclude = ["examples"]
 
 [workspace.package]
 version = "0.1.0"

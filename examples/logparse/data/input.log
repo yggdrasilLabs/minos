@@ -1,0 +1,48 @@
+2026-10-28T14:03:11Z INFO auth: login ok user=alice latency_ms=12
+Oct 28 14:03:12 web01 nginx[2211]: GET /api/orders 200 15ms
+[2026/10/28 14:03:13] INFO db: query took 42 ms
+2026-10-28T14:03:15Z ERROR billing: charge declined latency_ms=230
+Oct 28 14:03:17 web02 sshd[904]: accepted publickey for deploy 3ms
+[2026/10/28 14:03:18] info cache: refresh took 7 ms
+2026-10-28T14:03:20Z debug scheduler: tick latency_ms=1
+Nov  3 09:15:02 web01 cron[77]: job nightly-report started 120ms
+[2026/10/28 14:03:21] warning db: slow query took 1250 ms
+2026-10-28T14:03:22Z warning api: retrying upstream latency_ms=480
+Oct 28   14:03:24   web03  postfix[3120]:  queued message 2 recipients  9ms
+[2026/10/28 14:03:25] err mailer: send failed took 3000 ms
+2026-10-28T14:03:27Z   INFO   search:  query served  latency_ms=33
+Oct 28 14:03:28 web02 sshd[905]: session closed for deploy
+[2026/10/28   14:03:30]   ERROR   auth:   token check took  18 ms
+   2026-10-28T14:03:31Z INFO cache: warmup done latency_ms=64   
+  Oct 28 14:03:33 web01 nginx[2211]: GET /health 200 1ms
+[2026/10/28 14:03:34] INFO scheduler: queue drained
+2026-10-28T14:03:36Z WARN db: replica lag high
+Oct 28 14:03:37 web03 postfix[3121]: delivered to remote 44ms
+[2026/10/28 14:03:39] DEBUG api: cache hit took 0 ms    
+2026-10-28T14:03:40Z  Err  billing:  refund failed  latency_ms=910
+Oct 28  14:03:42  web02  cron[78]:  job cleanup finished
+[2026/10/28 14:03:43] Debug search: index merge took 75 ms
+2026-10-29T08:00:01Z INFO api: request served route=/v1/items latency_ms=27
+Oct 29 08:00:02 web04 nginx[3001]: POST /api/cart 201 38ms
+[2026/10/29 08:00:04] WARN cache: eviction storm took 95 ms
+2026-10-29T08:00:05Z DEBUG auth: session renewed latency_ms=4
+Oct 29 08:00:07 web05 sshd[1188]: accepted password for ops 6ms
+[2026/10/29 08:00:08] error billing: invoice render took 640 ms
+2026-10-29T08:00:10Z error db: deadlock detected latency_ms=1500
+Dec  1 23:59:58 web04 cron[91]: job backup started 250ms
+[2026/10/29 08:00:11] WARNING mailer: bounce rate high took 12 ms
+2026-10-29T08:00:13Z Warning search: shard slow latency_ms=720
+Oct 29  08:00:14   web06   postfix[4410]:   deferred message  21ms
+[2026/10/29 08:00:16] ERR scheduler: missed deadline took 5000 ms
+2026-10-29T08:00:17Z    WARN  cache:   miss ratio up   latency_ms=58
+Oct 29 08:00:19 web05 sshd[1189]: disconnected from ops
+[2026/10/29  08:00:20]  INFO  api:  batch import  took 310  ms
+  2026-10-29T08:00:22Z ERROR mailer: smtp timeout latency_ms=8000  
+    Oct 29 08:00:23 web04 nginx[3001]: GET /static/app.js 304 2ms
+[2026/10/29 08:00:25] DEBUG db: pool resized
+2026-10-29T08:00:26Z INFO billing: ledger closed
+Oct 29 08:00:28 web06 postfix[4411]: delivered locally 17ms
+[2026/10/29 08:00:29] INFO auth: password reset took 140 ms   
+2026-10-29T08:00:31Z   ERR   scheduler:   job crashed   latency_ms=77
+Oct 29   08:00:32  web05  cron[92]:   job rotate finished
+[2026/10/29 08:00:34] debug search: compaction took 2200 ms
