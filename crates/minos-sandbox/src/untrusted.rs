@@ -368,8 +368,8 @@ impl Untrusted<GuestOutput<Candidate>> {
     /// file named `out`, and any path under `outx/` or another directory. Each entry is a regular file with a
     /// hand-built ustar header: the path, the size, mode 0644, uid, gid, and mtime 0, empty user and group names,
     /// and the checksum. The archive ends with two 512-byte zero blocks and nothing else, so an output with no
-    /// artifact becomes 1024 zero bytes. The judge VM unpacks it under `/candidate`, so the judge reads
-    /// `/candidate/out/<file>`.
+    /// artifact becomes 1024 zero bytes. The judge VM's PID 1 unpacks it under `/scratch/candidate`, so the judge
+    /// reads `/scratch/candidate/out/<file>`.
     ///
     /// The archive is a subset of a stream the output reader already held to [`MAX_CANDIDATE_OUT_BYTES`]: the
     /// same names, so every header fits, and the same sizes and padding. It is checked against that cap again
