@@ -1,6 +1,7 @@
-//! `minos_cli::status::status` and `minos_cli::log::log` over a temporary project's `FileStore`, on runs driven by
-//! `minos_cli::run::run` with a fake job runner and the sweep tier, so no test boots a VM or calls a model (CLI-07,
-//! COST-02; 08-CONTEXT D-10, D-15, D-16).
+//! `minos_cli::status::status`, `minos_cli::log::log`, and `minos_cli::show::show` over a temporary project's
+//! `FileStore`, on runs driven by `minos_cli::run::run` with a fake job runner and either the sweep tier or a
+//! scripted single_shot provider, so no test boots a VM or calls a model (CLI-07, COST-02; 08-CONTEXT D-10, D-15,
+//! D-16, D-17).
 //!
 //! - `status` on a run driven to generation 2 prints its ID and start, `generations concluded: 2`,
 //!   `driver: not running`, the incumbent, and the `approx. cost:` line, and is healthy.
@@ -13,9 +14,16 @@
 //!   events only; `--exp <prefix>` keeps the events that name that experiment only.
 //! - `log --json` with no filter writes exactly the bytes of the run's `ledger.jsonl`.
 //! - `--full-ids` prints 64-hex IDs, and the default prints 12-hex prefixes.
+//! - `show` of a generation-1 experiment prints its header, one line per trial with its outcome, percent, and
+//!   elapsed time, the lineage from the baseline, the rationale, and the cumulative diff of the writable file.
+//! - `show` of the baseline marks it `(baseline)` and prints its trials and no diff.
+//! - A single_shot rationale holding an ESC sequence and U+202E reaches the output with neither.
+//! - Stage logs holding an ESC sequence print only with `--logs`, one block per stored stage, with no ESC byte.
+//! - An experiment prefix that names two experiments is `AddressError::Ambiguous`.
 //!
 //! Every captured output and every provoked error's text passes [`assert_no_banned_words`]: no `estimate`, and no
-//! whole word `exact` (COST-02). The fixture's files and the sweep's rationales contain neither word.
+//! whole word `exact` (COST-02). The fixture's files, the sweep's rationales, and the scripted rationale and log
+//! bytes contain neither word.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -24,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
-use minos_cli::address::HexPrefix;
+use minos_cli::address::{AddressError, HexPrefix};
 use minos_cli::env_build::{LOCK_FILE, MANIFEST_FILE};
 use minos_cli::judge_push::{JudgePushOptions, judge_push};
 use minos_cli::lock_file::{read_lock, write_lock};
@@ -32,20 +40,22 @@ use minos_cli::log::{LogOptions, log};
 use minos_cli::project::{Prepared, prepare};
 use minos_cli::render::IdStyle;
 use minos_cli::run::{RunOptions, run};
+use minos_cli::show::{ShowError, ShowOptions, show};
 use minos_cli::status::{StatusOptions, status};
-use minos_core::id::{BlobId, ExperimentId, ImageDigest, MetricName, RunId};
+use minos_core::id::{BlobId, ExperimentId, ImageDigest, MetricName, ModelId, RunId};
 use minos_core::job::{JobRequest, JobResult};
 use minos_core::ledger::{BackendInfo, BackendKind, EXPECTED_KRUN_LAYERS, Isolation};
 use minos_core::lock::{BuilderId, BuilderText, LockedImage};
 use minos_core::manifest::Arch;
 use minos_core::metric::{Metric, Scorecard};
-use minos_core::outcome::Outcome;
+use minos_core::outcome::{Outcome, Stage};
 use minos_core::state::{RunState, fold};
 use minos_core::usage::Usage;
 use minos_loop::{DriverOptions, JobFailure, JobRunner};
-use minos_propose::{FakeProvider, ModelProvider, Proposer};
+use minos_propose::{FakeProvider, FakeReply, ModelProvider, Proposer};
 use minos_source::CleanPolicy;
 use minos_store::{Blobs, FileStore, Ledger, RunLock, STORE_DIR};
+use serde_json::json;
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -108,6 +118,9 @@ step = 1
 
 /// The sweep proposer.
 const SWEEP: &str = "\n[[proposer]]\nkind = \"sweep\"\nbatch = 2\n";
+
+/// A single_shot proposer of one proposal per call.
+const SINGLE_SHOT: &str = "\n[[proposer]]\nkind = \"single_shot\"\nmodel = \"haiku\"\nbatch = 1\n";
 
 /// The Dockerfile the lock image entry is written for.
 const DOCKERFILE: &[u8] = b"FROM scratch\n";
@@ -256,7 +269,7 @@ where
 fn scored_with_logs(
     request: &JobRequest,
     value: f64,
-    logs: BTreeMap<minos_core::outcome::Stage, BlobId>,
+    logs: BTreeMap<Stage, BlobId>,
 ) -> Result<JobResult, JobFailure> {
     let invalid = JobFailure::Config {
         what: "the fake scorecard is invalid",
@@ -713,4 +726,249 @@ fn error_chain(error: &dyn Error) -> String {
         source = cause.source();
     }
     message
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// show
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The rationale the scripted provider returns: an ESC color sequence and a right-to-left override.
+const HOSTILE_RATIONALE: &str = "Raise the value \u{1b}[31mred\u{1b}[0m and \u{202e}flipped text";
+
+/// The stage log bytes the hostile job runner stores: an ESC clear-screen sequence and a right-to-left override.
+const HOSTILE_LOG: &[u8] =
+    b"compiling probe\n\x1b[2Jcleared screen \xe2\x80\xae flipped\nfinished\n";
+
+/// `show` of the experiment `exp` names in the latest run of `store`: its result and everything it printed.
+fn show_text<S: Ledger + Blobs>(
+    store: &S,
+    exp: &HexPrefix,
+    logs: bool,
+) -> Fallible<(Result<(), ShowError>, Vec<u8>)> {
+    let mut out = Vec::new();
+    let result = show(
+        store,
+        None,
+        exp,
+        ShowOptions::new(logs, IdStyle::Short),
+        &mut out,
+    );
+    Ok((result, out))
+}
+
+/// `show` that must succeed: its output as text.
+fn shown<S: Ledger + Blobs>(store: &S, exp: &ExperimentId, logs: bool) -> Fallible<String> {
+    let (result, out) = show_text(store, &prefix_of(&exp.to_hex(), 12)?, logs)?;
+    result?;
+    Ok(String::from_utf8(out)?)
+}
+
+/// The UTF-8 bytes of U+202E, the right-to-left override.
+const RLO: &[u8] = "\u{202e}".as_bytes();
+
+/// Whether `haystack` holds `needle` anywhere.
+fn holds(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// The first experiment of generation 1 in `state`.
+fn first_of_generation_one(state: &RunState) -> Fallible<ExperimentId> {
+    Ok(*state
+        .proposals_in(1)
+        .next()
+        .map(|(exp, _)| exp)
+        .ok_or("generation 1 proposed nothing")?)
+}
+
+#[test]
+fn show_prints_a_proposal_with_its_trials_lineage_rationale_and_diff() -> TestResult {
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
+    let run = driven(&prepared)?;
+    let state = state_of(prepared.store(), &run)?;
+    let exp = first_of_generation_one(&state)?;
+    let parent = *state.proposal(&exp).ok_or("no proposal")?.parent();
+
+    let text = shown(prepared.store(), &exp, false)?;
+
+    assert_no_banned_words(&text)?;
+    let rows: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        rows.first().copied(),
+        Some(format!("experiment {}", short(&exp)).as_str()),
+        "{text}"
+    );
+    let header = format!(
+        "generation 1  tier sweep  origin sweep  parent {}",
+        short(&parent)
+    );
+    assert!(rows.iter().any(|row| *row == header), "{text}");
+    let trial = rows
+        .iter()
+        .find(|row| row.starts_with("trial 0: scored"))
+        .ok_or("no trial line")?;
+    assert!(trial.contains('%'), "{trial}");
+    assert!(trial.ends_with("0m00s"), "{trial}");
+    assert!(
+        rows.iter()
+            .any(|row| row.starts_with(&format!("lineage: {} -> ", short(state.baseline())))),
+        "{text}"
+    );
+    assert!(rows.contains(&"rationale:"), "{text}");
+    assert!(rows.contains(&"diff:"), "{text}");
+    assert!(
+        rows.iter()
+            .any(|row| row.trim_start() == "diff --git a/src/value.txt b/src/value.txt"),
+        "{text}"
+    );
+    assert!(!rows.iter().any(|row| row.starts_with("log ")), "{text}");
+    Ok(())
+}
+
+#[test]
+fn show_marks_the_baseline_and_prints_no_diff() -> TestResult {
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
+    let run = driven(&prepared)?;
+    let state = state_of(prepared.store(), &run)?;
+
+    let text = shown(prepared.store(), state.baseline(), false)?;
+
+    assert_no_banned_words(&text)?;
+    assert!(
+        text.lines()
+            .any(|row| row == format!("experiment {} (baseline)", short(state.baseline()))),
+        "{text}"
+    );
+    let trials = text.lines().filter(|row| row.starts_with("trial ")).count();
+    assert_eq!(trials, 3, "{text}");
+    assert!(!text.lines().any(|row| row == "diff:"), "{text}");
+    assert!(!text.lines().any(|row| row == "rationale:"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn a_hostile_rationale_reaches_the_output_with_no_escape_or_override() -> TestResult {
+    let fixture = Fixture::with(SINGLE_SHOT)?;
+    let prepared = fixture.prepare()?;
+    let reply = FakeReply::Structured {
+        output: json!({
+            "proposals": [{
+                "rationale": HOSTILE_RATIONALE,
+                "files": [{"path": "src/value.txt", "content": "value = 9\n"}],
+            }],
+        }),
+        usage: Usage::tokens(100, 200, 0, 0),
+        models: BTreeMap::from([(ModelId::from_str("haiku")?, Usage::tokens(100, 200, 0, 0))]),
+    };
+    let proposer = Proposer::with_provider(FakeProvider::new(vec![reply]));
+    let run = drive(&prepared, &proposer, &FakeJobs { run: deterministic }, 1)?;
+    let state = state_of(prepared.store(), &run)?;
+    let exp = first_of_generation_one(&state)?;
+
+    let (result, out) = show_text(prepared.store(), &prefix_of(&exp.to_hex(), 12)?, false)?;
+    result?;
+
+    let text = String::from_utf8(out.clone())?;
+    assert_no_banned_words(&text)?;
+    assert!(!out.contains(&0x1b), "{text}");
+    assert!(!holds(&out, RLO), "{text}");
+    assert!(text.contains("Raise the value"), "{text}");
+    assert!(text.contains("origin model haiku"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn stage_logs_print_only_with_logs_and_without_escapes() -> TestResult {
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
+    let store = prepared.store();
+    let jobs = FakeJobs {
+        run: |request: &JobRequest| {
+            let stored = store
+                .put(HOSTILE_LOG)
+                .map_err(|_error| JobFailure::Config {
+                    what: "the fake could not store a log",
+                })?;
+            let logs = BTreeMap::from([(Stage::Build, stored), (Stage::Run, stored)]);
+            let value = if request.is_baseline() { 1.0 } else { 2.0 };
+            scored_with_logs(request, value, logs)
+        },
+    };
+    let run = drive(
+        &prepared,
+        &Proposer::<FakeProvider>::without_provider(),
+        &jobs,
+        1,
+    )?;
+    let state = state_of(store, &run)?;
+    let exp = first_of_generation_one(&state)?;
+
+    let quiet = shown(store, &exp, false)?;
+    let (result, out) = show_text(store, &prefix_of(&exp.to_hex(), 12)?, true)?;
+    result?;
+    let loud = String::from_utf8(out.clone())?;
+
+    assert_no_banned_words(&quiet)?;
+    assert_no_banned_words(&loud)?;
+    assert!(!quiet.lines().any(|row| row.starts_with("log ")), "{quiet}");
+    assert!(!quiet.contains("compiling probe"), "{quiet}");
+    let blocks: Vec<&str> = loud
+        .lines()
+        .filter(|row| row.starts_with("log trial 0 "))
+        .collect();
+    assert_eq!(blocks, ["log trial 0 build:", "log trial 0 run:"], "{loud}");
+    assert!(loud.contains("cleared screen"), "{loud}");
+    assert!(!out.contains(&0x1b), "{loud}");
+    assert!(!holds(&out, RLO), "{loud}");
+    Ok(())
+}
+
+#[test]
+fn an_ambiguous_experiment_prefix_is_refused() -> TestResult {
+    let fixture = Fixture::new()?;
+    let prepared = fixture.prepare()?;
+    let run = drive(
+        &prepared,
+        &Proposer::<FakeProvider>::without_provider(),
+        &FakeJobs { run: deterministic },
+        8,
+    )?;
+    let state = state_of(prepared.store(), &run)?;
+    let mut by_first: BTreeMap<char, usize> = BTreeMap::new();
+    for exp in std::iter::once(state.baseline()).chain(state.proposals().map(|(exp, _)| exp)) {
+        if let Some(first) = exp.to_hex().chars().next() {
+            *by_first.entry(first).or_default() += 1;
+        }
+    }
+    let shared = by_first
+        .iter()
+        .find(|(_, count)| **count > 1)
+        .map(|(first, _)| *first)
+        .ok_or("no two experiments share a first hex character")?;
+
+    let (result, out) = show_text(
+        prepared.store(),
+        &HexPrefix::from_str(&shared.to_string())?,
+        false,
+    )?;
+
+    let Err(error) = result else {
+        return Err("an ambiguous prefix was accepted".into());
+    };
+    assert_no_banned_words(&error_chain(&error))?;
+    assert_no_banned_words(&String::from_utf8(out)?)?;
+    assert!(
+        matches!(
+            error,
+            ShowError::Address(AddressError::Ambiguous {
+                what: "experiment",
+                ..
+            })
+        ),
+        "{error:?}"
+    );
+    Ok(())
 }
