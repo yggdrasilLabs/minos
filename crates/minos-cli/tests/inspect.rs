@@ -513,9 +513,8 @@ fn a_corrupt_ledger_is_reported_by_status_and_refused_by_log() -> TestResult {
         "{text}"
     );
     let mut out = Vec::new();
-    let error = match log(prepared.store(), Some(&named), plain(), &mut out) {
-        Err(error) => error,
-        Ok(()) => return Err("log read a corrupt ledger".into()),
+    let Err(error) = log(prepared.store(), Some(&named), plain(), &mut out) else {
+        return Err("log read a corrupt ledger".into());
     };
     let message = error_chain(&error);
     assert_no_banned_words(&message)?;
@@ -534,7 +533,8 @@ fn status_without_prices_prints_no_dollar_figure() -> TestResult {
     assert_no_banned_words(&text)?;
     assert!(healthy, "{text}");
     assert!(
-        text.lines().any(|line| line.starts_with("cost: unavailable")),
+        text.lines()
+            .any(|line| line.starts_with("cost: unavailable")),
         "{text}"
     );
     assert!(!text.contains('$'), "{text}");
@@ -562,7 +562,9 @@ fn log_prints_one_line_per_ledger_line_in_seq_order() -> TestResult {
         assert_eq!(words.next(), Some(line.seq().to_string().as_str()), "{row}");
     }
     assert!(
-        printed.first().is_some_and(|row| row.starts_with("0 run_started 0 ")),
+        printed
+            .first()
+            .is_some_and(|row| row.starts_with("0 run_started 0 ")),
         "{text}"
     );
     Ok(())
@@ -620,7 +622,12 @@ fn log_keeps_the_events_that_name_one_experiment() -> TestResult {
     let text = log_text(
         prepared.store(),
         None,
-        LogOptions::new(None, Some(prefix_of(&exp.to_hex(), 12)?), false, IdStyle::Short),
+        LogOptions::new(
+            None,
+            Some(prefix_of(&exp.to_hex(), 12)?),
+            false,
+            IdStyle::Short,
+        ),
     )?;
 
     assert_no_banned_words(&text)?;
@@ -628,8 +635,7 @@ fn log_keeps_the_events_that_name_one_experiment() -> TestResult {
     assert!(!text.is_empty());
     for row in text.lines() {
         let kind = row.split_whitespace().nth(1).unwrap_or_default();
-        let names = row.contains(&named)
-            || (kind == "selected" && row.contains(&short(&exp)));
+        let names = row.contains(&named) || (kind == "selected" && row.contains(&short(&exp)));
         assert!(names, "{row}");
     }
     assert!(

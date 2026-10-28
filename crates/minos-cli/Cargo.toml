@@ -33,5 +33,8 @@ tar.workspace = true
 sha2.workspace = true
 toml.workspace = true
 serde.workspace = true
+# serde_json: `log --json` re-encodes each verified ledger line, which reproduces the bytes the store wrote (08-CONTEXT
+# D-16).
+serde_json.workspace = true
 tempfile.workspace = true
 rustix.workspace = true
