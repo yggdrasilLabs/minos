@@ -4,9 +4,9 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 8
 current_phase_name: CLI, Sample Project, and Docs
-status: verifying
+status: executing
 stopped_at: Phase 8 context gathered
-last_updated: "2026-10-28T14:43:33.706Z"
+last_updated: "2026-10-28T17:16:02.429Z"
 last_activity: 2026-10-24
 last_activity_desc: "Completed quick task 261024-i81: WR-01 optional ordinal on StopRequested"
 progress:
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 
 Phase: 8 — CLI, Sample Project, and Docs
 Plan: Not started
-Status: Phase complete — ready for verification
+Status: Ready to execute
 Last activity: 2026-10-24 - Completed quick task 261024-i81: WR-01 optional ordinal on StopRequested
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
