@@ -1539,3 +1539,433 @@ dropped, recording the resolved model `claude-haiku-5-5`; with the fixture as th
 hook or MCP canary fired and the fixture's marker did not reach the envelope (case b, 2 valid proposals, 0 dropped);
 and the positive control fired all three canaries (case c), so the fixture was live. This matches the 2.1.304 run
 (06-EVIDENCE.md) for this version and this fixture; a later CLI version needs a rerun.
+
+## Final gate
+
+Run on 2026-10-28 from the repository root against one final build at HEAD `b93a1a2` (fix(08-15): move the host
+probe VM test out of src so no src file names the test variables), in this order, from 20:40:16 to 20:41:21 UTC by
+the shell's clock, with `TRYBUILD`, `MINOS_CLAUDE_LIVE`, and every `MINOS_*` variable unset (`env | grep -E
+'^(MINOS_|TRYBUILD)'` printed nothing). `rustc --version`: rustc 1.97.1 (8bab26f4f 2026-07-14); `cargo --version`:
+cargo 1.97.1 (c980f4866 2026-06-30); `sw_vers -productVersion`: 27.0.1. Every cargo step exited 0, and every grep
+check printed what it must. Output is verbatim; the
+only edit is the home directory written as `~`. No VM was launched, no image was built, and no model call was made:
+`sample_vm` reports `0 passed; 0 failed; 2 ignored`, `runner_vm` reports `1 passed; 0 failed; 3 ignored` (its one
+non-ignored test parses the fixture manifests, 07-14), the krun `exit` and `vm` targets report `4 ignored` and
+`12 ignored`, and the live provider target reports `1 passed; 0 failed; 3 ignored`. The sample on real VMs is the record in
+"## Sample end to end on real VMs (08-13)" (`2 passed`) and "## Sample end to end with the final budgets (08-13)"
+(`1 passed`), and the live provider rerun is "## Live provider tests rerun (08-13)" (`3 passed`), all above; this plan
+did not rerun them.
+
+### A first pass, and the one fix
+
+A first pass of the whole sequence at HEAD `facf474` (docs(08-14): complete the public docs plan in state and roadmap)
+passed every step except the test-variable check, which printed four lines:
+
+```text
+crates/minos-backend-krun/src/host.rs:1359:    #[ignore = "needs MINOS_VMM (a signed minos-vmm) and MINOS_GUEST (the static musl minos-guest); MINOS_KRUNFW is optional"]
+crates/minos-backend-krun/src/host.rs:1361:        let vmm = std::env::var_os("MINOS_VMM").ok_or("set MINOS_VMM to the signed minos-vmm")?;
+crates/minos-backend-krun/src/host.rs:1363:            std::env::var_os("MINOS_GUEST").ok_or("set MINOS_GUEST to the musl minos-guest")?;
+crates/minos-backend-krun/src/host.rs:1364:        let krunfw = std::env::var_os("MINOS_KRUNFW")
+```
+
+These lines are the ignored unit test `probe_host_on_this_mac` inside `host.rs`'s `#[cfg(test)] mod tests` (05-11),
+not production code, but the check covers every file under `crates/*/src` (07-17 checked `crates/minos-cli/src`
+only; 08-15 widened it to every crate and to `MINOS_CLAUDE_LIVE` and `MINOS_EXIT`). The fix is in the owning code,
+not in the check: commit `b93a1a2` moves the test, its assertions unchanged, into `crates/minos-backend-krun/tests/vm.rs`,
+where it reads the three variables through the shared harness's `env_path` like every other VM test (so
+`MINOS_KRUNFW` is now required for it, as it is for the rest of that target), and drops the imports only that test
+used from `host.rs`. The krun library's unit tests now report `1 ignored` (`seatbelt_denial_probes_hold`) and the
+`vm` target `12 ignored`. The moved test was run once on this Mac after `cargo build -p minos-vmm` and the CLAUDE.md
+`codesign` argv, before the rerun:
+
+```text
+$ MINOS_VMM=$(pwd)/target/debug/minos-vmm MINOS_GUEST=$(pwd)/target/aarch64-unknown-linux-musl/release/minos-guest MINOS_KRUNFW=/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib cargo test -p minos-backend-krun --test vm -- --ignored --nocapture --test-threads=1 probe_host_on_this_mac
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/vm.rs (target/debug/deps/vm-69052a93a1f98219)
+
+running 1 test
+test probe_host_on_this_mac ... helper present                   ["~/Repos/minos/target/debug/minos-vmm"] Passed { detail: SafeText("a regular file of 17955744 bytes") }
+helper entitlements              ["~/Repos/minos/target/debug/minos-vmm", "/usr/bin/codesign"] Passed { detail: SafeText("both entitlements are set to true") }
+guest kernel                     ["/opt/homebrew/Cellar/libkrunfw/5.6.2/lib/libkrunfw.5.dylib"] Passed { detail: SafeText("sha256 59764391005357bbdd5218f3fd522dd8ab63722cbc96144752c7bddc2c8e5217") }
+hypervisor                       ["/usr/sbin/sysctl"] Passed { detail: SafeText("kern.hv_support 1, hw.ncpu 16, hw.memsize 51539607552; largest VM 8 vCPUs and 16384 MiB, leaving half the host's memory to the host") }
+job socket path                  ["/private/tmp/minos-501/mnsXXXXXXXX/o.sock"] Passed { detail: SafeText("41 of at most 103 bytes") }
+sandbox-exec present             ["/usr/bin/sandbox-exec"] Passed { detail: SafeText("a regular file") }
+Seatbelt denies network          ["/usr/bin/sandbox-exec", "/usr/bin/nc", "/bin/cat"] Passed { detail: SafeText("the control connected; under the profile nc exited 1 and the listener accepted nothing: no stderr") }
+Seatbelt denies unlisted files   ["/usr/bin/sandbox-exec", "/usr/bin/nc", "/bin/cat"] Passed { detail: SafeText("the listed file read back; the unlisted read exited 1: cat: /private/tmp/mnpWqItl8TD/unlisted: Operation not permitted") }
+guest binary                     ["~/Repos/minos/target/aarch64-unknown-linux-musl/release/minos-guest"] Passed { detail: SafeText("a static aarch64 ELF of 1516040 bytes") }
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.24s
+```
+
+The whole sequence was then rerun from the first step at `b93a1a2`; the rerun is recorded below.
+
+### The six gate commands
+
+1. `cargo fmt --all --check`: exit 0, no output.
+
+2. `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+
+```text
+    Checking minos-backend-krun v0.1.0 (~/Repos/minos/crates/minos-backend-krun)
+    Checking minos-cli v0.1.0 (~/Repos/minos/crates/minos-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.13s
+```
+
+3. `cargo test --workspace`: exit 0, 59 s. 104 result lines; summed over them, 1839 passed, 0 failed, 28 ignored, and
+no `warning` or `error` line. The ignored tests are the ignored VM tests (`minos-backend-krun` `--test exit` 4 and
+`--test vm` 12, its unit test `seatbelt_denial_probes_hold`, `minos-cli` `--test runner_vm` 3 and `--test sample_vm`
+2), the live provider tests (`minos-propose` `--test live` 3), `docker_env_build_reproduces` (`--test env_build`),
+`doctor_runs_on_this_mac` (`--test host_cmd`), and the one ignored case in `minos-sandbox` `--test output_tar`. The
+Phase 8 `minos-cli` targets ran `address` 7, `check` 13, `cli_binary` 8, `docs_words` 4, `init` 8, `inspect` 14,
+`patch_tools` 3, `progress_golden` 4, `project` 13, `report_adopt` 9, `run` 8, `sample_manifest` 4, and `stop` 6,
+with the library's 25 and the binary's 11 unit tests; `minos-core` `--test cli_seams` ran 9, and `minos-source`
+`--test read` 14. The driver target's modules ran 15 `flow::`, 5 `caps::`, 6 `breaker::`, 5 `stops::`, 3 `pins::`,
+2 `resume::`, and 4 `lock::` tests.
+
+```text
+Running unittests src/lib.rs (target/debug/deps/minos_backend_krun-de667b6d468a05d5)
+  test result: ok. 105 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.02s
+Running tests/exit.rs (target/debug/deps/exit-89797bbe80950b05)
+  test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/vm.rs (target/debug/deps/vm-e5c499f08fd31caf)
+  test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_cli-c591e07c0a9d1b07)
+  test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+Running unittests src/main.rs (target/debug/deps/minos-dc941e65f200c100)
+  test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/address.rs (target/debug/deps/address-3d3adef1923364fc)
+  test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/check.rs (target/debug/deps/check-c86eaef2dd01afb7)
+  test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
+Running tests/cli_binary.rs (target/debug/deps/cli_binary-828e167e3006d7ba)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+Running tests/docs_words.rs (target/debug/deps/docs_words-8d0acec5c1514245)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/env_build.rs (target/debug/deps/env_build-4d3b782e1c13a146)
+  test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.24s
+Running tests/host_cmd.rs (target/debug/deps/host_cmd-53747c641bc29787)
+  test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.73s
+Running tests/init.rs (target/debug/deps/init-744c0e94f33c8caf)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+Running tests/inspect.rs (target/debug/deps/inspect-d9603cf02ecd7fa7)
+  test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.25s
+Running tests/judge_push.rs (target/debug/deps/judge_push-03465fac0058a67e)
+  test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+Running tests/patch_tools.rs (target/debug/deps/patch_tools-b505b565e0ad8d8b)
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+Running tests/progress_golden.rs (target/debug/deps/progress_golden-a938052ec1dacc3e)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/project.rs (target/debug/deps/project-09b4a92b1a9177ef)
+  test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+Running tests/report_adopt.rs (target/debug/deps/report_adopt-50f5e7960535bb9b)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+Running tests/run.rs (target/debug/deps/run-7683dc4989680afa)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.49s
+Running tests/runner_vm.rs (target/debug/deps/runner_vm-3afbd8a099c212e8)
+  test result: ok. 1 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/sample_manifest.rs (target/debug/deps/sample_manifest-ac590a062ab52b60)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+Running tests/sample_vm.rs (target/debug/deps/sample_vm-243e83abeeacd833)
+  test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/stop.rs (target/debug/deps/stop-97e38297ad810266)
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+Running unittests src/lib.rs (target/debug/deps/minos_core-49fc12ea1cbf8830)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Running tests/blob_hasher.rs (target/debug/deps/blob_hasher-707f9e80b322bd98)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.03s
+Running tests/breaker.rs (target/debug/deps/breaker-2ff3318f14691bb8)
+  test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+Running tests/chunk.rs (target/debug/deps/chunk-a347b9643cd47640)
+  test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.19s
+Running tests/cli_seams.rs (target/debug/deps/cli_seams-ca2750e98ce73ae1)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/compile_fail.rs (target/debug/deps/compile_fail-a3a00ca939061789)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+Running tests/cumulative.rs (target/debug/deps/cumulative-9d1e976812ba5839)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/golden_ids.rs (target/debug/deps/golden_ids-497e7c7cba4ea636)
+  test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Running tests/golden_wire.rs (target/debug/deps/golden_wire-262db30471de5b5d)
+  test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Running tests/guest_wire.rs (target/debug/deps/guest_wire-4dcba75952710cce)
+  test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+Running tests/lock.rs (target/debug/deps/lock-0b9c75eeaf2fb245)
+  test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+Running tests/manifest.rs (target/debug/deps/manifest-a0fa7e3a5345ed90)
+  test result: ok. 108 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/money.rs (target/debug/deps/money-7d18a657477363e4)
+  test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+Running tests/prop_apply.rs (target/debug/deps/prop_apply-30468656d0d75d83)
+  test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+Running tests/prop_diff.rs (target/debug/deps/prop_diff-197ae67a0139e54c)
+  test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+Running tests/prop_fold.rs (target/debug/deps/prop_fold-1f0fe15139f12fe7)
+  test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+Running tests/prop_keys.rs (target/debug/deps/prop_keys-17df50f8439e2e3f)
+  test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+Running tests/prop_metric.rs (target/debug/deps/prop_metric-4a01fc67e5382ed1)
+  test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/prop_path.rs (target/debug/deps/prop_path-6e2e2ce60e1618ac)
+  test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Running tests/prop_policy.rs (target/debug/deps/prop_policy-035f70840cfa23d8)
+  test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+Running tests/render.rs (target/debug/deps/render-8edc7b6a74cf13c1)
+  test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+Running tests/report.rs (target/debug/deps/report-681406ca40a8ab98)
+  test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+Running tests/route.rs (target/debug/deps/route-77df815e137baac1)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/sweep.rs (target/debug/deps/sweep-150d5ae104985aaf)
+  test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+Running unittests src/lib.rs (target/debug/deps/minos_guest-ff9cca34304ea5ea)
+  test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+Running unittests src/main.rs (target/debug/deps/minos_guest-2d97dc2b4d1632e5)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/bin/minos-probe.rs (target/debug/deps/minos_probe-5627d13d51fedf66)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_loop-a00d7bc7c115d5ac)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/blocks.rs (target/debug/deps/blocks-11c7a318f37d4cc5)
+  test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+Running tests/driver/main.rs (target/debug/deps/driver-d1655d2a7ed01692)
+  test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+Running tests/stage.rs (target/debug/deps/stage-369e7f0e0053c16a)
+  test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+Running unittests src/lib.rs (target/debug/deps/minos_propose-a32aa428f41afb82)
+  test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.50s
+Running tests/argv_golden.rs (target/debug/deps/argv_golden-09453002981372c8)
+  test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+Running tests/classify.rs (target/debug/deps/classify-236650040b6f26f1)
+  test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/claude_cli.rs (target/debug/deps/claude_cli-13682ca879a63f71)
+  test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+Running tests/held_out.rs (target/debug/deps/held_out-a8bd5b9799a069d6)
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+Running tests/history.rs (target/debug/deps/history-f95f4dab2411ab06)
+  test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/live.rs (target/debug/deps/live-bf4d1a1b44e80a99)
+  test result: ok. 1 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/locate.rs (target/debug/deps/locate-c7dbb9b19ee5a88f)
+  test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Running tests/parse.rs (target/debug/deps/parse-1de677cb9e8c5df8)
+  test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+Running tests/prompt.rs (target/debug/deps/prompt-f123387b0b58cc6b)
+  test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+Running tests/proposer.rs (target/debug/deps/proposer-b60b5d3333082710)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/provider.rs (target/debug/deps/provider-0ae5ad271e5aa784)
+  test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/schema.rs (target/debug/deps/schema-65de61a220300659)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+Running tests/single_shot.rs (target/debug/deps/single_shot-ff20b4601b1a68a5)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/sweep.rs (target/debug/deps/sweep-05223db0e614f4e0)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_runner-a714a6fc4b190877)
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/map.rs (target/debug/deps/map-c8a9de130b694980)
+  test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+Running tests/pipeline.rs (target/debug/deps/pipeline-b6d2b33949970350)
+  test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/usage.rs (target/debug/deps/usage-780fccf98eeecc26)
+  test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/lib.rs (target/debug/deps/minos_sandbox-4b7e5db11ee5745b)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/backend.rs (target/debug/deps/backend-abb00b226a85bc2a)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/blob_source.rs (target/debug/deps/blob_source-d424f0dbb56fc55a)
+  test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/compile_fail.rs (target/debug/deps/compile_fail-0c7906e0638ae0d5)
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.39s
+Running tests/output_tar.rs (target/debug/deps/output_tar-adbd864b297ee011)
+  test result: ok. 35 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.52s
+Running tests/preflight.rs (target/debug/deps/preflight-8a0a614f85e9d937)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/spec.rs (target/debug/deps/spec-939ba99885943f40)
+  test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Running tests/untrusted.rs (target/debug/deps/untrusted-5b1c00c016a9cea1)
+  test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+Running unittests src/lib.rs (target/debug/deps/minos_source-5429adc68d00303c)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+Running tests/clean.rs (target/debug/deps/clean-4d8227224d71bbcc)
+  test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+Running tests/denylist.rs (target/debug/deps/denylist-9d6bd90c60079a07)
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/judge.rs (target/debug/deps/judge-1848dd9d099c7c3a)
+  test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+Running tests/pack.rs (target/debug/deps/pack-c81bffdb36d1cb5a)
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running tests/read.rs (target/debug/deps/read-8a5903aa8e804d65)
+  test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Running tests/refusals.rs (target/debug/deps/refusals-ecc47c6e3342518b)
+  test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+Running tests/scan.rs (target/debug/deps/scan-72ef2660ffb8f8c1)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Running unittests src/lib.rs (target/debug/deps/minos_store-f91087a99a88b128)
+  test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/contract.rs (target/debug/deps/contract-0ccd6f1ff8a87df3)
+  test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.44s
+Running tests/file_blobs.rs (target/debug/deps/file_blobs-7940e65c52fed831)
+  test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+Running tests/file_ledger.rs (target/debug/deps/file_ledger-498662032decf0ee)
+  test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.44s
+Running unittests src/main.rs (target/debug/deps/minos_vmm-04be6e1974430353)
+  test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Doc-tests minos_backend_krun
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_cli
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_core
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_guest
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_loop
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_propose
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_runner
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_sandbox
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_source
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests minos_store
+  test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+4. `cargo deny check`: exit 0. Every warning header and the last line (the same seven duplicate-crate warnings as the
+Phase 5, 6, and 7 final gates):
+
+```text
+warning[duplicate]: found 2 duplicate entries for crate 'bitflags'
+warning[duplicate]: found 2 duplicate entries for crate 'getrandom'
+warning[duplicate]: found 2 duplicate entries for crate 'miniz_oxide'
+warning[duplicate]: found 2 duplicate entries for crate 'nix'
+warning[duplicate]: found 2 duplicate entries for crate 'rand_chacha'
+warning[duplicate]: found 2 duplicate entries for crate 'rand_core'
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+5. `cargo doc --workspace --no-deps`: exit 0, no warning or error line.
+
+```text
+    Checking minos-backend-krun v0.1.0 (~/Repos/minos/crates/minos-backend-krun)
+ Documenting minos-backend-krun v0.1.0 (~/Repos/minos/crates/minos-backend-krun)
+ Documenting minos-cli v0.1.0 (~/Repos/minos/crates/minos-cli)
+    Checking minos-cli v0.1.0 (~/Repos/minos/crates/minos-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.50s
+   Generated ~/Repos/minos/target/doc/minos_backend_krun/index.html and 12 other files
+```
+
+6. `cargo clippy -p minos-guest --all-targets --target aarch64-unknown-linux-musl -- -D warnings`: exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+```
+
+### The sample gate
+
+Run from the repository root, so `.cargo/config.toml`'s forbid backstop applies.
+
+7. `cargo fmt --manifest-path examples/logparse/Cargo.toml --check`: exit 0, no output.
+
+8. `cargo fmt --manifest-path examples/logparse/judge/Cargo.toml --check`: exit 0, no output.
+
+9. `cargo clippy --manifest-path examples/logparse/Cargo.toml --all-targets --target-dir target/examples -- -D warnings`:
+exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+```
+
+10. `cargo clippy --manifest-path examples/logparse/judge/Cargo.toml --all-targets --target-dir target/examples -- -D warnings`:
+exit 0.
+
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+```
+
+11. `cargo test --manifest-path examples/logparse/Cargo.toml --target-dir target/examples`: exit 0.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/main.rs (target/examples/debug/deps/logparse-a50ad12f1c1bb1b1)
+
+running 8 tests
+test parse::tests::a_single_spaced_format_a_line_is_parsed ... ok
+test parse::tests::the_baseline_yields_nothing_for_format_b ... ok
+test parse::tests::the_baseline_yields_nothing_for_format_c ... ok
+test record::tests::a_full_record_renders_its_fields_in_order ... ok
+test record::tests::a_missing_latency_renders_as_a_dash ... ok
+test record::tests::an_empty_record_renders_four_dashes ... ok
+test tests::every_row_ends_in_a_line_feed ... ok
+test tests::the_sample_input_yields_one_numbered_row_per_line ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+12. `cargo test --manifest-path examples/logparse/judge/Cargo.toml --target-dir target/examples`: exit 0.
+
+```text
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/main.rs (target/examples/debug/deps/logparse_judge-9efae3cbf2ad76d7)
+
+running 12 tests
+test tests::a_key_with_a_gap_or_an_unknown_split_is_malformed ... ok
+test tests::a_misnumbered_row_fails_the_gate ... ok
+test tests::a_missing_row_fails_the_gate_and_costs_four_fields ... ok
+test tests::a_row_with_extra_fields_fails_the_gate ... ok
+test tests::the_scorecard_json_has_the_wire_form ... ok
+test tests::the_wrong_argument_count_is_a_usage_failure ... ok
+test tests::a_wrong_field_costs_one_quarter_of_a_row ... ok
+test tests::an_unreadable_answer_key_is_a_failure ... ok
+test tests::an_absent_output_scores_zero_everywhere ... ok
+test tests::a_perfect_output_for_the_sample_key_scores_one_everywhere ... ok
+test tests::an_unwritable_scorecard_path_is_a_failure ... ok
+test tests::a_missing_output_still_writes_a_scorecard ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+### C-01, C-02, and the Phase 8 checks
+
+13. C-01, `for f in crates/*/Cargo.toml; do grep -A1 -xF '[lints]' "$f" | grep -qxF 'workspace = true' && echo "ok $f" || echo "MISSING $f"; done`:
+eleven `ok` lines, no `MISSING`. The two sample crates are outside the workspace and carry a literal copy of
+`[workspace.lints]` in their own `[lints.rust]` and `[lints.clippy]` tables (08-04), which steps 9 and 10 enforce.
+
+```text
+ok crates/minos-backend-krun/Cargo.toml
+ok crates/minos-cli/Cargo.toml
+ok crates/minos-core/Cargo.toml
+ok crates/minos-guest/Cargo.toml
+ok crates/minos-loop/Cargo.toml
+ok crates/minos-propose/Cargo.toml
+ok crates/minos-runner/Cargo.toml
+ok crates/minos-sandbox/Cargo.toml
+ok crates/minos-source/Cargo.toml
+ok crates/minos-store/Cargo.toml
+ok crates/minos-vmm/Cargo.toml
+```
+
+14. C-02, `grep -rnE '#!?\[allow\(' crates examples --include='*.rs'`: no output (grep exit 1, no match).
+
+15. LOOP-01, `grep -rnE '\.(take_status|into_scorecard|into_output|into_log_excerpt|into_diff_texts|store_judge_input|store_tail)\(' crates/*/src --include='*.rs' | grep -vE '^crates/minos-(runner|sandbox)/'`:
+no output (pipeline exit 1). No production crate other than `minos-runner` and `minos-sandbox` calls an `Untrusted`
+exit or a sink exit; the CLI's commands read stored blobs only.
+
+16. Test-variable check, `grep -rn 'MINOS_VMM\|MINOS_GUEST\|MINOS_KRUNFW\|MINOS_CLAUDE_LIVE\|MINOS_EXIT' crates/*/src`:
+no output (grep exit 1), after the fix above. No file under any crate's `src/` names a variable of the ignored tests.
+
+17. Validation targets, run after 08-VALIDATION.md was filled: every `--test <name>` it names (20 names: `address`,
+`check`, `cli_binary`, `cli_seams`, `contract`, `docs_words`, `init`, `inspect`, `judge_push`, `live`, `money`,
+`patch_tools`, `progress_golden`, `project`, `read`, `report_adopt`, `run`, `sample_manifest`, `sample_vm`, `stop`)
+exists as `crates/*/tests/<name>.rs` or `crates/*/tests/<name>/main.rs`, and each ran in step 3. The plan's own loop,
+`ls crates/*/tests/$t.rs crates/*/tests/$t/main.rs`, printed `MISSING` for all 20 under bash, because `ls` exits
+non-zero when either of its two arguments is absent and no target has both forms (the defect 07-17 recorded). The check
+was run instead with `compgen -G` on each form, an either-or test, and printed 20 `ok` lines, no `MISSING`, and exit 0.
+
+Result: every gate command, every sample gate command, C-01, C-02, the LOOP-01 check, the test-variable check, and
+the validation-target check pass on the final code.

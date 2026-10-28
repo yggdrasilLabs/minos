@@ -115,35 +115,35 @@ Each spike produces a recorded result in CLAUDE.md before code depends on it.
 ### Judge (JUDGE)
 
 - [x] **JUDGE-01**: `minos judge push <dir>` uploads judge data into the local blob store as a new judge version and records its hash; judge data is never in the source tarball or the image build context
-- [ ] **JUDGE-02**: `minos check` judges the baseline several times with the trial index on `Judged` and reports a noise floor the user can compare against `min_improvement`
+- [x] **JUDGE-02**: `minos check` judges the baseline several times with the trial index on `Judged` and reports a noise floor the user can compare against `min_improvement` *The sample's objective is deterministic, so its noise floor is 0 by construction; the default of 3 trials remains a recorded assumption until a timing objective exists (08-EVIDENCE.md D-07).*
 - [x] **JUDGE-03**: Gates run before objectives and short-circuit: a failed gate yields `Rejected` without scoring objectives
 - [x] **JUDGE-04**: Every `Judged` event records backend and architecture, and a run with a speed objective is pinned to one backend class *Phase 7 pins every run to the backend class of its first `Judged`, whatever its objective (D-11).*
 
 ### CLI (CLI)
 
-- [ ] **CLI-01**: `minos init --kind <tune|optimize|explore>` scaffolds `minos.toml`, `program.md`, and `minos.Dockerfile`
+- [x] **CLI-01**: `minos init --kind <tune|optimize|explore>` scaffolds `minos.toml`, `program.md`, and `minos.Dockerfile`
 - [x] **CLI-02**: `minos env build` writes `minos.lock`
 - [x] **CLI-03**: `minos host doctor` runs the launch preflight and prints every refusal with an explanation and a fix
 - [x] **CLI-04**: `minos judge push <dir>` registers judge data
-- [ ] **CLI-05**: `minos check` validates the manifest, builds, judges the baseline repeatedly, prints the noise floor and the route table with reasons, and gives actionable errors
-- [ ] **CLI-06**: `minos run --generations N` starts or resumes a run and prints one sanitized progress line per experiment (ID, tier, outcome, delta, elapsed)
-- [ ] **CLI-07**: `minos status`, `minos log`, and `minos show <exp>` display progress, the ledger, and one experiment's diff, rationale, outcome, and lineage, all through the sanitizing renderer
-- [ ] **CLI-08**: `minos report <exp>` renders the hashed report and prints its hash
-- [ ] **CLI-09**: `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test), and never applies it
-- [ ] **CLI-10**: `minos stop <run>` records `StopRequested` and the driver exits at the next safe point
+- [x] **CLI-05**: `minos check` validates the manifest, builds, judges the baseline repeatedly, prints the noise floor and the route table with reasons, and gives actionable errors *`check` builds no image: a missing or stale lock, image, or judge push is an actionable refusal naming `minos env build` or `minos judge push` (08-CONTEXT D-06).*
+- [x] **CLI-06**: `minos run --generations N` starts or resumes a run and prints one sanitized progress line per experiment (ID, tier, outcome, delta, elapsed)
+- [x] **CLI-07**: `minos status`, `minos log`, and `minos show <exp>` display progress, the ledger, and one experiment's diff, rationale, outcome, and lineage, all through the sanitizing renderer
+- [x] **CLI-08**: `minos report <exp>` renders the hashed report and prints its hash
+- [x] **CLI-09**: `minos adopt <exp> --reviewed <hash>` refuses unless the hash matches an acknowledged report for that exact experiment, then writes a canonical patch file that both `git apply` and `patch -p1` accept (golden test), and never applies it
+- [x] **CLI-10**: `minos stop <run>` records `StopRequested` and the driver exits at the next safe point
 - [x] **CLI-11**: `minos run` packs the working tree into a deterministic tarball (sorted paths, zeroed metadata, regular files only) respecting `.gitignore` and `.minosignore`, applies a hard denylist, runs a secret scan that blocks on a hit, and requires a clean commit unless `--allow-dirty`
 
 ### Cost (COST)
 
 - [x] **COST-01**: The ledger stores usage only (vCPU-seconds, GB-seconds, tokens in and out); dollars are derived from `~/.config/minos/prices.toml` with rates as strings
-- [ ] **COST-02**: Exactly one type formats cost, always as `approx. cost: $X.XX` with token counts beside it; no command prints an estimate or the word "exact"
+- [x] **COST-02**: Exactly one type formats cost, always as `approx. cost: $X.XX` with token counts beside it; no command prints an estimate or the word "exact"
 
 ### Sample Project and Docs (DOCS)
 
-- [ ] **DOCS-01**: An `examples/` `optimize` project ships in the repo whose judge measures from the harness and computes metrics from candidate output files, never from candidate-reported numbers
-- [ ] **DOCS-02**: `minos check`, `minos run --generations N`, `minos report`, and `minos adopt` complete end to end on the sample project with every experiment in a VM
-- [ ] **DOCS-03**: `SECURITY.md` states the threat model, the trust base (libkrun plus macOS confinement layers), what preflight checks, and does not claim ironclad isolation
-- [ ] **DOCS-04**: The README states that the `claude` CLI provider only execs the user's own install under their own login, never handles credentials, and that shared or hosted use must go through an API key or Bedrock
+- [x] **DOCS-01**: An `examples/` `optimize` project ships in the repo whose judge measures from the harness and computes metrics from candidate output files, never from candidate-reported numbers
+- [x] **DOCS-02**: `minos check`, `minos run --generations N`, `minos report`, and `minos adopt` complete end to end on the sample project with every experiment in a VM
+- [x] **DOCS-03**: `SECURITY.md` states the threat model, the trust base (libkrun plus macOS confinement layers), what preflight checks, and does not claim ironclad isolation
+- [x] **DOCS-04**: The README states that the `claude` CLI provider only execs the user's own install under their own login, never handles credentials, and that shared or hosted use must go through an API key or Bedrock
 - [x] **DOCS-05**: CLAUDE.md is amended for v1: local-first build order, `ModelProvider` decision, no tokio in v1, pico-dollar money, `libkrun/krun` tap, the libkrun networking default, the `minos-loop` crate, and each spike result
 
 ## v2 Requirements
@@ -270,26 +270,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOOP-08 | Phase 7 | Complete |
 | LOOP-09 | Phase 7 | Complete |
 | JUDGE-01 | Phase 7 | Complete |
-| JUDGE-02 | Phase 8 | Pending |
+| JUDGE-02 | Phase 8 | Complete |
 | JUDGE-03 | Phase 7 | Complete |
 | JUDGE-04 | Phase 7 | Complete |
-| CLI-01 | Phase 8 | Pending |
+| CLI-01 | Phase 8 | Complete |
 | CLI-02 | Phase 5 | Complete |
 | CLI-03 | Phase 5 | Complete |
 | CLI-04 | Phase 7 | Complete |
-| CLI-05 | Phase 8 | Pending |
-| CLI-06 | Phase 8 | Pending |
-| CLI-07 | Phase 8 | Pending |
-| CLI-08 | Phase 8 | Pending |
-| CLI-09 | Phase 8 | Pending |
-| CLI-10 | Phase 8 | Pending |
+| CLI-05 | Phase 8 | Complete |
+| CLI-06 | Phase 8 | Complete |
+| CLI-07 | Phase 8 | Complete |
+| CLI-08 | Phase 8 | Complete |
+| CLI-09 | Phase 8 | Complete |
+| CLI-10 | Phase 8 | Complete |
 | CLI-11 | Phase 4 | Complete |
 | COST-01 | Phase 3 | Complete |
-| COST-02 | Phase 8 | Pending |
-| DOCS-01 | Phase 8 | Pending |
-| DOCS-02 | Phase 8 | Pending |
-| DOCS-03 | Phase 8 | Pending |
-| DOCS-04 | Phase 8 | Pending |
+| COST-02 | Phase 8 | Complete |
+| DOCS-01 | Phase 8 | Complete |
+| DOCS-02 | Phase 8 | Complete |
+| DOCS-03 | Phase 8 | Complete |
+| DOCS-04 | Phase 8 | Complete |
 | DOCS-05 | Phase 2 | Complete |
 
 **Coverage:**
@@ -300,7 +300,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-10-09*
-*Last updated: 2026-10-24 after the Phase 7 final gate (LOOP-01 to LOOP-09, JUDGE-01, JUDGE-03, JUDGE-04, CLI-04 complete; JUDGE-04 and LOOP-07 annotated with D-11 and D-15)*
+*Last updated: 2026-10-28 after the Phase 8 final gate (CLI-01, CLI-05 to CLI-10, JUDGE-02, COST-02, DOCS-01 to DOCS-04 complete; JUDGE-02 annotated with the D-07 partial outcome and CLI-05 with D-06; GATE-06 stays cross-cutting)*
+*Earlier update: 2026-10-24 after the Phase 7 final gate (LOOP-01 to LOOP-09, JUDGE-01, JUDGE-03, JUDGE-04, CLI-04 complete; JUDGE-04 and LOOP-07 annotated with D-11 and D-15)*
 *Earlier update: 2026-10-19 after the Phase 6 final gate (PROP-01 to PROP-10 complete)*
 *Earlier update: 2026-10-19 after the Phase 5 final gate (GUEST-01 to GUEST-05, KRUN-01 to KRUN-10, CLI-02, CLI-03 complete; GUEST-05 with its one recorded exception)*
 *Earlier update: 2026-10-19, PROP-07 reworded to `{rationale, files}` candidates (06-CONTEXT.md D-11)*
