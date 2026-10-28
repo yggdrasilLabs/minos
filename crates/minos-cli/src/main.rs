@@ -262,7 +262,19 @@ fn judge_push_command(matches: &ArgMatches) -> anyhow::Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
+    use clap::Command;
+
     use super::cli;
+
+    /// A report hash: 64 lowercase hex characters.
+    const HASH: &str = "abababababababababababababababababababababababababababababababab";
+
+    /// Whether `args`, after `minos`, parse.
+    fn parses(args: &[&str]) -> Result<(), clap::Error> {
+        cli()
+            .try_get_matches_from(std::iter::once("minos").chain(args.iter().copied()))
+            .map(drop)
+    }
 
     #[test]
     fn command_tree_is_well_formed() {
@@ -275,5 +287,87 @@ mod tests {
         assert!(parsed.is_ok(), "{parsed:?}");
         let missing = cli().try_get_matches_from(["minos", "judge", "push"]);
         assert!(missing.is_err(), "push without a directory parsed");
+    }
+
+    #[test]
+    fn phase_8_commands_parse_with_their_flags() {
+        let accepted: [&[&str]; 11] = [
+            &["run", "--generations", "3"],
+            &["run", "--generations", "3", "--run", "ab12"],
+            &["check", "--fresh", "--allow-dirty"],
+            &["stop"],
+            &["stop", "ab12"],
+            &["status", "--run", "ab", "--full-ids"],
+            &["log", "--generation", "2", "--exp", "ab", "--json"],
+            &["show", "ab", "--logs"],
+            &["report", "ab", "--run", "cd"],
+            &["adopt", "ab", "--reviewed", HASH, "--out", "x.patch"],
+            &["init", "--kind", "tune"],
+        ];
+        for args in accepted {
+            let parsed = parses(args);
+            assert!(parsed.is_ok(), "{args:?}: {parsed:?}");
+        }
+    }
+
+    #[test]
+    fn phase_8_commands_refuse_bad_arguments() {
+        let refused: [&[&str]; 8] = [
+            &["run"],
+            &["run", "--generations", "0"],
+            &["run", "--generations", "2", "--run", "XYZ"],
+            &["adopt", "ab"],
+            &["adopt", "ab", "--reviewed", "nothex"],
+            &["init", "--kind", "bogus"],
+            &["show"],
+            &["log", "--generation", "two"],
+        ];
+        for args in refused {
+            assert!(parses(args).is_err(), "{args:?} parsed");
+        }
+    }
+
+    /// Whether `text` holds the word estimate anywhere or the whole word exact, case-insensitively.
+    fn banned_word(text: &str) -> Option<&'static str> {
+        let lower = text.to_lowercase();
+        if lower.contains("estimate") {
+            return Some("estimate");
+        }
+        lower
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|word| word == "exact")
+            .then_some("exact")
+    }
+
+    /// Checks the long help of `command` and of every command under it, recursively.
+    fn check_help(command: &Command, path: &str, checked: &mut Vec<String>) {
+        let name = format!("{path} {}", command.get_name());
+        let help = command.clone().render_long_help().to_string();
+        assert!(
+            banned_word(&help).is_none(),
+            "{name}'s help says {:?}:\n{help}",
+            banned_word(&help)
+        );
+        checked.push(name.clone());
+        for sub in command.get_subcommands() {
+            check_help(sub, &name, checked);
+        }
+    }
+
+    #[test]
+    fn no_help_text_says_estimate_or_exact() {
+        let mut root = cli();
+        root.build();
+        let mut checked = Vec::new();
+        check_help(&root, "", &mut checked);
+        for command in [
+            "init", "check", "run", "stop", "status", "log", "show", "report", "adopt",
+        ] {
+            let name = format!(" minos {command}");
+            assert!(
+                checked.contains(&name),
+                "{name} was not checked: {checked:?}"
+            );
+        }
     }
 }
