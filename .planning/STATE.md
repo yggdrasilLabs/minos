@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: "Completed 08-13-PLAN.md"
-last_updated: "2026-10-28T20:20:56.594Z"
+stopped_at: Completed 08-14-PLAN.md
+last_updated: "2026-10-28T20:32:48.962Z"
 last_activity: 2026-10-28
-last_activity_desc: 08-13 complete (live provider rerun on 2.1.312 and the D-07 answer recorded)
+last_activity_desc: 08-14 complete (SECURITY.md, README.md, the docs_words overclaim test, CLAUDE.md Phase 8 sections)
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 100
-  percent: 98
+  completed_plans: 101
+  percent: 99
 ---
 
 # Project State
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 14 of 15
+Plan: 15 of 15
 Status: Ready to execute
-Last activity: 2026-10-28 — 08-13 complete (live provider rerun on 2.1.312 and the D-07 answer recorded)
+Last activity: 2026-10-28 — 08-14 complete (SECURITY.md, README.md, the docs_words overclaim test, CLAUDE.md Phase 8 sections)
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -161,6 +161,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P11 | 9 min | 2 tasks | 5 files |
 | Phase 08 P12 | 15min | 2 tasks | 3 files |
 | Phase 08 P13 | 67 min | 3 tasks | 5 files |
+| Phase 08 P14 | 6min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -393,6 +394,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-13: D-07 met partially (objective spread 0 by construction; default of 3 trials stays a recorded assumption; VM wall-time variance recorded instead); awaiting the user's answer at the Task 3 checkpoint; the Phase 8 blocker stays open
 - [Phase 08]: 08-13: the user accepted D-07 as met partially for this milestone at the Task 3 checkpoint (2026-10-28); the default of 3 trials stays a recorded assumption, no timing probe in v1; the Phase 8 blocker stays open for 08-15 to restate
 - [Phase 08]: 08-13: the live provider suite passed on claude 2.1.312 (3 passed, run by the user), so 08-14 may cite the provider's live behavior on the installed CLI
+- [Phase 08]: 08-14: docs_words bans ironclad (substring), exact (whole word), and cannot be escaped (phrase, whitespace collapsed) in README.md, SECURITY.md, and the sample README; exactly stays allowed
+- [Phase 08]: 08-14: SECURITY.md states the zero-day escape target as a goal tested against, not a guarantee, and lists side channels and concurrent VMs as unaddressed
 
 ### Pending Todos
 
@@ -424,6 +427,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T20:20:51.428Z
-Stopped at: Completed 08-13-PLAN.md
+Last session: 2026-10-28T20:32:48.957Z
+Stopped at: Completed 08-14-PLAN.md
 Resume file: None
