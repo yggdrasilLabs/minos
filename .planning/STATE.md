@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: "08-13 Task 3 checkpoint: awaiting the user's live provider rerun and D-07 answer"
-last_updated: "2026-10-28T20:12:03.080Z"
+stopped_at: "Completed 08-13-PLAN.md"
+last_updated: "2026-10-28T20:20:56.594Z"
 last_activity: 2026-10-28
-last_activity_desc: Phase 08 execution started
+last_activity_desc: 08-13 complete (live provider rerun on 2.1.312 and the D-07 answer recorded)
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 99
-  percent: 88
+  completed_plans: 100
+  percent: 98
 ---
 
 # Project State
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 13 of 15
+Plan: 14 of 15
 Status: Ready to execute
-Last activity: 2026-10-28 — Phase 08 execution started
+Last activity: 2026-10-28 — 08-13 complete (live provider rerun on 2.1.312 and the D-07 answer recorded)
 
 Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 60 planned plans)
 
@@ -160,6 +160,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 08 P10 | 8 min | 2 tasks | 4 files |
 | Phase 08 P11 | 9 min | 2 tasks | 5 files |
 | Phase 08 P12 | 15min | 2 tasks | 3 files |
+| Phase 08 P13 | 67 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -390,6 +391,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-13: sample [budget] build and judge set to 1m from measured VM times (candidate max 1358 ms, judge max 1434 ms at the default [environment])
 - [Phase 08]: 08-13: DEFAULT_MEMORY_MIB and DEFAULT_SCRATCH_MIB unchanged; the sample's in-VM release build passed at a 448 MiB allowance and above and failed at 384 MiB, so the default 768 MiB allowance has 320 MiB of headroom
 - [Phase 08]: 08-13: D-07 met partially (objective spread 0 by construction; default of 3 trials stays a recorded assumption; VM wall-time variance recorded instead); awaiting the user's answer at the Task 3 checkpoint; the Phase 8 blocker stays open
+- [Phase 08]: 08-13: the user accepted D-07 as met partially for this milestone at the Task 3 checkpoint (2026-10-28); the default of 3 trials stays a recorded assumption, no timing probe in v1; the Phase 8 blocker stays open for 08-15 to restate
+- [Phase 08]: 08-13: the live provider suite passed on claude 2.1.312 (3 passed, run by the user), so 08-14 may cite the provider's live behavior on the installed CLI
 
 ### Pending Todos
 
@@ -401,7 +404,7 @@ None yet.
 - [Phase 2] Seatbelt deny-default vs VM creation is unverified; fallback is a dedicated unprivileged user, recorded in provenance, never silent
 - [Phase 2/6] `claude -p` behavior under subscription login is unverified (tools off with `--json-schema`, `--max-turns 1`, usage field names)
 - [Phase 5] The container engine for `env build` on macOS depends on the SPIKE-06 answer
-- [Phase 8] The default baseline repeat count for the noise floor should come from measured variance across VM boots, not a guess
+- [Phase 8] The default baseline repeat count for the noise floor should come from measured variance across VM boots, not a guess. Still open: 08-13 measured objective spread 0 on the deterministic sample and recorded VM wall-time variance instead (08-EVIDENCE.md "Boot-to-boot variance (D-07)"); the user accepted D-07 as met partially for this milestone on 2026-10-28, with no timing probe in v1; 08-15 restates this blocker
 - [Phase 8] F-01 decided (01-UAT.md test 6, option A; plan 01-05): minos-cli uses the clap builder API, and clap's `derive` feature is off, because clap_derive's `#[allow(clippy::restriction)]` is E0453 under forbid. Any later wish for a clap derive goes back to the user; no lint level changes for it
 
 ### Quick Tasks Completed
@@ -421,6 +424,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T20:12:03.075Z
-Stopped at: 08-13 Task 3 checkpoint: awaiting the user's live provider rerun and D-07 answer
-Resume file: .planning/phases/08-cli-sample-project-and-docs/08-13-SUMMARY.md
+Last session: 2026-10-28T20:20:51.428Z
+Stopped at: Completed 08-13-PLAN.md
+Resume file: None
