@@ -31,7 +31,7 @@ use minos_core::limits::judge_scratch_needed_bytes;
 use minos_core::lock::{BuilderId, BuilderText, LockedImage};
 use minos_core::manifest::Arch;
 use minos_core::metric::{Metric, Scorecard};
-use minos_core::outcome::{Outcome, Reason};
+use minos_core::outcome::Outcome;
 use minos_core::text::SafeText;
 use minos_core::usage::Usage;
 use minos_loop::{DriverOptions, JobFailure, JobRunner};
@@ -236,8 +236,6 @@ fn write(dir: &Path, rel: &str, bytes: &[u8]) -> TestResult {
 enum Script {
     /// The gate passes and the objective is the next value, cycling through the list.
     Scores(Vec<f64>),
-    /// The gate fails.
-    GateFails,
 }
 
 /// A [`JobRunner`] that answers trials from a script and counts them; its preflight always passes.
@@ -258,19 +256,6 @@ impl FakeJobs {
     /// A runner whose every trial scores 1.
     fn steady() -> Self {
         Self::scoring(&[1.0])
-    }
-
-    /// A runner whose every trial fails the gate.
-    fn gate_fails() -> Self {
-        Self {
-            script: Script::GateFails,
-            calls: AtomicUsize::new(0),
-        }
-    }
-
-    /// How many trials ran.
-    fn requests(&self) -> usize {
-        self.calls.load(Ordering::SeqCst)
     }
 }
 
@@ -302,9 +287,6 @@ impl JobRunner for FakeJobs {
                 .map_err(|_| invalid)?;
                 Outcome::Scored(card)
             }
-            Script::GateFails => Outcome::Rejected(Reason::GateFailed {
-                gate: name("identical_output")?,
-            }),
         };
         JobResult::new(
             request,
@@ -402,7 +384,10 @@ fn the_project_facts_name_the_base_image_judge_and_denylist_drops() -> TestResul
     assert!(
         has_line(
             &text,
-            &format!("project: checked (manifest {})", manifest_hex.get(..12).ok_or("short")?)
+            &format!(
+                "project: checked (manifest {})",
+                manifest_hex.get(..12).ok_or("short")?
+            )
         ),
         "{text}"
     );
@@ -550,7 +535,10 @@ fn the_provider_line_reports_each_status_and_only_a_refusal_refuses() -> TestRes
         &ready,
         options(false, STARTED_AT + 1),
     )?;
-    assert!(has_line(&text, "provider: claude 2.1.304 logged in"), "{text}");
+    assert!(
+        has_line(&text, "provider: claude 2.1.304 logged in"),
+        "{text}"
+    );
     assert!(!result?.refused());
 
     let refused = ProviderStatus::Refused {
@@ -563,7 +551,10 @@ fn the_provider_line_reports_each_status_and_only_a_refusal_refuses() -> TestRes
         options(false, STARTED_AT + 2),
     )?;
     assert!(
-        has_line(&text, "provider: refused: not logged in: run claude auth login"),
+        has_line(
+            &text,
+            "provider: refused: not logged in: run claude auth login"
+        ),
         "{text}"
     );
     assert!(result?.refused());
