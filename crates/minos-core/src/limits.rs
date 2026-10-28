@@ -297,13 +297,16 @@ pub const MIN_SCRATCH_MIB: u16 = 64;
 pub const MAX_SCRATCH_MIB: u16 = MAX_MEMORY_MIB - GUEST_RESERVE_MIB - MIN_CANDIDATE_ALLOWANCE_MIB;
 /// `[environment] memory_mib` when the manifest names none, in MiB.
 ///
-/// Recorded assumption (05-RESEARCH A6, Open Question 3), flagged for the user to confirm: generous enough for
-/// one Rust build of the sample project; a project sets its own values.
+/// Measured (08-13, `.planning/phases/08-cli-sample-project-and-docs/08-EVIDENCE.md`): with
+/// [`DEFAULT_SCRATCH_MIB`] it leaves a 768 MiB candidate allowance, and the sample's `cargo build --release` in a
+/// krun VM passed at allowances of 448 MiB and above and failed at 384 MiB (rustc aborted with SIGABRT), so the
+/// default holds 320 MiB of headroom for that build. A project with a larger build sets its own values.
 pub const DEFAULT_MEMORY_MIB: u16 = 2048;
 /// `[environment] scratch_mib` when the manifest names none, in MiB.
 ///
-/// Recorded assumption (05-RESEARCH A6, Open Question 3), flagged for the user to confirm: generous enough for
-/// one Rust build of the sample project; a project sets its own values.
+/// Measured (08-13, `.planning/phases/08-cli-sample-project-and-docs/08-EVIDENCE.md`): the sample's release build
+/// and its judge's compile both scored with a 256 MiB scratch, so this default is four times what that build
+/// needed. A project with a larger build sets its own values.
 pub const DEFAULT_SCRATCH_MIB: u16 = 1024;
 
 /// The candidate's memory allowance, in MiB, or `None` when the budget does not fit.

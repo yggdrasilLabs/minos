@@ -20,7 +20,8 @@ exclude = ["judge/", "target/"]
 [environment]
 dockerfile = "minos.Dockerfile"
 requires = { arch = "arm64" }
-# memory_mib and scratch_mib stay at their defaults (2048 and 1024).
+# memory_mib and scratch_mib stay at their defaults (2048 and 1024): the release build passed at a 448 MiB
+# candidate allowance and failed at 384 MiB, and the defaults leave 768 MiB (08-EVIDENCE.md, "RLIMIT_AS bisection").
 
 [commands]
 # Std only and a committed Cargo.lock, so the build runs offline in the VM with --frozen.
@@ -28,9 +29,13 @@ build = ["cargo", "build", "--release", "--frozen"]
 run = ["./target/release/logparse", "data/input.log", "/out/fields.tsv"]
 
 [budget]
-build = "5m"
+# Set from the in-VM measurement (.planning/phases/08-cli-sample-project-and-docs/08-EVIDENCE.md, "Judge compile
+# time (D-04)"): at the default [environment], the candidate VM (boot, release build, run) took at most 1358 ms and
+# the judge VM (boot, judge compile, scoring) at most 1434 ms over five boots, so one minute is more than ten times
+# either.
+build = "1m"
 run = "1m"
-judge = "5m"
+judge = "1m"
 spend_usd = 5
 
 [judge]
