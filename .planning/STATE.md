@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 08
 current_phase_name: cli-sample-project-and-docs
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-10-28T17:27:12.613Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-10-28T17:33:25.958Z"
 last_activity: 2026-10-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 102
-  completed_plans: 88
-  percent: 86
+  completed_plans: 89
+  percent: 87
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-09)
 ## Current Position
 
 Phase: 08 (cli-sample-project-and-docs) — EXECUTING
-Plan: 2 of 15
+Plan: 3 of 15
 Status: Ready to execute
 Last activity: 2026-10-28 — Phase 08 execution started
 
@@ -149,6 +149,7 @@ Progress: [██████████] 100% (22 of 22 Phase 5 plans; 60 of 6
 | Phase 07 P16 | 9 min | 3 tasks | 6 files |
 | Phase 07 P17 | 12min | 2 tasks | 5 files |
 | Phase 08 P01 | 6 min | 2 tasks | 9 files |
+| Phase 08 P02 | 4min | 1 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -356,6 +357,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-17: cargo clean runs after the SUMMARY/STATE/ROADMAP commit, then a git-only commit records it (the 06-10 pattern)
 - [Phase 08]: 08-01: batch_output_tokens is exact when it fits and saturates otherwise (q*batch + ceil(r*batch/d)), avoiding a truncating u128 cast
 - [Phase 08]: 08-01: run_cost returns the unrounded Cost; spend_ok and every CLI cost figure share it
+- [Phase 08]: FileStore::runs lists a run only when its ledger's first line is complete or over the line cap; lock-only, empty, and torn-only ledgers are not runs, and a ledger read would refuse is still listed (08-02)
+- [Phase 08]: Listing runs takes no ledger lock and creates nothing, so probing a run never invents one (08-02)
 
 ### Pending Todos
 
@@ -387,6 +390,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-10-28T17:27:12.607Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-10-28T17:33:25.953Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
