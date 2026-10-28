@@ -6,13 +6,13 @@
 //! so the memory store and the file store are held to exactly the same assertions. A few run-lock cases that
 //! only the file store can have (its lock file's mode, a planted symlink, two handles) follow the arms.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs;
 use std::io::{self, Read};
 use std::os::unix::fs::{PermissionsExt, symlink};
 
-use minos_core::id::{BlobId, ManifestId, RunId, TreeId};
+use minos_core::id::{BlobId, ExperimentId, ManifestId, RunId, TreeId};
 use minos_core::ledger::{Event, EventKey, Record};
 use minos_store::{Appended, Blobs, FileStore, Ledger, MemoryStore, RunLock, StoreError};
 use proptest::prelude::*;
@@ -31,6 +31,22 @@ fn run() -> RunId {
 /// A second run: the same manifest and tree, started a second later.
 fn other_run() -> RunId {
     RunId::of(&ManifestId::of(b"m"), &TreeId::of(b"t"), 1_760_000_001)
+}
+
+/// The `RunStarted` record of the run started at `started_at` on the fixture manifest and tree, with its run.
+fn run_started(started_at: u64) -> (RunId, Record) {
+    let manifest = ManifestId::of(b"m");
+    let base = TreeId::of(b"t");
+    let run = RunId::of(&manifest, &base, started_at);
+    let record = Record::v1(Event::RunStarted {
+        run,
+        manifest,
+        base,
+        baseline: ExperimentId::baseline(&base),
+        started_at,
+        root_image: None,
+    });
+    (run, record)
 }
 
 /// A `Steered` record. Its key is the generation and the ordinal only, so two notes at one ordinal conflict.
@@ -144,6 +160,46 @@ fn unknown_run_reads_empty<L: Ledger>(ledger: &L) -> TestResult {
 
     assert!(read.lines().is_empty());
     assert_eq!(read.torn_tail(), 0);
+    Ok(())
+}
+
+fn runs_lists_appended_runs<L: Ledger>(ledger: &L) -> TestResult {
+    // Arrange
+    let (first, first_started) = run_started(1_760_000_000);
+    let (second, second_started) = run_started(1_760_000_001);
+    assert_eq!(
+        ledger.append(&second, second_started)?,
+        Appended::New { seq: 0 }
+    );
+    assert_eq!(
+        ledger.append(&first, first_started)?,
+        Appended::New { seq: 0 }
+    );
+    assert_eq!(
+        ledger.append(&first, steered(1, 0, b"note"))?,
+        Appended::New { seq: 1 }
+    );
+
+    // Act
+    let runs = ledger.runs()?;
+
+    // Assert
+    assert_eq!(runs, BTreeSet::from([first, second]));
+    let mut sorted = vec![first, second];
+    sorted.sort();
+    assert!(runs.iter().eq(sorted.iter()), "runs come in RunId order");
+    Ok(())
+}
+
+fn runs_of_an_empty_store_is_empty<L: Ledger>(ledger: &L) -> TestResult {
+    // Arrange: a fresh store, and a read of a run that was never appended to.
+    assert!(ledger.read(&run())?.lines().is_empty());
+
+    // Act
+    let runs = ledger.runs()?;
+
+    // Assert
+    assert!(runs.is_empty(), "a fresh store lists no runs");
     Ok(())
 }
 
@@ -344,6 +400,20 @@ fn locked_run_still_appends<S: RunLock + Ledger>(store: &S) -> TestResult {
     Ok(())
 }
 
+fn a_locked_run_is_not_listed<S: RunLock + Ledger>(store: &S) -> TestResult {
+    // Arrange: lock one run and release it with nothing appended; append to another.
+    drop(store.lock_run(&run())?);
+    let (started, record) = run_started(1_760_000_002);
+    assert_eq!(store.append(&started, record)?, Appended::New { seq: 0 });
+
+    // Act
+    let runs = store.runs()?;
+
+    // Assert
+    assert_eq!(runs, BTreeSet::from([started]));
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Arms
 // ---------------------------------------------------------------------------------------------------------------
@@ -408,6 +478,8 @@ ledger_contract!(duplicate_append_is_a_no_op);
 ledger_contract!(conflicting_append_is_not_written);
 ledger_contract!(runs_are_independent);
 ledger_contract!(unknown_run_reads_empty);
+ledger_contract!(runs_lists_appended_runs);
+ledger_contract!(runs_of_an_empty_store_is_empty);
 
 blob_contract!(put_returns_the_content_address);
 blob_contract!(get_over_max_is_refused);
@@ -423,6 +495,7 @@ run_lock_contract!(second_lock_is_refused);
 run_lock_contract!(lock_after_drop_succeeds);
 run_lock_contract!(runs_lock_independently);
 run_lock_contract!(locked_run_still_appends);
+run_lock_contract!(a_locked_run_is_not_listed);
 
 // ---------------------------------------------------------------------------------------------------------------
 // File-only run-lock cases
@@ -500,6 +573,190 @@ fn two_file_handles_refuse_each_others_lock() -> TestResult {
 
     let _taken = second.lock_run(&run())?;
     expect_run_locked(first.lock_run(&run()), &run())
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// File-only run listing cases
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Checks that `result` is `StoreError::Unsafe` naming `what`.
+fn expect_unsafe(result: Result<BTreeSet<RunId>, StoreError>, what: &str) -> TestResult {
+    match result {
+        Err(StoreError::Unsafe { what: refused }) if refused == what => Ok(()),
+        Err(other) => Err(format!("expected Unsafe naming the {what}, got {other}").into()),
+        Ok(runs) => Err(format!("a foreign entry was listed as {} runs", runs.len()).into()),
+    }
+}
+
+/// The names of the entries directly under `path`, sorted.
+fn entry_names(path: &std::path::Path) -> Result<BTreeSet<std::ffi::OsString>, Box<dyn Error>> {
+    let mut names = BTreeSet::new();
+    for entry in fs::read_dir(path)? {
+        names.insert(entry?.file_name());
+    }
+    Ok(names)
+}
+
+/// A file store with one appended run, so `runs/` exists, and the path of its `runs/` directory.
+fn store_with_one_run(
+    dir: &tempfile::TempDir,
+) -> Result<(FileStore, std::path::PathBuf), Box<dyn Error>> {
+    let store = FileStore::open(dir.path())?;
+    let (started, record) = run_started(1_760_000_000);
+    assert_eq!(store.append(&started, record)?, Appended::New { seq: 0 });
+    Ok((store, dir.path().join("runs")))
+}
+
+#[test]
+fn runs_of_a_fresh_file_store_creates_nothing() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+
+    // Act
+    let runs = store.runs()?;
+
+    // Assert
+    assert!(runs.is_empty());
+    assert!(
+        entry_names(dir.path())?.is_empty(),
+        "listing runs must not create runs/"
+    );
+    Ok(())
+}
+
+#[test]
+fn listing_a_locked_run_creates_nothing_in_it() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    drop(store.lock_run(&run())?);
+    let run_dir = dir.path().join("runs").join(run().to_hex());
+    let before = entry_names(&run_dir)?;
+
+    // Act
+    let runs = store.runs()?;
+
+    // Assert
+    assert!(runs.is_empty(), "a run that was only locked is not a run");
+    assert_eq!(entry_names(&run_dir)?, before);
+    Ok(())
+}
+
+#[test]
+fn a_ledger_without_a_complete_line_is_not_listed() -> TestResult {
+    // Arrange: one run whose ledger is empty and one whose ledger holds only a torn tail.
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    let (listed, _record) = run_started(1_760_000_000);
+    for (run, bytes) in [
+        (run(), b"".as_slice()),
+        (other_run(), b"{\"seq\":0".as_slice()),
+    ] {
+        let run_dir = runs_dir.join(run.to_hex());
+        fs::create_dir(&run_dir)?;
+        fs::write(run_dir.join("ledger.jsonl"), bytes)?;
+    }
+
+    // Act
+    let runs = store.runs()?;
+
+    // Assert
+    assert_eq!(runs, BTreeSet::from([listed]));
+    Ok(())
+}
+
+#[test]
+fn a_symlink_under_runs_is_refused() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    let target = dir.path().join("elsewhere");
+    fs::create_dir(&target)?;
+    fs::write(target.join("ledger.jsonl"), b"")?;
+    symlink(&target, runs_dir.join(other_run().to_hex()))?;
+
+    // Act
+    let result = store.runs();
+
+    // Assert
+    expect_unsafe(result, "run directory")
+}
+
+#[test]
+fn a_regular_file_under_runs_is_refused() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    fs::write(runs_dir.join(other_run().to_hex()), b"not a directory")?;
+
+    // Act
+    let result = store.runs();
+
+    // Assert
+    expect_unsafe(result, "run directory")
+}
+
+#[test]
+fn a_directory_not_named_by_a_run_id_is_refused() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    fs::create_dir(runs_dir.join("not-a-run"))?;
+
+    // Act
+    let result = store.runs();
+
+    // Assert
+    expect_unsafe(result, "run directory")
+}
+
+#[test]
+fn an_uppercase_run_directory_is_refused() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    fs::create_dir(runs_dir.join(other_run().to_hex().to_uppercase()))?;
+
+    // Act
+    let result = store.runs();
+
+    // Assert
+    expect_unsafe(result, "run directory")
+}
+
+#[test]
+fn a_symlinked_ledger_is_refused() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let (store, runs_dir) = store_with_one_run(&dir)?;
+    let target = dir.path().join("elsewhere.jsonl");
+    fs::write(&target, b"")?;
+    let run_dir = runs_dir.join(other_run().to_hex());
+    fs::create_dir(&run_dir)?;
+    symlink(&target, run_dir.join("ledger.jsonl"))?;
+
+    // Act
+    let result = store.runs();
+
+    // Assert
+    expect_unsafe(result, "ledger file")
+}
+
+#[test]
+fn a_symlinked_runs_directory_is_refused() -> TestResult {
+    // Arrange
+    let dir = tempfile::tempdir()?;
+    let store = FileStore::open(dir.path())?;
+    let target = dir.path().join("elsewhere");
+    fs::create_dir(&target)?;
+    symlink(&target, dir.path().join("runs"))?;
+
+    // Act
+    let result = store.runs();
+
+    // Assert
+    expect_unsafe(result, "runs directory")
 }
 
 fn is_send_sync<T: Send + Sync>() {}
