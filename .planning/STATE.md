@@ -402,7 +402,8 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- 2026-10-28: Ship a Homebrew formula for minos (tooling; `.planning/todos/pending/2026-10-28-ship-a-homebrew-formula-for-minos.md`)
+- 2026-10-28: Explain why the judge is a separate program (docs; `.planning/todos/pending/2026-10-28-explain-why-the-judge-is-a-separate-program.md`)
 
 ### Blockers/Concerns
 
