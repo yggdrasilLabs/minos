@@ -114,12 +114,18 @@ const DOCKERFILE: &[u8] = b"FROM scratch\n";
 /// The fake guest binary the lock image entry is written for.
 const GUEST: &[u8] = b"a fake minos-guest\n";
 
-/// A `prices.toml` that prices compute; the sweep calls no model.
+/// A `prices.toml` that prices compute and one model; the sweep calls no model.
 const PRICES: &str = r#"v = 1
 
 [compute]
 vcpu_second = "0.0000276944"
 gib_second = "0.0000036667"
+
+[models."haiku"]
+input_token = "0.000001"
+output_token = "0.000005"
+cache_creation_input_token = "0.00000125"
+cache_read_input_token = "0.0000001"
 "#;
 
 /// A temporary project beside its judge data, guest, and prices file, ready to prepare.
@@ -568,7 +574,7 @@ fn a_user_stop_during_a_generation_one_trial_ends_the_run() -> TestResult {
             let mut stopped = stopped.lock().map_err(|_poisoned| POISONED)?;
             if !*stopped {
                 *stopped = true;
-                store
+                let _appended = store
                     .append(
                         &run,
                         Record::v1(Event::StopRequested {
