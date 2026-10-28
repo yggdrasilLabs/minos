@@ -50,7 +50,7 @@ use minos_loop::history::{recorded_diff, recorded_manifest_at};
 use minos_loop::{DriverOptions, JobFailure, JobRunner};
 use minos_propose::{FakeProvider, Proposer};
 use minos_source::CleanPolicy;
-use minos_store::{Blobs, FileStore, Ledger, STORE_DIR};
+use minos_store::{Appended, Blobs, FileStore, Ledger, STORE_DIR};
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -271,7 +271,11 @@ fn scored(value: f64) -> Fallible<Outcome> {
             Metric::new(1.0)?,
             false,
         ),
-        (MetricName::from_str("probe_score")?, Metric::new(value)?, false),
+        (
+            MetricName::from_str("probe_score")?,
+            Metric::new(value)?,
+            false,
+        ),
     ])?;
     Ok(Outcome::Scored(card))
 }
@@ -326,7 +330,7 @@ impl Driven {
         )?;
         let run = *outcome.run();
         let state = state_of(prepared.store(), &run)?;
-        let winner = match state.decision(1).map(|decision| decision.kind()) {
+        let winner = match state.decision(1).map(minos_core::ledger::Decision::kind) {
             Some(DecisionKind::Improved { winner }) => *winner,
             _ => return Err("generation 1 did not improve".into()),
         };
@@ -468,11 +472,15 @@ fn report_prints_the_text_the_hash_and_the_adopt_command_and_appends_nothing() -
     assert_eq!(built.run(), &driven.run);
     let hash = built.report().hash().to_hex();
     for line in built.report().text().lines() {
-        assert!(text.lines().any(|printed| printed == line), "{line}\n{text}");
+        assert!(
+            text.lines().any(|printed| printed == line),
+            "{line}\n{text}"
+        );
     }
     assert!(text.starts_with("minos report v1\n"), "{text}");
     assert!(
-        text.lines().any(|line| line == format!("report hash: {hash}")),
+        text.lines()
+            .any(|line| line == format!("report hash: {hash}")),
         "{text}"
     );
     let command = format!(
@@ -530,7 +538,11 @@ fn adopt_refuses_a_hash_that_is_not_the_reports_and_records_and_writes_nothing()
     }
     assert_eq!(driven.fixture.ledger_bytes(&driven.run)?, before);
     assert!(!driven.fixture.default_patch(&driven.winner).exists());
-    assert!(!driven.state()?.is_acknowledged(&driven.winner, &other_hash()));
+    assert!(
+        !driven
+            .state()?
+            .is_acknowledged(&driven.winner, &other_hash())
+    );
     Ok(())
 }
 
@@ -560,8 +572,8 @@ fn adopt_with_the_reports_hash_records_it_and_writes_the_canonical_patch() -> Te
 }
 
 #[test]
-fn a_second_adopt_reports_the_acknowledgment_as_recorded_and_refuses_the_existing_file() -> TestResult
-{
+fn a_second_adopt_reports_the_acknowledgment_as_recorded_and_refuses_the_existing_file()
+-> TestResult {
     let driven = Driven::new()?;
     let hash = *built(&driven)?.report().hash();
     let (first, _) = adopt_text(&driven, AdoptOptions::new(hash, None))?;
@@ -653,7 +665,7 @@ fn a_new_trial_makes_the_old_hash_stale() -> TestResult {
         .into_iter()
         .next()
         .ok_or("the winner has no judge version")?;
-    driven.store().append(
+    let appended = driven.store().append(
         &driven.run,
         Record::v1(Event::Judged {
             exp: driven.winner,
@@ -664,6 +676,7 @@ fn a_new_trial_makes_the_old_hash_stale() -> TestResult {
             logs: None,
         }),
     )?;
+    assert!(matches!(appended, Appended::New { .. }));
     let before = driven.fixture.ledger_bytes(&driven.run)?;
 
     let (result, text) = adopt_text(&driven, AdoptOptions::new(old, None))?;
