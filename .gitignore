@@ -3,3 +3,5 @@
 # proptest-regressions/ stays committed.
 *.snap.new
 *.pending-snap
+# GSD planning artifacts stay local.
+/.planning/

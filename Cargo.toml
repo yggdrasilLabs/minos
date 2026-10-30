@@ -24,7 +24,7 @@ exclude = ["examples"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"  # patch versions are accepted
-license = "Apache-2.0 OR MIT"
+license = "MIT"
 publish = false          # v1 publishes nothing; also makes clippy::cargo_common_metadata skip the crate
 
 [profile.release]

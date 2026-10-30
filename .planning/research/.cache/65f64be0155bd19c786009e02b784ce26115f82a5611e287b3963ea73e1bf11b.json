@@ -1,1 +1,0 @@
-{"content":"Attestations docs: local and tar exporters write attestations as JSON files in the root directory of the export; pass --provenance=false --sbom=false to keep rootfs tar clean.","source":"web","provider":"webfetch","confidence":"MEDIUM","fetched_at":"2026-10-18T16:20:29.127Z","ttl":86400000,"kind":"web"}

@@ -125,7 +125,7 @@ minos adopt <exp> --reviewed <hash>
 `minos check` shows the facts of the project, the memory budget, the route table, each baseline trial, and the
 noise verdict. If you do `check` again with no change, it uses the first result and boots no VM. The text below
 comes from a recorded run of this sample on real VMs. In that run, a scripted stand-in replaced the model. Thus,
-the token counts are not real (`.planning/phases/08-cli-sample-project-and-docs/08-EVIDENCE.md`):
+the token counts are not real:
 
 ```text
 baseline: run 988820162f00, 3 trials (each boots a candidate VM and then a judge VM)
@@ -246,5 +246,4 @@ the preflight checks, the recorded exceptions, and the procedure to report a vul
 
 ## License
 
-You can use this software under the [Apache License, Version 2.0](LICENSE-APACHE) or the
-[MIT license](LICENSE-MIT). You select the license.
+This software is available under the [MIT license](LICENSE).
