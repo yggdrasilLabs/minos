@@ -34,8 +34,22 @@ Minos is new. It did not have an external security audit.
 
 ## Install
 
-You must have a Mac with Apple silicon, Homebrew, Docker, and rustup. This milestone was built and tested on
-macOS 27.
+You must have a Mac with Apple silicon, Homebrew, and Docker. This milestone was built and tested on macOS 27.
+
+The short path is the Homebrew formula. It builds Minos from source, signs the helper, and installs the three
+binaries:
+
+```sh
+brew tap libkrun/krun
+brew trust libkrun/krun
+brew tap yggdrasilLabs/tap
+brew install yggdrasilLabs/tap/minos
+minos host doctor
+```
+
+The formula installs the pinned Rust toolchain into its build directory. Thus, the build takes some minutes. Then
+do `brew pin libkrunfw`, because Minos works only with the libkrunfw release it was built against. After that,
+continue at step 5. Steps 1 to 4 are the path for a source checkout, and they need rustup.
 
 1. Install the guest kernel. Minos uses only libkrunfw from the libkrun tap:
 
