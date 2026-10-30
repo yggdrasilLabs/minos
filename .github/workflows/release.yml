@@ -1,0 +1,89 @@
+# On a version tag, publish a GitHub release and update the Homebrew formula in yggdrasilLabs/homebrew-tap.
+#
+# The formula builds Minos from the tag's source archive, so the only release artifact is that archive's SHA-256.
+# The formula text comes from packaging/homebrew/minos.rb in this repository; the tap holds the rendered copy.
+# The tap is pushed over a deploy key with write access, stored as the HOMEBREW_TAP_SSH_KEY secret.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate the tag against the workspace version
+        id: version
+        env:
+          TAG_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag_version="${TAG_REF#v}"
+          cargo_version=$(sed -nE '/^\[workspace\.package\]/,/^\[/ s/^version = "([^"]+)"$/\1/p' Cargo.toml)
+          if [ "$tag_version" != "$cargo_version" ]; then
+            echo "::error::tag ${TAG_REF} does not match [workspace.package] version ${cargo_version} in Cargo.toml"
+            exit 1
+          fi
+          echo "version=${tag_version}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          generate_release_notes: true
+
+  update-homebrew:
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Minos
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: minos
+
+      - name: Check out the tap
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: yggdrasilLabs/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+          path: tap
+
+      - name: Render the formula from the tag archive
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/yggdrasilLabs/minos/archive/refs/tags/v${VERSION}.tar.gz"
+          sha256=$(curl -fsSL "$url" | sha256sum | cut -d ' ' -f 1)
+          mkdir -p tap/Formula
+          sed -e "s|@VERSION@|${VERSION}|g" -e "s|@SHA256@|${sha256}|g" \
+            minos/packaging/homebrew/minos.rb > tap/Formula/minos.rb
+          if grep -q '@[A-Z0-9]*@' tap/Formula/minos.rb; then
+            echo "::error::a placeholder survived in Formula/minos.rb"
+            exit 1
+          fi
+          ruby -c tap/Formula/minos.rb
+
+      - name: Commit and push the tap
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/minos.rb
+          git diff --cached --quiet || git commit -m "minos ${VERSION}"
+          git push
