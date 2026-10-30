@@ -43,6 +43,7 @@ binaries:
 brew tap libkrun/krun
 brew trust libkrun/krun
 brew tap yggdrasilLabs/tap
+brew trust yggdrasilLabs/tap
 brew install yggdrasilLabs/tap/minos
 minos host doctor
 ```
