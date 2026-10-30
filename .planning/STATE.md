@@ -420,6 +420,7 @@ Recent decisions affecting current work:
 |---|-------------|------|--------|-----------|
 | 261018-eiw | Fix Phase 4 review warnings WR-01, WR-02, WR-03 | 2026-10-18 | a2c3761 | [261018-eiw-fix-phase-4-review-warnings](./quick/261018-eiw-fix-phase-4-review-warnings/) |
 | 261024-i81 | WR-01: optional `ordinal` on `StopRequested`, in the EventKey only when Some, so a repeated `minos stop` is a new line a resumed driver honours | 2026-10-24 | f18bd53 | [261024-i81-wr-01-add-an-optional-ordinal-to-stopreq](./quick/261024-i81-wr-01-add-an-optional-ordinal-to-stopreq/) |
+| 261030-ste | Rewrite README.md in ASD-STE100 Simplified Technical English | 2026-10-30 | 9e65530 | — |
 
 ## Deferred Items
 
